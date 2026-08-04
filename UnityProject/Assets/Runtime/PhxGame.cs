@@ -361,11 +361,23 @@ public class PhxGame : MonoBehaviour
         MaterialLoader.UseHDRP = true;
         EffectsLoader.UseHDRP = true;
 
+        // BF3 Legacy install simplification: if no (valid) path is configured,
+        // try to auto-detect a BF2 install in common Steam/GOG locations.
+        if (!PhxGamePathDetector.IsValidGamePath(Settings.GamePathString))
+        {
+            string detected = PhxGamePathDetector.TryDetect();
+            if (detected != null)
+            {
+                Debug.Log($"[BF3Legacy] Auto-detected BF2 installation: {detected}");
+                Settings.GamePathString = detected;
+            }
+        }
+
         AddonPath = GamePath / "GameData/addon";
         StdLVLPC = GamePath / "GameData/data/_lvl_pc";
 
-        if (GamePath.IsFile()              || 
-            !GamePath.Exists()             || 
+        if (GamePath.IsFile()              ||
+            !GamePath.Exists()             ||
             !CheckStdLVLExistence("common.lvl")  ||
             !CheckStdLVLExistence("core.lvl")    ||
             !CheckStdLVLExistence("ingame.lvl")  ||

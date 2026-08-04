@@ -2,29 +2,40 @@ using UnityEngine;
 
 /// <summary>
 /// Manned anti-fighter turret console in the capital ship hangar (the BF2 /
-/// Elite Squadron hangar turrets). A soldier of the ship's team standing at
-/// the console mans the linked external gun mounted on the hull; while manned
-/// it engages enemy flyers and (as fallback) enemy soldiers outside.
+/// Elite Squadron hangar turrets), driving an external gun on the hull.
 ///
-/// The external gun is created on first use. Full seat/camera possession is a
-/// TODO (needs PhxSeat integration); manning currently drives the gun
-/// automatically while the console is occupied, which already matters
-/// tactically: an occupied hangar keeps its air defense alive.
+/// Two ways to man it:
+///  - PLAYER: walk up to the console and press E. The camera possesses the
+///    external gun (PhxCamera.Track), mouse aims, left mouse fires, E exits
+///    back to the soldier. A minimal on-screen prompt/reticle is drawn while
+///    in range / possessed.
+///  - AI / other soldiers: any friendly soldier standing at the console mans
+///    the gun automatically and it engages enemy flyers on its own.
 /// </summary>
-public class PhxShipTurretStation : MonoBehaviour
+public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
 {
     public PhxCapitalShip Ship;
     public Vector3 ExternalGunLocalPos;
     public float UseRadius = 3f;
     public float GunRange = 250f;
     public float GunDamagePerSecond = 60f;
+    public float GunShotDamage = 45f;
+    public float GunShotDelay = 0.18f;
 
     public PhxSoldier Operator { get; private set; }
+    public bool PlayerPossessed { get; private set; }
 
     GameObject ExternalGun;
     LineRenderer Tracer;
-    Component Target;             // PhxSoldier or PhxVehicle-ish component
+    Component Target;             // PhxSoldier or PhxVehicle
     float RetargetTimer;
+
+    // player possession state
+    IPhxControlableInstance PossessedPawn;
+    PhxPawnController PossessedController;
+    float GunYaw, GunPitch;
+    float ShotTimer;
+    bool PlayerInRange;
 
     static readonly Collider[] OverlapCache = new Collider[64];
 
@@ -33,11 +44,20 @@ public class PhxShipTurretStation : MonoBehaviour
     {
         if (Ship == null) return;
 
+        bool shipAlive = Ship.State != PhxCapitalShip.PhxShipState.Dying &&
+                         Ship.State != PhxCapitalShip.PhxShipState.Destroyed;
+
+        UpdatePlayerPossession(shipAlive);
+
+        if (PlayerPossessed)
+        {
+            TickPlayerControl();
+            return;
+        }
+
         UpdateOperator();
 
-        bool active = Operator != null &&
-                      Ship.State != PhxCapitalShip.PhxShipState.Dying &&
-                      Ship.State != PhxCapitalShip.PhxShipState.Destroyed;
+        bool active = Operator != null && shipAlive;
         if (!active)
         {
             if (Tracer != null) Tracer.enabled = false;
@@ -45,7 +65,171 @@ public class PhxShipTurretStation : MonoBehaviour
         }
 
         EnsureGun();
+        TickAutoControl();
+    }
 
+    // ------------------------------------------------------ player possession
+
+    void UpdatePlayerPossession(bool shipAlive)
+    {
+        PhxMatch match = PhxGame.GetMatch();
+        PhxCamera cam = PhxGame.GetCamera();
+        if (match == null || match.Player == null || cam == null) return;
+
+        if (PlayerPossessed)
+        {
+            // exit: E pressed, soldier died, or the ship is going down
+            bool wantExit = Input.GetKeyDown(KeyCode.E);
+            bool mustExit = !shipAlive ||
+                            (PossessedPawn is PhxSoldier s && s.IsDead);
+            if (wantExit || mustExit)
+            {
+                PlayerPossessed = false;
+                if (PossessedPawn != null && PossessedController != null)
+                {
+                    PossessedPawn.Assign(PossessedController);
+                    cam.Follow(PossessedPawn);
+                }
+                PossessedPawn = null;
+                PossessedController = null;
+                if (Tracer != null) Tracer.enabled = false;
+            }
+            return;
+        }
+
+        // can the player grab this console?
+        IPhxControlableInstance playerPawn = match.Player.Pawn;
+        PlayerInRange = false;
+        if (!shipAlive || playerPawn == null) return;
+        if (!(playerPawn is PhxSoldier soldier) || soldier.IsDead) return;
+        if (soldier.Team != Ship.Team) return;
+        if ((soldier.transform.position - transform.position).magnitude > UseRadius) return;
+
+        PlayerInRange = true;
+        if (Input.GetKeyDown(KeyCode.E))
+        {
+            EnsureGun();
+            PossessedPawn = playerPawn;
+            PossessedController = playerPawn.GetController();
+            playerPawn.UnAssign();
+
+            // start aiming outward from the hull
+            Vector3 outward = ExternalGun.transform.position - Ship.transform.position;
+            outward.y = 0f;
+            GunYaw = Quaternion.LookRotation(outward.normalized).eulerAngles.y;
+            GunPitch = 0f;
+
+            PlayerPossessed = true;
+            PhxGame.GetCamera().Track(this);
+        }
+    }
+
+    void TickPlayerControl()
+    {
+        GunYaw += Input.GetAxis("Mouse X") * 2.5f;
+        GunPitch = Mathf.Clamp(GunPitch - Input.GetAxis("Mouse Y") * 2.5f, -45f, 60f);
+
+        ShotTimer -= Time.deltaTime;
+        if (Input.GetMouseButton(0) && ShotTimer <= 0f)
+        {
+            ShotTimer = GunShotDelay;
+            FirePlayerShot();
+        }
+        else if (Tracer != null && ShotTimer <= -0.1f)
+        {
+            Tracer.enabled = false;
+        }
+    }
+
+    void FirePlayerShot()
+    {
+        Vector3 origin = ExternalGun.transform.position;
+        Vector3 dir = GetAimRotation() * Vector3.forward;
+
+        Vector3 hitPoint = origin + dir * GunRange;
+        if (Physics.Raycast(origin + dir * 6f, dir, out RaycastHit hit, GunRange))
+        {
+            hitPoint = hit.point;
+
+            PhxSoldier soldier = hit.collider.GetComponentInParent<PhxSoldier>();
+            if (soldier != null)
+            {
+                soldier.AddDamageFrom(GunShotDamage, hit.point, isSaber: false);
+            }
+            else
+            {
+                IPhxDamageableInstance damageable = hit.collider.GetComponentInParent<IPhxDamageableInstance>();
+                damageable?.AddDamage(GunShotDamage);
+            }
+        }
+
+        Tracer.enabled = true;
+        Tracer.SetPosition(0, origin);
+        Tracer.SetPosition(1, hitPoint);
+    }
+
+    Quaternion GetAimRotation()
+    {
+        return Quaternion.Euler(GunPitch, GunYaw, 0f);
+    }
+
+    // IPhxTrackable - camera rides just behind/above the gun
+    public Vector3 GetCameraPosition()
+    {
+        Quaternion rot = GetAimRotation();
+        return ExternalGun.transform.position - rot * Vector3.forward * 6f + Vector3.up * 2.5f;
+    }
+
+    public Quaternion GetCameraRotation()
+    {
+        return GetAimRotation();
+    }
+
+    // --------------------------------------------------------------- UI hint
+
+    void OnGUI()
+    {
+        if (PlayerPossessed)
+        {
+            // minimal reticle + exit hint
+            Rect mid = new Rect(Screen.width / 2f - 4f, Screen.height / 2f - 4f, 8f, 8f);
+            GUI.Label(mid, "+");
+            GUI.Label(new Rect(20f, Screen.height - 40f, 400f, 30f),
+                "Hangar turret - [Mouse] aim, [LMB] fire, [E] exit");
+        }
+        else if (PlayerInRange)
+        {
+            GUI.Label(new Rect(Screen.width / 2f - 100f, Screen.height * 0.6f, 260f, 30f),
+                "[E] Man hangar defense turret");
+        }
+    }
+
+    // ------------------------------------------------------ AI / auto control
+
+    void UpdateOperator()
+    {
+        // occupied while a living friendly soldier stands at the console
+        if (Operator != null &&
+            (Operator.IsDead || (Operator.transform.position - transform.position).magnitude > UseRadius))
+        {
+            Operator = null;
+        }
+        if (Operator != null) return;
+
+        int count = Physics.OverlapSphereNonAlloc(transform.position, UseRadius, OverlapCache);
+        for (int i = 0; i < count; ++i)
+        {
+            PhxSoldier soldier = OverlapCache[i].GetComponentInParent<PhxSoldier>();
+            if (soldier != null && !soldier.IsDead && soldier.Team == Ship.Team)
+            {
+                Operator = soldier;
+                return;
+            }
+        }
+    }
+
+    void TickAutoControl()
+    {
         RetargetTimer -= Time.deltaTime;
         if (RetargetTimer <= 0f)
         {
@@ -72,28 +256,6 @@ public class PhxShipTurretStation : MonoBehaviour
         else if (Target is IPhxDamageableInstance dmgable)
         {
             dmgable.AddDamage(dmg);
-        }
-    }
-
-    void UpdateOperator()
-    {
-        // occupied while a living friendly soldier stands at the console
-        if (Operator != null &&
-            (Operator.IsDead || (Operator.transform.position - transform.position).magnitude > UseRadius))
-        {
-            Operator = null;
-        }
-        if (Operator != null) return;
-
-        int count = Physics.OverlapSphereNonAlloc(transform.position, UseRadius, OverlapCache);
-        for (int i = 0; i < count; ++i)
-        {
-            PhxSoldier soldier = OverlapCache[i].GetComponentInParent<PhxSoldier>();
-            if (soldier != null && !soldier.IsDead && soldier.Team == Ship.Team)
-            {
-                Operator = soldier;
-                return;
-            }
         }
     }
 

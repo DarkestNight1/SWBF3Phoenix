@@ -31,6 +31,12 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
         public PhxProp<float> LightSaberLength = new PhxProp<float>(3.0f);
         public PhxProp<float> DamageArc = new PhxProp<float>(120f);
 
+        // Further saber odf properties per the BF2 mod tools docs; populated
+        // from the odf when present (blade visuals / combo system TODO)
+        public PhxProp<float> LightSaberWidth = new PhxProp<float>(0.1f);
+        public PhxProp<string> LightSaberTexture = new PhxProp<string>(null);
+        public PhxProp<string> ComboAnimationBank = new PhxProp<string>(null);
+
         // Anything with "saber" in its class marks a lightsaber; can also be
         // forced via odf (used for dismemberment + deflect visuals)
         public PhxProp<bool> IsLightSaber = new PhxProp<bool>(false);

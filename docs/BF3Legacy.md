@@ -24,6 +24,12 @@ All new code lives in `UnityProject/Assets/Runtime/BF3Legacy/`.
 | Modern lighting (ACES, SSAO, SSR, volumetrics) | Implemented | `Graphics/PhxModernLighting.cs` |
 | 4K graphics mode | Implemented | `Graphics/PhxResolutionManager.cs` |
 | Mod support (load order, toggling, detection) | Implemented | `Mods/PhxModManager.cs` |
+| BF2 install auto-detection + mod installer scripts | Implemented | `Mods/PhxGamePathDetector.cs`, `Tools/` |
+| AI boarding parties, defense, vehicles, grenades, stuck recovery | Implemented | `AI/` |
+| Player turret possession (camera + UI) | Implemented | `CapitalShip/PhxShipTurretStation.cs` |
+| Per-map weather, storms, day/night | Implemented | `Weather/PhxWeatherSystem.cs` |
+| Procedural animation modernization | Implemented | `Animation/PhxProceduralMotion.cs` |
+| BF2 documentation compatibility audit | See [BF2Compatibility.md](BF2Compatibility.md) | — |
 | BF3 map recreations | 6 greybox layouts, data-driven | `Maps/` |
 
 Everything is toggleable via `bf3legacy.json` in Unity's persistent data path
@@ -106,12 +112,70 @@ Gore levels in config: `0` off, `1` sparks only, `2` full dismemberment.
 - `PhxBF3AIController` — per-soldier brain: LOS target acquisition, reaction
   time, burst-fire discipline, reloading, strafing/cover, objective seeking
   and command-post capture. Drop-in replacement for the old stub controller
-  (spawn with `MTC.SpawnAI<PhxBF3AIController>(...)`).
-- `PhxAIDirector` — battlefield commander: builds squads, spreads them over
-  command posts, designates flanking squads with lateral approach offsets.
+  (spawn with `MTC.SpawnAI<PhxBF3AIController>(...)`). Additional behaviors:
+  - **Grenades/secondary**: skill-gated secondary-channel pulses against
+    mid-range targets, on an 8–16 s cooldown.
+  - **Vehicles**: for long approaches (>80 m) the AI mounts a nearby free
+    friendly vehicle (via the soldier's normal `Enter` flow), steers it
+    toward the objective with heading-error mouse input, and dismounts
+    ~25 m out.
+  - **Stuck recovery**: if the soldier wants to move but hasn't displaced in
+    1.5 s, it jumps + sidesteps on a fresh vector and rotates its flank
+    offset — no more grinding against geometry. Plus whisker raycasts that
+    deflect around obstacles before contact.
+  - **Boarding runs**: with a `BoardTarget` set, the unit musters, inserts
+    into the enemy ship's hangar (simulated transport for now), then
+    sabotages criticals room by room and finishes the reactor.
+- `PhxAIDirector` — battlefield commander: builds squads, splits them into
+  **attackers** (spread over capturable posts, some flanking), **defenders**
+  (~1/3 hold owned posts, patrol and re-take them if lost) and — the moment
+  an enemy capital ship's shields drop — **one boarding party**. Units
+  mid-boarding-run are never reassigned by replans.
 - `PhxAISkillProfile` — four difficulty tiers: **Classic** (2005 feel),
   **Veteran**, **Elite**, **Legendary** (fast reactions, tight aim, heavy
   flanking). Per-unit jitter keeps squads from acting in lockstep.
+
+## Turret possession (player)
+
+Walk up to a hangar turret console as a soldier of the ship's team and press
+**E**: the camera possesses the external hull gun (`PhxCamera.Track`), mouse
+aims, left mouse fires hitscan shots, **E** exits back to your soldier (whose
+controller is restored). An on-screen prompt shows when in range, and a
+reticle + control hint while possessed. AI soldiers still man consoles by
+standing at them.
+
+## Weather, time of day & atmosphere
+
+`PhxWeatherSystem` applies a per-planet profile on every map load, all
+generated at runtime (camera-following particle emitters, no assets):
+
+| Planet prefix | Weather |
+|---|---|
+| `hot` (Hoth) | heavy driven snow, day |
+| `kam` (Kamino) | storm: heavy rain + lightning flashes, dusk |
+| `mus` (Mustafar) | falling embers/ash, night, thick haze |
+| `dag` (Dagobah) | dense fog + ground mist, dusk |
+| `fel` (Felucia) | drifting spores, dusk |
+| `geo` (Geonosis) | dust storm, day |
+| `tat` (Tatooine) | light blowing dust, day |
+| `cor` (Coruscant) | night city with light rain |
+| `myg` (Mygeeto) | light snow, dusk |
+| `yav`/`end` | jungle/forest mist |
+| space maps | clean vacuum, night lighting |
+
+Unlisted maps get clear weather and a **deterministic day/dusk/night** roll
+from the map name (same map always looks the same). Time of day rescales and
+retints the map's directional lights; storms add double-strike lightning
+flicker. Everything sits behind `Config.DynamicWeather`.
+
+## Modernized animation feel
+
+`PhxProceduralMotion` (auto-attached to every soldier when
+`Config.ProceduralAnimation` is on) layers small additive motion on top of
+the stock animation banks after the animator runs each frame: torso lean
+into strafes, subtle breathing sway, and recoil kicks on shots with
+exponential recovery — the standard modern-shooter procedural layer, kept to
+a few degrees so the original SWBF2 animations stay recognizable.
 
 ## Graphics & lighting
 

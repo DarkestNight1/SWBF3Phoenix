@@ -307,6 +307,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     public bool IsDead { get; private set; }
 
+    // Whether we're currently piloting a vehicle seat (used by AI)
+    public bool IsInVehicle => Context == PhxSoldierContext.Pilot;
+
     public void AddHealth(float amount)
     {
         if (IsDead)

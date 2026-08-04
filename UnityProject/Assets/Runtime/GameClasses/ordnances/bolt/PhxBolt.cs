@@ -95,9 +95,30 @@ public class PhxBolt : PhxOrdnance
 
     void OnCollisionEnter(Collision coll)
     {
-        if (coll.rigidbody != null)
+        // Damage comes from the ordnance odf (MaxDamage), scaled per target
+        // type - see PhxOrdnanceClass Person/Building/VehicleScale.
+        ContactPoint contact = coll.GetContact(0);
+
+        PhxSoldier hitSoldier = coll.collider.GetComponentInParent<PhxSoldier>();
+        if (hitSoldier != null)
         {
-            ((IPhxDamageableInstance) coll.rigidbody.gameObject.GetComponent<PhxInstance>())?.AddDamage(100f);
+            hitSoldier.AddDamageFrom(BoltClass.MaxDamage * BoltClass.PersonScale, contact.point, isSaber: false);
+        }
+        else
+        {
+            // vehicles, buildings, capital ship subsystems, ...
+            IPhxDamageableInstance damageable = coll.collider.GetComponentInParent<IPhxDamageableInstance>();
+            if (damageable == null && coll.rigidbody != null)
+            {
+                damageable = coll.rigidbody.gameObject.GetComponent<PhxInstance>() as IPhxDamageableInstance;
+            }
+            if (damageable != null)
+            {
+                float scale = damageable is PhxVehicle ? BoltClass.VehicleScale
+                            : damageable is PhxCapitalShipSubsystem || damageable is PhxCapitalShip ? BoltClass.BuildingScale
+                            : 1f;
+                damageable.AddDamage(BoltClass.MaxDamage * scale);
+            }
         }
 
         if (gameObject.activeSelf)

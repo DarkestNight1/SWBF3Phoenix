@@ -57,6 +57,14 @@ public static class PhxBF3
         {
             Host.AddComponent<PhxVerticalBattlefront>();
         }
+        if (Config.DynamicWeather)
+        {
+            Host.AddComponent<PhxWeatherSystem>();
+        }
+        if (Config.ProceduralAnimation)
+        {
+            Host.AddComponent<PhxProceduralMotionManager>();
+        }
 
         PhxModManager.Scan();
 
@@ -115,6 +123,8 @@ public class PhxBF3Config
     public bool ModernLighting = true;
     public bool HighResolutionMode = true;
     public bool VerticalBattlefront = true;   // seamless ground <-> space transitions
+    public bool DynamicWeather = true;        // per-map precipitation, storms, day/night
+    public bool ProceduralAnimation = true;   // modern lean/recoil layered on stock anims
 
     // AI difficulty: 0 = Classic (vanilla-ish), 1 = Veteran, 2 = Elite, 3 = Legendary
     public int AIDifficulty = 2;

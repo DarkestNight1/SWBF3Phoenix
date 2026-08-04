@@ -91,15 +91,47 @@ public class PhxAIDirector : MonoBehaviour
 
     void AssignTeamSquads(int team, List<PhxBF3AIController> members, PhxCommandpost[] posts)
     {
-        // capturable objectives for this team
+        // split the map into capturable targets and posts we own (to defend)
         List<PhxCommandpost> targets = new List<PhxCommandpost>();
+        List<PhxCommandpost> owned = new List<PhxCommandpost>();
         foreach (PhxCommandpost cp in posts)
         {
             if (cp.Team != team) targets.Add(cp);
+            else owned.Add(cp);
         }
-        if (targets.Count == 0) return;
+
+        // units already on a boarding run keep their orders - reassigning
+        // them would teleport-yank them out of the ship
+        int alreadyBoarding = 0;
+        members = members.FindAll(m =>
+        {
+            if (m.IsBusyBoarding) { alreadyBoarding++; return false; }
+            return true;
+        });
+        if (members.Count == 0) return;
+
+        // boardable enemy capital ship? task a boarding party (one at a time)
+        PhxCapitalShip boardable = null;
+        if (alreadyBoarding == 0)
+        {
+            foreach (PhxCapitalShip ship in PhxCapitalShip.GetAll())
+            {
+                if (ship.Team != team && ship.CanBeBoarded())
+                {
+                    boardable = ship;
+                    break;
+                }
+            }
+        }
 
         int squadCount = Mathf.Max(1, members.Count / SquadSize);
+
+        // Squad role split: ~1/3 defend owned posts (if any), one squad boards
+        // a vulnerable capital ship, the rest attack. Attackers always get at
+        // least one squad when there's anything to take.
+        int defendSquads = owned.Count > 0 ? Mathf.Max(squadCount / 3, squadCount > 1 ? 1 : 0) : 0;
+        bool sendBoarders = boardable != null && squadCount > 1;
+
         for (int s = 0; s < squadCount; ++s)
         {
             PhxSquad squad = new PhxSquad();
@@ -107,13 +139,56 @@ public class PhxAIDirector : MonoBehaviour
             {
                 squad.Members.Add(members[m]);
             }
+            Squads.Add(squad);
 
-            // spread squads over objectives; extra squads flank
-            squad.Objective = targets[s % targets.Count];
+            // role assignment by squad index: boarders first, then defenders,
+            // remainder attacks
+            if (sendBoarders && s == 0)
+            {
+                foreach (PhxBF3AIController member in squad.Members)
+                {
+                    member.BoardTarget = boardable;
+                    member.AssignedObjective = null;
+                    member.DefendObjective = null;
+                    member.FlankOffset = Vector3.zero;
+                }
+                continue;
+            }
+
+            int roleIdx = sendBoarders ? s - 1 : s;
+            if (roleIdx < defendSquads && owned.Count > 0)
+            {
+                PhxCommandpost post = owned[roleIdx % owned.Count];
+                foreach (PhxBF3AIController member in squad.Members)
+                {
+                    member.DefendObjective = post;
+                    member.AssignedObjective = null;
+                    member.BoardTarget = null;
+                    member.FlankOffset = Vector3.zero;
+                }
+                continue;
+            }
+
+            if (targets.Count == 0)
+            {
+                // nothing left to take - everyone defends
+                if (owned.Count > 0)
+                {
+                    PhxCommandpost post = owned[s % owned.Count];
+                    foreach (PhxBF3AIController member in squad.Members)
+                    {
+                        member.DefendObjective = post;
+                        member.AssignedObjective = null;
+                    }
+                }
+                continue;
+            }
+
+            squad.Objective = targets[roleIdx % targets.Count];
             squad.IsFlanking = Random.value < GetSquadSkill(squad).FlankTendency;
 
             Vector3 flankOffset = Vector3.zero;
-            if (squad.IsFlanking)
+            if (squad.IsFlanking && squad.Members.Count > 0 && squad.Members[0].Pawn != null)
             {
                 // detour perpendicular to the approach direction
                 Vector3 approach = squad.Objective.transform.position -
@@ -125,9 +200,10 @@ public class PhxAIDirector : MonoBehaviour
             foreach (PhxBF3AIController member in squad.Members)
             {
                 member.AssignedObjective = squad.Objective;
+                member.DefendObjective = null;
+                member.BoardTarget = null;
                 member.FlankOffset = flankOffset;
             }
-            Squads.Add(squad);
         }
     }
 
