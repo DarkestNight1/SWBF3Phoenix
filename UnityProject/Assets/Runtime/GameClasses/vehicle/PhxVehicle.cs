@@ -98,11 +98,12 @@ public class PhxVehicleProperties : PhxClass
 
 
 
-public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>, 
-                                    IPhxTrackable, 
+public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
+                                    IPhxTrackable,
                                     IPhxSeatable,
                                     IPhxTickablePhysics,
-                                    IPhxTickable 
+                                    IPhxTickable,
+                                    IPhxDamageableInstance
 {
     protected static PhxGame GAME => PhxGame.Instance;
     protected static PhxMatch MTC => PhxGame.GetMatch();
@@ -253,6 +254,55 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
     }
 
 
+    public bool IsDestroyed { get; private set; }
+
+    /// <summary>
+    /// Vehicles were previously invulnerable - nothing implemented
+    /// IPhxDamageableInstance, so all ordnance hits were dropped. Damage now
+    /// applies to CurHealth (odf MaxHealth), and destruction ejects everyone
+    /// aboard before the wreck is removed.
+    /// </summary>
+    public virtual void AddDamage(float damage)
+    {
+        if (IsDestroyed || damage <= 0f) return;
+
+        CurHealth.Set(Mathf.Max(CurHealth.Get() - damage, 0f));
+        if (CurHealth.Get() <= 0f)
+        {
+            OnVehicleDestroyed();
+        }
+    }
+
+    protected virtual void OnVehicleDestroyed()
+    {
+        if (IsDestroyed) return;
+        IsDestroyed = true;
+
+        // throw out every occupant so they aren't stranded in a dead vehicle
+        if (Seats != null)
+        {
+            for (int i = 0; i < Seats.Count; ++i)
+            {
+                if (Seats[i] != null && Seats[i].Occupant != null)
+                {
+                    Eject(i);
+                }
+            }
+        }
+
+        OnDeath?.Invoke(this);
+        SCENE?.DestroyInstance(this);
+    }
+
+    // True when this seat's occupant is the local player (used to decide
+    // whether camera changes are appropriate - AI must never steal the view)
+    protected static bool IsPlayerSoldier(PhxSoldier soldier)
+    {
+        PhxMatch match = PhxGame.GetMatch();
+        return soldier != null && match != null && match.Player != null &&
+               ReferenceEquals(match.Player.Pawn, soldier);
+    }
+
     public bool HasAvailableSeat()
     {
         return GetNextAvailableSeat() != -1;
@@ -303,11 +353,16 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         }
         else
         {
-            Seats[seat].SetOccupant(Seats[index].Occupant);
+            PhxSoldier occupant = Seats[index].Occupant;
+            Seats[seat].SetOccupant(occupant);
             Seats[seat].Occupant.SetPilot(Seats[seat]);
             Seats[index].Occupant = null;
 
-            CAM.Track(Seats[seat]);
+            // only the local player's view may follow a seat change
+            if (IsPlayerSoldier(occupant))
+            {
+                CAM.Track(Seats[seat]);
+            }
 
             return true;
         }
@@ -323,11 +378,14 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         {
             return null;
         }
-        else 
+        else
         {
             Seats[seat].SetOccupant(soldier);
-            PhxGame.GetCamera().Track(Seats[seat]);
-            
+            if (IsPlayerSoldier(soldier))
+            {
+                PhxGame.GetCamera().Track(Seats[seat]);
+            }
+
             return Seats[seat];
         }
     }
@@ -335,15 +393,23 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
     public bool Eject(int i)
     {
-        if (i < Seats.Count || Seats[i] != null || Seats[i].Occupant != null)
+        // NOTE: these must be AND-ed - the original '||' chain threw an
+        // IndexOutOfRangeException whenever i was out of range.
+        if (i >= 0 && i < Seats.Count && Seats[i] != null && Seats[i].Occupant != null)
         {
-            Seats[i].Occupant.SetFree(transform.position + Vector3.up * 2.0f);
-            CAM.Follow(Seats[i].Occupant);
+            PhxSoldier occupant = Seats[i].Occupant;
+            occupant.SetFree(transform.position + Vector3.up * 2.0f);
+
+            // only restore the local player's camera to their soldier
+            if (IsPlayerSoldier(occupant))
+            {
+                CAM.Follow(occupant);
+            }
             Seats[i].Occupant = null;
 
             return true;
         }
-        else 
+        else
         {
             return false;
         }

@@ -26,6 +26,10 @@ All new code lives in `UnityProject/Assets/Runtime/BF3Legacy/`.
 | Mod support (load order, toggling, detection) | Implemented | `Mods/PhxModManager.cs` |
 | BF2 install auto-detection + mod installer scripts | Implemented | `Mods/PhxGamePathDetector.cs`, `Tools/` |
 | AI boarding parties, defense, vehicles, grenades, stuck recovery | Implemented | `AI/` |
+| Vehicle AI: ground driving, flyer combat, capital ship attack runs | Implemented | `AI/PhxAIVehicleOperator.cs` |
+| AI turret gunners (vehicle seats + ship stations) | Implemented | `AI/`, `CapitalShip/` |
+| Runtime texture upscaling (bicubic + adaptive sharpen) | Implemented | `Graphics/PhxTextureUpscaler.cs` |
+| Graphics fidelity (TAA, mip bias, PBR sky, probes, post) | Implemented | `Graphics/PhxGraphicsEnhancer.cs` |
 | Player turret possession (camera + UI) | Implemented | `CapitalShip/PhxShipTurretStation.cs` |
 | Per-map weather, storms, day/night | Implemented | `Weather/PhxWeatherSystem.cs` |
 | Procedural animation modernization | Implemented | `Animation/PhxProceduralMotion.cs` |
@@ -176,6 +180,78 @@ the stock animation banks after the animator runs each frame: torso lean
 into strafes, subtle breathing sway, and recoil kicks on shots with
 exponential recovery — the standard modern-shooter procedural layer, kept to
 a few degrees so the original SWBF2 animations stay recognizable.
+
+## Vehicle AI (land, air, turrets)
+
+`PhxAIVehicleOperator` drives vehicles through the **engine's own control
+path** — it writes the same `PhxPawnController` fields a human produces
+(`MoveDirection`, `mouseX/Y`, `Jump`, `ShootPrimary`), which `PhxSeat.Tick`
+already consumes — so no vehicle internals are special-cased for AI.
+
+- **Ground**: steers by signed heading error, slows for sharp turns, probes
+  ahead and deflects around obstacles, and reverses out when wedged.
+- **Air**: requests takeoff (`Jump`), then flies with yaw/pitch stick values
+  derived from heading error, banks into turns via roll, climbs when terrain
+  is dead ahead or altitude is low, and holds combat altitude when cruising.
+- **Capital ship attack runs**: air AI prioritizes enemy capital ships —
+  targeting the *externally* attackable criticals (engines) since internal
+  systems need boarding. It dives in firing, breaks off at ~90 m, climbs out
+  past the hull and comes around for another pass. With shields still up it
+  attacks the hull, which drains them.
+- **Gunners**: AI in a passenger seat never fights the driver for movement
+  input — it only traverses and fires, driving the seat's pitch/yaw
+  accumulators so the turret model actually moves, with skill-scaled aim
+  error.
+- **Ship hangar turrets**: defenders aboard a threatened friendly ship walk
+  to unmanned `PhxShipTurretStation` consoles and hold them (state
+  `ManTurret`), yielding immediately if boarders show up.
+
+Soldier AI mounts up for long approaches, and will now specifically seek out
+an aircraft when there's an enemy capital ship alive to kill.
+
+## Texture upscaling
+
+`PhxTextureUpscaler` + `PhxTextureUpscale.shader` enhance the original
+game's textures at display time (nothing is modified on disk or
+redistributed — these are the user's own files):
+
+1. **Catmull-Rom bicubic** reconstruction to 2× or 4× (`UpscaleFactor`),
+   which is what removes the blocky bilinear stretch of a 256² texture on a
+   4K screen.
+2. **Contrast-adaptive sharpening** (CAS-style) that restores micro-detail
+   while clamping to the local min/max, so it doesn't ring on edges or
+   amplify the source's compression artifacts. Normal maps skip this pass and
+   are re-normalized instead.
+
+Results stay as mipmapped `RenderTexture`s — **no GPU→CPU readback**, so a
+texture costs two blits rather than a pipeline stall. Work is amortized
+across frames, and a VRAM budget (`UpscaleBudgetMB`, default 1.5 GB) caps
+total added memory; past the cap remaining textures stay native rather than
+risking an allocation failure. Tiny textures, oversized ones and lightmaps
+are skipped.
+
+## Graphics fidelity
+
+`PhxGraphicsEnhancer` covers what the lighting volume doesn't:
+
+- **TAA** — the biggest single image-quality win here, because 2005-era
+  alpha-tested geometry (fences, foliage, antennae) shimmers badly at 4K.
+- **Negative mip bias (−0.5)** — with TAA resolving the aliasing, textures
+  can be sampled sharper than 1:1. This is what makes the upscaled textures
+  actually *read* as upscaled rather than just being bigger.
+- **Physically Based Sky** — real Rayleigh/Mie scattering for correct
+  horizons and dusk gradients instead of a flat skybox.
+- **Realtime reflection probe** baked once per map, centered on the command
+  posts, so specular surfaces reflect the actual map.
+- **Cinematic post** — restrained motion blur, close-range depth of field,
+  subtle vignette, chromatic aberration and fine film grain.
+- **Shadow distance 500 m / 4 cascades / very high resolution** for the
+  large SWBF2 maps, and **GPU instancing** enabled across loaded materials to
+  buy back the frame time the rest of the stack spends.
+- 5 km far clip so the vertical-battlefront capital ships stay visible.
+
+Every step is independently try-guarded — HDRP's API surface moves between
+versions, and a missing override must not take down the renderer.
 
 ## Graphics & lighting
 

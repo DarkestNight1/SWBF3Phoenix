@@ -310,6 +310,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     // Whether we're currently piloting a vehicle seat (used by AI)
     public bool IsInVehicle => Context == PhxSoldierContext.Pilot;
 
+    // The seat we currently occupy (null when on foot)
+    public PhxSeat GetCurrentSeat() => Context == PhxSoldierContext.Pilot ? CurrentSeat : null;
+
     public void AddHealth(float amount)
     {
         if (IsDead)

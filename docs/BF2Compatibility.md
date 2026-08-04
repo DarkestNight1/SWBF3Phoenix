@@ -25,6 +25,15 @@ behavior, FIXED = corrected in this fork, TODO = known gap.
 | `turret`, `remoteterminal` | TODO | map-placed turret odfs not registered (BF3 Legacy ship turrets are separate) |
 | `animatedbuilding`, `mine`, `beacon`, `repair` | TODO | |
 
+## Vehicles
+
+| Issue | Status | Detail |
+|---|---|---|
+| Vehicles were invulnerable | FIXED | `PhxVehicle` never implemented `IPhxDamageableInstance`, so every ordnance hit on a vehicle was silently discarded — nothing in the game could destroy one. It now takes damage against `CurHealth`/odf `MaxHealth`, ejects all occupants on death, fires `OnDeath` and despawns. |
+| AI stole the player's camera | FIXED | `TryEnterVehicle`, `TrySwitchSeat` and `Eject` called `CAM.Track()`/`CAM.Follow()` unconditionally, so whenever *any* AI soldier mounted, switched seats or exited a vehicle, the local player's view snapped to that bot. Camera changes are now gated on the occupant actually being the player's pawn. |
+| `Eject` index check | FIXED | The guard was `if (i < Seats.Count \|\| Seats[i] != null \|\| ...)` — an OR chain, so an out-of-range index fell through to `Seats[i]` and threw `IndexOutOfRangeException` instead of returning false. Now AND-ed. |
+| Seat aiming was camera-only | FIXED | `PhxSeat.Tick` derived its weapon target from a raycast relative to `CAM.transform.position`, which is meaningless for an AI occupant. Seats now accept an `AimOverride` that AI sets; the player path is unchanged. |
+
 ## Damage model
 
 - Ordnance→target damage now flows through odf values end to end

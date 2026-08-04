@@ -27,6 +27,7 @@ public class PhxBF3AIController : PhxAIController
         Capture,         // stand in CP region until captured
         Board,           // muster + transport onto an enemy capital ship
         Sabotage,        // inside the ship: destroy critical systems / reactor
+        ManTurret,       // walk to a friendly ship turret console and hold it
     }
 
     public PhxAISkillProfile Skill;
@@ -53,6 +54,13 @@ public class PhxBF3AIController : PhxAIController
 
     // boarding
     float BoardMusterTimer;
+
+    // vehicle operation (land + air), created when we occupy a seat
+    PhxAIVehicleOperator VehicleOp;
+
+    // hangar turret console we're heading for / holding
+    PhxShipTurretStation ManningStation;
+    float TurretScanTimer;
 
     // stuck recovery
     Vector3 LastPosition;
@@ -105,6 +113,21 @@ public class PhxBF3AIController : PhxAIController
 
         GrenadeTimer -= deltaTime;
 
+        // While in a vehicle the operator owns all control inputs - the
+        // on-foot state machine must not fight it for the same fields.
+        if (Pawn is PhxSoldier mounted && mounted.IsInVehicle)
+        {
+            PhxCommandpost vehGoal = GetObjective() ?? DefendObjective;
+            Vector3 goalPos = vehGoal != null ? vehGoal.transform.position : PawnPosition();
+            TryUseVehicle(goalPos, Vector3.Distance(PawnPosition(), goalPos));
+            return;
+        }
+        if (VehicleOp != null)
+        {
+            // we left the vehicle (ejected, destroyed, killed)
+            ReleaseVehicle();
+        }
+
         // periodic (re)targeting - full scans are too costly per frame
         RetargetTimer -= deltaTime;
         if (RetargetTimer <= 0f)
@@ -125,6 +148,20 @@ public class PhxBF3AIController : PhxAIController
             State = PhxAIState.Defend;
         }
 
+        // defenders aboard a threatened friendly ship man its hangar turrets
+        TurretScanTimer -= deltaTime;
+        if (TurretScanTimer <= 0f &&
+            (State == PhxAIState.Defend || State == PhxAIState.SeekObjective))
+        {
+            TurretScanTimer = 4f;
+            PhxShipTurretStation station = FindFreeTurretStation();
+            if (station != null)
+            {
+                ManningStation = station;
+                State = PhxAIState.ManTurret;
+            }
+        }
+
         switch (State)
         {
             case PhxAIState.SeekObjective: TickSeekObjective(deltaTime); break;
@@ -133,6 +170,7 @@ public class PhxBF3AIController : PhxAIController
             case PhxAIState.Capture: TickCapture(deltaTime); break;
             case PhxAIState.Board: TickBoard(deltaTime); break;
             case PhxAIState.Sabotage: TickSabotage(deltaTime); break;
+            case PhxAIState.ManTurret: TickManTurret(deltaTime); break;
         }
 
         TickStuckRecovery(deltaTime);
@@ -408,6 +446,80 @@ public class PhxBF3AIController : PhxAIController
         }
     }
 
+    /// <summary>
+    /// Hold a hangar turret console. The station itself does the shooting
+    /// (PhxShipTurretStation mans automatically for whoever stands there);
+    /// the AI's job is to get there and stay put while it's useful.
+    /// </summary>
+    void TickManTurret(float deltaTime)
+    {
+        ShootPrimary = false;
+
+        if (ManningStation == null || ManningStation.Ship == null ||
+            ManningStation.Ship.State == PhxCapitalShip.PhxShipState.Dying ||
+            ManningStation.Ship.State == PhxCapitalShip.PhxShipState.Destroyed)
+        {
+            ManningStation = null;
+            State = PhxAIState.SeekObjective;
+            return;
+        }
+
+        // taken by someone else? find other work
+        if (ManningStation.Operator != null && !ReferenceEquals(ManningStation.Operator, Pawn))
+        {
+            ManningStation = null;
+            State = PhxAIState.SeekObjective;
+            return;
+        }
+
+        // a boarder in our face outranks the turret
+        if (TargetPawn != null)
+        {
+            ReactionTimer = Skill.ReactionTime * 0.7f;
+            State = PhxAIState.Engage;
+            return;
+        }
+
+        float dist = Vector3.Distance(PawnPosition(), ManningStation.transform.position);
+        if (dist > 1.8f)
+        {
+            MoveTowards(ManningStation.transform.position, sprint: dist > 20f);
+        }
+        else
+        {
+            // in position - the station takes over from here
+            MoveDirection = Vector2.zero;
+            Vector3 outward = ManningStation.transform.position - ManningStation.Ship.transform.position;
+            outward.y = 0f;
+            if (outward.sqrMagnitude > 0.01f) ViewDirection = outward.normalized;
+        }
+    }
+
+    /// <summary>
+    /// Look for an unmanned friendly hangar turret worth taking. Only while
+    /// our own ship is actually threatened (shields down = enemies inbound).
+    /// </summary>
+    PhxShipTurretStation FindFreeTurretStation()
+    {
+        PhxCapitalShip ship = PhxCapitalShip.GetShipOfTeam(Team);
+        if (ship == null || !ship.CanBeBoarded()) return null;
+
+        PhxShipTurretStation best = null;
+        float bestDist = 120f;   // only worth walking this far
+        foreach (PhxShipTurretStation station in ship.GetComponentsInChildren<PhxShipTurretStation>())
+        {
+            if (station.Operator != null || station.PlayerPossessed) continue;
+
+            float d = Vector3.Distance(PawnPosition(), station.transform.position);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = station;
+            }
+        }
+        return best;
+    }
+
     PhxCapitalShipSubsystem PickSabotageTarget()
     {
         PhxCapitalShipSubsystem best = null;
@@ -440,36 +552,45 @@ public class PhxBF3AIController : PhxAIController
 
         if (soldier.IsInVehicle)
         {
-            // drive toward the goal; dismount when close
-            if (distToGoal < 25f)
+            PhxSeat seat = soldier.GetCurrentSeat();
+            PhxVehicle vehicle = seat?.Owner as PhxVehicle;
+
+            if (seat == null || vehicle == null || vehicle.IsDestroyed)
             {
+                ReleaseVehicle();
+                return false;
+            }
+
+            if (VehicleOp == null || VehicleOp.Seat != seat)
+            {
+                VehicleOp = new PhxAIVehicleOperator(this, vehicle, seat);
+            }
+
+            // Gunners ride along; pilots/drivers dismount once they've
+            // delivered the squad (air units keep fighting instead).
+            if (!VehicleOp.IsGunnerOnly && !VehicleOp.IsAir && distToGoal < 25f)
+            {
+                ReleaseVehicle();
                 Enter = true;   // eject (handled by the seat)
                 return true;
             }
-            Vector3 toGoal = goal - PawnPosition();
-            toGoal.y = 0f;
-            ViewDirection = toGoal.normalized;
 
-            // vehicles steer via mouse deltas - feed the heading error in
-            Vector3 fwd = Pawn.GetInstance().transform.forward;
-            fwd.y = 0f;
-            float headingError = Vector3.SignedAngle(fwd.normalized, toGoal.normalized, Vector3.up);
-            mouseX = Mathf.Clamp(headingError * 0.05f, -2f, 2f);
-            mouseY = 0f;
-            MoveDirection = new Vector2(0f, 1f);
+            VehicleOp.Tick(Time.deltaTime, goal, Team, Skill);
             return true;
         }
 
-        // on foot: worth mounting up? (long approach only)
-        if (distToGoal < 80f) return false;
+        // on foot: worth mounting up? (long approach, or an aircraft is free
+        // and there's a capital ship to kill)
+        bool wantsAircraft = HasBoardableOrKillableShip();
+        if (distToGoal < 80f && !wantsAircraft) return false;
 
-        PhxVehicle vehicle = FindNearbyFreeVehicle(20f);
-        if (vehicle == null) return false;
+        PhxVehicle free = FindNearbyFreeVehicle(wantsAircraft ? 60f : 20f);
+        if (free == null) return false;
 
-        float d = Vector3.Distance(PawnPosition(), vehicle.transform.position);
+        float d = Vector3.Distance(PawnPosition(), free.transform.position);
         if (d > 4f)
         {
-            MoveTowards(vehicle.transform.position);
+            MoveTowards(free.transform.position);
         }
         else
         {
@@ -477,6 +598,26 @@ public class PhxBF3AIController : PhxAIController
             Enter = true;   // PhxSoldier picks the closest available seat
         }
         return true;
+    }
+
+    void ReleaseVehicle()
+    {
+        VehicleOp?.Release();
+        VehicleOp = null;
+    }
+
+    bool HasBoardableOrKillableShip()
+    {
+        foreach (PhxCapitalShip ship in PhxCapitalShip.GetAll())
+        {
+            if (ship.Team != Team &&
+                ship.State != PhxCapitalShip.PhxShipState.Dying &&
+                ship.State != PhxCapitalShip.PhxShipState.Destroyed)
+            {
+                return true;
+            }
+        }
+        return false;
     }
 
     PhxVehicle FindNearbyFreeVehicle(float radius)

@@ -75,6 +75,10 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
     // Index in OwnerVehicle's Sections list
     protected int Index;
 
+    // Seat 0 is the driver/pilot; the rest are gunner positions
+    public int SeatIndex => Index;
+    public bool IsDriverSeat => Index == 0;
+
     // Accumulators for view control
     protected float PitchAccum;
     protected float YawAccum;
@@ -82,8 +86,13 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
     // View position in local space
     protected Vector3 ViewPoint;
 
-    // View direction in local space 
+    // View direction in local space
     protected Vector3 ViewDirection = Vector3.forward;
+
+    // When set, weapon systems aim here instead of at the camera-derived
+    // target point. AI occupants use this - the default aim path traces from
+    // the player camera, which is meaningless for a bot in a turret.
+    public Vector3? AimOverride;
 
     public virtual Vector3 GetCameraPosition()
     {
@@ -138,8 +147,12 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
 
         Vector3 TargetPos = BaseTransform.transform.TransformPoint(30000f * ViewDirection + ViewPoint);
 
-        
-        if (Physics.Raycast(TargetPos, TargetPos - CAM.transform.position, out RaycastHit hit, 1000f))
+        if (AimOverride.HasValue)
+        {
+            // AI-controlled seat: aim straight at the designated point
+            TargetPos = AimOverride.Value;
+        }
+        else if (Physics.Raycast(TargetPos, TargetPos - CAM.transform.position, out RaycastHit hit, 1000f))
         {
             TargetPos = hit.point;
 

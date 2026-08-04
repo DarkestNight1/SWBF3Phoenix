@@ -65,6 +65,14 @@ public static class PhxBF3
         {
             Host.AddComponent<PhxProceduralMotionManager>();
         }
+        if (Config.GraphicsEnhancements)
+        {
+            Host.AddComponent<PhxGraphicsEnhancer>();
+        }
+        if (Config.UpscaleTextures)
+        {
+            Host.AddComponent<PhxTextureUpscaler>();
+        }
 
         PhxModManager.Scan();
 
@@ -138,4 +146,14 @@ public class PhxBF3Config
     public bool UseDynamicResolution = true;
     public float RenderScale = 1.0f;
     public bool RayTracedEffects = false;     // only honored on capable hardware
+
+    // Extra fidelity pass: TAA, motion blur, DoF, PBR sky, reflection probe,
+    // GPU instancing, mip bias
+    public bool GraphicsEnhancements = true;
+
+    // Runtime texture upscaling of the original game's textures
+    public bool UpscaleTextures = true;
+    public int UpscaleFactor = 2;             // 2 or 4
+    public float UpscaleSharpness = 0.5f;     // 0..1
+    public int UpscaleBudgetMB = 1536;        // cap on added VRAM
 }
