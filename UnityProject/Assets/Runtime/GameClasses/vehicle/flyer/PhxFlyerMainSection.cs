@@ -221,8 +221,5 @@ public class PhxFlyerMainSection : PhxSeat
 
 
 
-    public PhxPawnController GetController()
-    {
-        return Occupant == null ? null : Occupant.GetController();
-    }
+    // GetController() now lives on PhxSeat (same implementation)
 }

@@ -194,6 +194,16 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
     }
 
 
+    /// <summary>
+    /// Controller of whoever is sitting here, or null when empty.
+    /// (Previously only the flyer/hover main sections exposed this, so other
+    /// seat types had no way to read their occupant's input.)
+    /// </summary>
+    public virtual PhxPawnController GetController()
+    {
+        return Occupant == null ? null : Occupant.GetController();
+    }
+
     public void ClearOccupant()
     {
         Occupant = null;
@@ -287,9 +297,12 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
 
                 WeaponSystems[WeaponIndex].InitManual(EC, i, values[i]);                
             }          
+            // TURRETSECTION was excluded here, which meant a turret odf's
+            // section headers never terminated the property scan - a turret
+            // seat would swallow the following sections' properties.
             else if (properties[i] == HashUtils.GetFNV("FLYERSECTION") ||
                     properties[i] == HashUtils.GetFNV("WALKERSECTION") ||
-                    //properties[i] == HashUtils.GetFNV("TURRETSECTION") ||
+                    properties[i] == HashUtils.GetFNV("TURRETSECTION") ||
                     properties[i] == HashUtils.GetFNV("BUILDINGSECTION"))
             {
                 if (properties[i] == HashUtils.GetFNV(HeaderName) &&

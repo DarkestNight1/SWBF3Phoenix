@@ -62,6 +62,18 @@ public class PhxBF3AIController : PhxAIController
     PhxShipTurretStation ManningStation;
     float TurretScanTimer;
 
+    // --- BF2 navigation data ---
+    // Route through the map's authored planning graph, replacing straight-line
+    // movement. Recomputed when the goal moves or we finish the path.
+    readonly List<Vector3> NavPath = new List<Vector3>();
+    int NavIndex;
+    Vector3 NavGoal = Vector3.positiveInfinity;
+    float NavRepathTimer;
+
+    // Tactical hint node we've claimed (cover / snipe position)
+    PhxHintNode ClaimedHint;
+    float HintScanTimer;
+
     // stuck recovery
     Vector3 LastPosition;
     float StuckTimer;
@@ -271,6 +283,7 @@ public class PhxBF3AIController : PhxAIController
         {
             TargetPawn = null;
             ShootPrimary = false;
+            ReleaseHint();          // don't camp a cover node with no enemy
             State = ReturnState();
             return;
         }
@@ -323,6 +336,46 @@ public class PhxBF3AIController : PhxAIController
                     Reload = true;
                 }
             }
+        }
+
+        // Tactical positioning from the map's authored hint nodes: designers
+        // marked where cover and firing lanes actually are, so prefer those
+        // over the generic strafe. Skill gates how often AI bothers.
+        HintScanTimer -= deltaTime;
+        if (HintScanTimer <= 0f)
+        {
+            HintScanTimer = 3f;
+            if (ClaimedHint == null && Random.value < Skill.CoverUsage)
+            {
+                // marksmen at range look for a snipe post, everyone else cover
+                PhxHintType want = dist > 45f ? PhxHintType.Snipe : PhxHintType.Cover;
+                PhxHintNode candidate = PhxHintNodes.FindNearest(
+                    PawnPosition(), want, 35f, facingToward: targetPos);
+
+                if (candidate != null && PhxHintNodes.TryOccupy(candidate, this, 20f))
+                {
+                    ClaimedHint = candidate;
+                }
+            }
+        }
+
+        if (ClaimedHint != null)
+        {
+            float toHint = Vector3.Distance(PawnPosition(), ClaimedHint.Position);
+            if (toHint > 2.5f)
+            {
+                // move into the authored position, still facing the enemy
+                SteerDirect(ClaimedHint.Position, sprint: toHint > 15f);
+                Crouch = false;
+                return;
+            }
+
+            // in position: hold it and adopt the designer's posture
+            MoveDirection = Vector2.zero;
+            Crouch = ClaimedHint.Type == PhxHintType.Cover ||
+                     (ClaimedHint.Posture != null &&
+                      ClaimedHint.Posture.ToLowerInvariant().Contains("crouch"));
+            return;
         }
 
         // combat movement: strafe and use cover based on skill
@@ -616,6 +669,15 @@ public class PhxBF3AIController : PhxAIController
         VehicleOp = null;
     }
 
+    void ReleaseHint()
+    {
+        if (ClaimedHint != null)
+        {
+            PhxHintNodes.Release(ClaimedHint, this);
+            ClaimedHint = null;
+        }
+    }
+
     bool HasBoardableOrKillableShip()
     {
         foreach (PhxCapitalShip ship in PhxCapitalShip.GetAll())
@@ -726,7 +788,56 @@ public class PhxBF3AIController : PhxAIController
         return Pawn.GetInstance().transform.position;
     }
 
+    /// <summary>
+    /// Move toward a distant goal using the map's authored planning graph.
+    /// Falls back to direct steering when the map has no graph (or no route),
+    /// so behaviour degrades gracefully rather than stalling.
+    /// </summary>
     void MoveTowards(Vector3 goal, bool sprint = true)
+    {
+        float goalDist = Vector3.Distance(PawnPosition(), goal);
+
+        // Short hops don't need pathfinding; long ones do.
+        if (PhxNavGraph.Instance.IsLoaded && goalDist > 15f)
+        {
+            NavRepathTimer -= Time.deltaTime;
+            bool goalMoved = (goal - NavGoal).sqrMagnitude > 25f;
+
+            if (goalMoved || (NavPath.Count == 0 && NavRepathTimer <= 0f))
+            {
+                NavRepathTimer = 2f;   // don't re-path every frame on failure
+                NavGoal = goal;
+                NavIndex = 0;
+                PhxNavGraph.Instance.FindPath(PawnPosition(), goal, PhxNavSize.Soldier, NavPath);
+            }
+
+            if (NavIndex < NavPath.Count)
+            {
+                Vector3 waypoint = NavPath[NavIndex];
+                Vector3 toWaypoint = waypoint - PawnPosition();
+                toWaypoint.y = 0f;
+
+                if (toWaypoint.magnitude < 4f)
+                {
+                    // reached this hub, advance
+                    if (++NavIndex >= NavPath.Count)
+                    {
+                        NavPath.Clear();
+                    }
+                }
+                else
+                {
+                    SteerDirect(waypoint, sprint);
+                    return;
+                }
+            }
+        }
+
+        SteerDirect(goal, sprint);
+    }
+
+    /// <summary>Direct steering with obstacle whiskers (fallback / final approach).</summary>
+    void SteerDirect(Vector3 goal, bool sprint = true)
     {
         Vector3 toGoal = goal - PawnPosition();
         toGoal.y = 0f;

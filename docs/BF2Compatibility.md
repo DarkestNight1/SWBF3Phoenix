@@ -21,9 +21,20 @@ behavior, FIXED = corrected in this fork, TODO = known gap.
 | `melee` | FIXED | previously unregistered — lightsabers simply did not function. Now `PhxMeleeWeapon`: arc sweep, `MaxDamage`, `LightSaberLength/Width/Texture`, `ComboAnimationBank` accepted (combo state machine itself still TODO). |
 | `bolt`, `bullet`, `beam`, `missile`, `shell`, `sticky` | OK/FIXED | bolt damage was hardcoded `100f`; now uses ordnance `MaxDamage` with `PersonScale`/`VehicleScale`/`BuildingScale` per the documented damage-scale properties. Impact effects per surface type (`ImpactEffectStatic/Rigid/Soft/Terrain/Water/Shield`) were already wired. |
 | `explosion` | OK | upstream |
-| `walker`, `commandwalker` | TODO | not registered; AT-ST/AT-AT etc. won't spawn |
-| `turret`, `remoteterminal` | TODO | map-placed turret odfs not registered (BF3 Legacy ship turrets are separate) |
-| `animatedbuilding`, `mine`, `beacon`, `repair` | TODO | |
+| `walker`, `commandwalker` | FIXED | were unregistered — no AT-ST/AT-AT/AT-TE/spider droid spawned on any map. `PhxWalker` parses `WALKERSECTION` seats/weapons and ground-follows terrain (leg animation still TODO). |
+| `turret` | FIXED | was unregistered — no emplaced gun spawned on any map. `PhxTurret` handles `TURRETSECTION` and the `BUILDINGSECTION/TURRET1` variant. |
+| `TURRETSECTION` in `PhxSeat.InitManual` | FIXED | the header check was **commented out**, so a turret seat's property scan never terminated and consumed the following sections' properties. |
+| `PhxSeat.GetController()` | FIXED | only existed on the flyer/hover main sections, so no other seat type could read its occupant's input. Lifted to `PhxSeat`. |
+| `remoteterminal`, `animatedbuilding`, `mine`, `beacon`, `repair` | TODO | see [BF2DataFeatures.md](BF2DataFeatures.md) |
+
+## AI data (planning graph, barriers, hint nodes)
+
+Previously unused entirely — see [BF2DataFeatures.md](BF2DataFeatures.md) for
+the full write-up. Summary: `PlanSet` (hubs/arcs with unit-size filters),
+`World.GetBarriers()` and `World.GetHintNodes()` are now imported, giving A*
+pathfinding over the designers' authored routes and tactical cover/snipe
+positioning. The `DisableBarriers` / `EnableBarriers` /
+`BlockPlanningGraphArcs` / `UnblockPlanningGraphArcs` Lua stubs are now live.
 
 ## Vehicles
 

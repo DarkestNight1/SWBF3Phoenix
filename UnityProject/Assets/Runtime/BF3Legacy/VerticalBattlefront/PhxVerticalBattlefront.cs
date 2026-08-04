@@ -82,6 +82,16 @@ public class PhxVerticalBattlefront : MonoBehaviour
             return;
         }
 
+        // If the map drives its own capital ships through the stock space
+        // assault system, those are real authored ships - don't also spawn
+        // greybox stand-ins on top of them.
+        if (PhxSpaceAssault.Enabled)
+        {
+            Debug.Log($"[BF3Legacy] '{mapScript}': using the map's own space assault " +
+                      "capital ships, greybox layer skipped");
+            return;
+        }
+
         BuildSpaceLayer(scene, mapScript, kind);
     }
 

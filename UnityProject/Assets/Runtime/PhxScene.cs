@@ -198,6 +198,20 @@ public class PhxScene
 
         WorldLoader.Instance.TerrainAsMesh = true;
 
+        // BF3 Legacy: import the original game's AI navigation data
+        // (planning graph, barriers, hint nodes) before instances, so AI
+        // spawned during load already has routes available.
+        PhxNavGraph.Reset();
+        PhxHintNodes.Reset();
+        PhxSpaceAssault.Reset();
+        PhxNavGraph.Instance.LoadPlanning(ENV.GetWorldLevel());
+
+        foreach (World world in worldLayers)
+        {
+            PhxNavGraph.Instance.LoadBarriers(world);
+            PhxHintNodes.Load(world);
+        }
+
         foreach (World world in worldLayers)
         {
             if (MapTexture == null)

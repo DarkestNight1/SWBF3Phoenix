@@ -16,8 +16,5 @@ public class PhxHoverMainSection : PhxSeat
         base.InitManual(EC, StartIndex, "FLYERSECTION", "BODY");
     }
 
-    public PhxPawnController GetController()
-    {
-        return Occupant == null ? null : Occupant.GetController();
-    }
+    // GetController() now lives on PhxSeat (same implementation)
 }

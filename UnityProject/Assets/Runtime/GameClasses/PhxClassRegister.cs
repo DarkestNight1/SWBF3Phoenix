@@ -44,8 +44,17 @@ public static class PhxClassRegister
 
         { "flyer",          new GameBaseClass(typeof(PhxFlyer.ClassProperties),          typeof(PhxFlyer))          },
         { "commandflyer",   new GameBaseClass(typeof(PhxFlyer.ClassProperties),          typeof(PhxFlyer))          },
+
+        // AT-ST / AT-AT / AT-TE / spider droid / hailfire. Previously
+        // unregistered - none of them spawned.
+        { "walker",         new GameBaseClass(typeof(PhxWalker.ClassProperties),         typeof(PhxWalker))         },
+        { "commandwalker",  new GameBaseClass(typeof(PhxWalker.ClassProperties),         typeof(PhxWalker))         },
         
         { "vehiclespawn",   new GameBaseClass(null,                                      typeof(PhxVehicleSpawn))   },
+
+        // Emplaced guns (map-placed turrets). Previously unregistered, so
+        // none of them spawned on any map.
+        { "turret",         new GameBaseClass(typeof(PhxTurret.ClassProperties),         typeof(PhxTurret))         },
 
         
         { "weapon",         new GameBaseClass(typeof(PhxGenericWeapon.ClassProperties),  typeof(PhxGenericWeapon))  },

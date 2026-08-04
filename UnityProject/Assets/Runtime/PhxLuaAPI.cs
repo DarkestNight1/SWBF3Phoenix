@@ -657,12 +657,12 @@ public static class PhxLuaAPI
 
 	public static void DisableBarriers(string barrierName)
 	{
-		
+		PhxNavGraph.Instance.SetBarriersEnabled(barrierName, false);
 	}
 
 	public static void EnableBarriers(string barrierName)
 	{
-		
+		PhxNavGraph.Instance.SetBarriersEnabled(barrierName, true);
 	}
 
 	public static void PlayAnimation(string animName)
@@ -687,22 +687,22 @@ public static class PhxLuaAPI
 
 	public static void BlockPlanningGraphArcs(string planNodeName)
 	{
-
+		PhxNavGraph.Instance.SetHubArcsBlocked(planNodeName, true);
 	}
 
 	public static void BlockPlanningGraphArcs(int planNode)
 	{
-
+		PhxNavGraph.Instance.SetHubArcsBlocked(planNode, true);
 	}
 
 	public static void UnblockPlanningGraphArcs(string planNodeName)
     {
-
+		PhxNavGraph.Instance.SetHubArcsBlocked(planNodeName, false);
     }
 
 	public static void UnblockPlanningGraphArcs(int planNode)
 	{
-
+		PhxNavGraph.Instance.SetHubArcsBlocked(planNode, false);
 	}
 
 	public static void SetUberMode(bool enable)
@@ -1013,7 +1013,7 @@ public static class PhxLuaAPI
 
 	public static void SpaceAssaultEnable(bool enable)
     {
-
+		PhxSpaceAssault.SetEnabled(enable);
     }
 
 	public static void SpaceAssaultSetupBitmaps(
@@ -1031,17 +1031,20 @@ public static class PhxLuaAPI
 
 	public static void SpaceAssaultAddCriticalSystem(string name, float pointValue, float hudPosX, float hudPosY, bool displayHudMarker)
 	{
-
+		PhxSpaceAssault.AddCriticalSystem(name, pointValue, hudPosX, hudPosY, displayHudMarker);
 	}
 
 	public static void SpaceAssaultLinkCriticalSystems(object obj)
     {
-
+		// Systems are grouped onto their ship by team prefix when resolved,
+		// so the explicit link table isn't needed; re-resolve in case this
+		// call arrives after further systems were declared.
+		PhxSpaceAssault.ResolveAll();
     }
 
 	public static void AddSpaceAssaultDestroyPoints(object killer, string instName)
     {
-
+		PhxSpaceAssault.AddDestroyPoints(instName);
     }
 
 	public static void EnableBuildingLockOn(string instName, bool lockOn)
