@@ -12,6 +12,11 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
 <br/>
 
 # How to Build
+
+> **Quick reference:** [INSTALL.md](INSTALL.md) covers running the game and
+> installing mods once you have a build. The steps below are the one-time
+> build from source, which needs Unity and a C++ toolchain.
+
 ## Windows
 ### Installation Requirements
 * Git. Must be either included in PATH or installed with Git Bash.
@@ -27,7 +32,9 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
 * Unity 2020.3.x with *Windows Build Support (IL2CPP)*
 
 ### Build steps
-1. Clone the repository to a directory of your choice using `git clone https://github.com/Ben1138/SWBF2Phoenix --recurse-submodules`. If your forgot to clone with submodules, do `git submodule update --init --recursive`
+1. Clone **this fork** with submodules:
+   `git clone --recurse-submodules https://github.com/DarkestNight1/SWBF3Phoenix`
+   If you forgot the submodules, run `git submodule update --init --recursive` afterwards (the build fails without them).
 2. Execute `BuildAndCopyLibsWin.bat` (double click)
 3. Choose your build type. For now, Debug is recommended
 4. Choose the number of threads used for compilation. Recommended is the number of your CPU cores.
@@ -40,8 +47,11 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
 8. Open the package manager in *Windows -> Package Manager* and select the "High Definition RP" package. On the right side, expand "Samples" and import "Particle System Shader Samples"
 9. Navigate to `Runtime/Scenes` and open PhxMainScene
 10. In the hierarchy, select *Game* and set in the inspector:
-    * `Game Path String` to your Star Wars Battlefront II installation directory. E.g.: `C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II`
     * `Mission List Path` to empty!
+    * `Game Path String` is **optional** in this fork — the game auto-detects
+      Battlefront II in the usual Steam/GOG/retail locations, and shows an
+      in-game setup panel if it can't. Set it only to override that. E.g.:
+      `C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II`
 11. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Windows` as Target Platform and `x86_64` as Architecture.
 12. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
 
@@ -52,24 +62,28 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
 * Unity 2020.3.x with *Linux Build Support (IL2CPP)*
 
 ### Build steps
-1. Clone the repository to a directory of your choice using `git clone https://github.com/Ben1138/SWBF2Phoenix --recurse-submodules`. If your forgot to clone with submodules, do `git submodule update --init --recursive`
+1. Clone **this fork** with submodules:
+   `git clone --recurse-submodules https://github.com/DarkestNight1/SWBF3Phoenix`
+   If you forgot the submodules, run `git submodule update --init --recursive` afterwards (the build fails without them).
 2. [ARCH USERS ONLY] If you're on an Arch based system, the current mono package is not correctly installed, which will cause to `LibSWBF2.NET.dll` to not build. Run `arch_mono_4.5_fix.sh` to fix that issue
 3. Execute `BuildAndCopyLibsUnix.sh` in your terminal
-3. Choose your build type. For now, Debug is recommended
-4. Choose the number of threads used for compilation. Recommended is the number of your CPU cores.
-5. Wait for the batch to complete. There should be no red text outputs! Yellow is ok. 
-6. Three files should've been successfully copied to `UnityProject/Assets/Lib`:
+4. Choose your build type. For now, Debug is recommended
+5. Choose the number of threads used for compilation. Recommended is the number of your CPU cores.
+6. Wait for the batch to complete. There should be no red text outputs! Yellow is ok. 
+7. Three files should've been successfully copied to `UnityProject/Assets/Lib`:
     * `libSWBF2.so`
     * `LibSWBF2.NET.dll`
     * `liblua50-swbf2-x64.so`
-7. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
-8. Open the package manager in *Windows -> Package Manager* and select the "High Definition RP" package. On the right side, expand "Samples" and import "Particle System Shader Samples"
-9. Navigate to `Runtime/Scenes` and open PhxMainScene
-10. In the hierarchy, select *Game* and set in the inspector:
-    * `Game Path String` to your Star Wars Battlefront II installation directory.
+8. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
+9. Open the package manager in *Windows -> Package Manager* and select the "High Definition RP" package. On the right side, expand "Samples" and import "Particle System Shader Samples"
+10. Navigate to `Runtime/Scenes` and open PhxMainScene
+11. In the hierarchy, select *Game* and set in the inspector:
     * `Mission List Path` to empty!
-11. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Linux` as Target Platform and `x86_64` as Architecture.
-12. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
+    * `Game Path String` is **optional** in this fork — the game auto-detects
+      Battlefront II in the usual Steam/GOG locations, and shows an in-game
+      setup panel if it can't. Set it only to override that.
+12. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Linux` as Target Platform and `x86_64` as Architecture.
+13. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
 
 
 ## Known problems
