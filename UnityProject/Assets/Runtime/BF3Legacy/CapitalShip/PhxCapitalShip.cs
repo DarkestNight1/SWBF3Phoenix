@@ -54,6 +54,9 @@ public class PhxCapitalShip : MonoBehaviour, IPhxDamageableInstance, IPhxTickabl
     public Transform HangarEntrance;      // where attackers land once shields are down
     public GameObject HangarShieldVisual; // translucent barrier, disabled on ShieldsDown
 
+    // Interior spawn pads for the ship's defenders (filled by PhxShipInterior)
+    public readonly List<Transform> DefenderSpawns = new List<Transform>();
+
     public float CurShields { get; private set; }
     public float CurHull { get; private set; }
     public PhxShipState State { get; private set; } = PhxShipState.Shielded;
@@ -89,10 +92,11 @@ public class PhxCapitalShip : MonoBehaviour, IPhxDamageableInstance, IPhxTickabl
         CurHull = MaxHull;
         All.Add(this);
 
-        GetComponentsInChildren(true, Subsystems);
-        foreach (PhxCapitalShipSubsystem sys in Subsystems)
+        List<PhxCapitalShipSubsystem> found = new List<PhxCapitalShipSubsystem>();
+        GetComponentsInChildren(true, found);
+        foreach (PhxCapitalShipSubsystem sys in found)
         {
-            sys.Ship = this;
+            RegisterSubsystem(sys);
         }
     }
 
@@ -256,4 +260,33 @@ public class PhxCapitalShip : MonoBehaviour, IPhxDamageableInstance, IPhxTickabl
     public float GetShieldPercent() => MaxShields <= 0f ? 0f : CurShields / MaxShields;
     public float GetHullPercent() => MaxHull <= 0f ? 0f : CurHull / MaxHull;
     public bool CanBeBoarded() => State >= PhxShipState.ShieldsDown && State < PhxShipState.Dying;
+
+    public bool IsSubsystemAlive(PhxCapitalShipSubsystem.PhxSubsystemType type)
+    {
+        foreach (PhxCapitalShipSubsystem s in Subsystems)
+        {
+            if (s.Type == type && s.IsAlive) return true;
+        }
+        return false;
+    }
+
+    // Interior autoguns and hangar defense stay online until the mainframe is sabotaged
+    public bool AutoTurretsOnline => IsSubsystemAlive(PhxCapitalShipSubsystem.PhxSubsystemType.AutoTurretMainframe);
+
+    /// <summary>Late registration for subsystems created after Awake (e.g. by PhxShipInterior).</summary>
+    public void RegisterSubsystem(PhxCapitalShipSubsystem sys)
+    {
+        if (!Subsystems.Contains(sys))
+        {
+            Subsystems.Add(sys);
+            sys.Ship = this;
+
+            // the reactor starts protected until the other criticals are sabotaged
+            if (sys.Type == PhxCapitalShipSubsystem.PhxSubsystemType.MainReactor &&
+                State < PhxShipState.ReactorExposed)
+            {
+                sys.SetInvulnerable(true);
+            }
+        }
+    }
 }

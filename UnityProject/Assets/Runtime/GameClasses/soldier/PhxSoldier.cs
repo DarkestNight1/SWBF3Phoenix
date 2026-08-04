@@ -7,7 +7,7 @@ using UnityEngine.Animations;
 using LibSWBF2.Utils;
 using System.Runtime.ExceptionServices;
 
-public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, ICraAnimated, IPhxTickable, IPhxTickablePhysics
+public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, ICraAnimated, IPhxTickable, IPhxTickablePhysics, IPhxDamageableInstance
 {
     static PhxGame GAME => PhxGame.Instance;
     static PhxMatch MTC => PhxGame.GetMatch();
@@ -305,8 +305,15 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         return Weapons[0][WeaponIdx[0]];
     }
 
+    public bool IsDead { get; private set; }
+
     public void AddHealth(float amount)
     {
+        if (IsDead)
+        {
+            return;
+        }
+
         if (amount < 0)
         {
             // we got hit! alert!
@@ -317,9 +324,71 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         if (health <= 0f)
         {
             health = 0;
-            // TODO: dead!
+            CurHealth.Set(0f);
+            Die(transform.position, false);
+            return;
         }
         CurHealth.Set(Mathf.Min(health, C.MaxHealth));
+    }
+
+    // IPhxDamageableInstance - projectile impacts etc.
+    public void AddDamage(float damage)
+    {
+        AddDamageFrom(damage, transform.position, false);
+    }
+
+    // Damage with hit context, so lethal saber hits can dismember (BF3 Legacy)
+    public void AddDamageFrom(float damage, Vector3 hitPos, bool isSaber)
+    {
+        if (IsDead)
+        {
+            return;
+        }
+
+        float health = CurHealth - damage;
+        if (health <= 0f)
+        {
+            CurHealth.Set(0f);
+            Die(hitPos, isSaber);
+        }
+        else
+        {
+            AddHealth(-damage);
+        }
+    }
+
+    void Die(Vector3 hitPos, bool isSaber)
+    {
+        if (IsDead)
+        {
+            return;
+        }
+        IsDead = true;
+
+        if (isSaber)
+        {
+            PhxDismemberment.TrySever(gameObject, hitPos);
+        }
+
+        // release the controller, freeze the corpse in place
+        UnAssign();
+        if (Body != null)
+        {
+            Body.isKinematic = true;
+        }
+        CapsuleCollider coll = GetComponent<CapsuleCollider>();
+        if (coll != null)
+        {
+            coll.enabled = false;
+        }
+
+        StartCoroutine(RemoveCorpse());
+    }
+
+    System.Collections.IEnumerator RemoveCorpse()
+    {
+        yield return new WaitForSeconds(15f);
+        SCENE?.DestroyInstance(this);
     }
 
     public void AddAmmo(float amount)
@@ -469,6 +538,10 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     public void Tick(float deltaTime)
     {
+        if (IsDead)
+        {
+            return;
+        }
         Profiler.BeginSample("Tick Soldier");
         UpdateState(deltaTime);
         Profiler.EndSample();
@@ -476,6 +549,10 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     public void TickPhysics(float deltaTime)
     {
+        if (IsDead)
+        {
+            return;
+        }
         Profiler.BeginSample("Tick Soldier Physics");
         UpdatePhysics(deltaTime);
         Profiler.EndSample();

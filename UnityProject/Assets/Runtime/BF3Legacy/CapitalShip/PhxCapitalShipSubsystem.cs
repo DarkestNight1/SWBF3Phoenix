@@ -43,15 +43,11 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance
     bool Invulnerable;
 
 
+    // NOTE: reactor invulnerability is applied by PhxCapitalShip when the
+    // subsystem is registered - Awake() runs on AddComponent, before Type is set.
     void Awake()
     {
         CurHealth = MaxHealth;
-
-        // The reactor starts protected until the other critical systems are sabotaged
-        if (Type == PhxSubsystemType.MainReactor)
-        {
-            Invulnerable = true;
-        }
     }
 
     public void SetInvulnerable(bool value)

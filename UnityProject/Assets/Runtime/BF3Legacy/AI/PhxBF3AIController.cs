@@ -127,8 +127,10 @@ public class PhxBF3AIController : PhxAIController
 
     void TickEngage(float deltaTime)
     {
-        if (TargetPawn == null || TargetPawn.GetInstance() == null)
+        if (TargetPawn == null || TargetPawn.GetInstance() == null ||
+            (TargetPawn is PhxSoldier deadCheck && deadCheck.IsDead))
         {
+            TargetPawn = null;
             ShootPrimary = false;
             State = PhxAIState.SeekObjective;
             return;
@@ -241,7 +243,7 @@ public class PhxBF3AIController : PhxAIController
         for (int i = 0; i < count; ++i)
         {
             PhxSoldier soldier = OverlapCache[i].GetComponentInParent<PhxSoldier>();
-            if (soldier == null) continue;
+            if (soldier == null || soldier.IsDead) continue;
             if (soldier.Team == Team || soldier.Team == 0) continue;
             if (ReferenceEquals(soldier, Pawn)) continue;
 

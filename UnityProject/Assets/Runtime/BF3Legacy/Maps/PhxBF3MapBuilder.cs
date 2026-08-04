@@ -169,67 +169,13 @@ public class PhxBF3MapBuilder : MonoBehaviour
 
     void BuildCapitalShip(PhxBF3MapDatabase.PhxBF3MapDef def, int team, Vector3 position)
     {
-        GameObject shipGo = new GameObject($"CapitalShip_Team{team}");
-        shipGo.transform.SetParent(Root.transform, false);
-        shipGo.transform.localPosition = position;
-        shipGo.transform.localRotation = Quaternion.LookRotation(
-            (Vector3.zero - new Vector3(position.x, 0f, position.z)).normalized);
-
-        // hull: elongated greybox with named break sections for the destruction sequence
-        Vector3[] sectionOffsets = { new Vector3(0f, 0f, 90f), Vector3.zero, new Vector3(0f, 0f, -90f) };
-        string[] sectionNames = { "bow_hull_section", "mid_hull_section", "stern_hull_section" };
-        for (int i = 0; i < sectionOffsets.Length; ++i)
-        {
-            GameObject section = GameObject.CreatePrimitive(PrimitiveType.Cube);
-            section.name = sectionNames[i];
-            section.transform.SetParent(shipGo.transform, false);
-            section.transform.localPosition = sectionOffsets[i];
-            section.transform.localScale = new Vector3(60f, 20f, 90f);
-            section.AddComponent<PhxShipBreakSection>();
-            Tint(section, new Color(0.55f, 0.57f, 0.6f));
-        }
-
-        PhxCapitalShip ship = shipGo.AddComponent<PhxCapitalShip>();
-        ship.ShipName = team == 1 ? "Alliance Flagship" : "Imperial Flagship";
-        ship.Team = team;
-
-        // subsystems: external engines + internal criticals + reactor
-        AddSubsystem(shipGo, "Engines", PhxCapitalShipSubsystem.PhxSubsystemType.Engines,
-            new Vector3(0f, 0f, -140f), critical: true, @internal: false);
-        AddSubsystem(shipGo, "ShieldGenerator", PhxCapitalShipSubsystem.PhxSubsystemType.ShieldGenerator,
-            new Vector3(0f, 14f, -60f), critical: true, @internal: true);
-        AddSubsystem(shipGo, "AutoTurretMainframe", PhxCapitalShipSubsystem.PhxSubsystemType.AutoTurretMainframe,
-            new Vector3(0f, 0f, 40f), critical: true, @internal: true);
-        AddSubsystem(shipGo, "LifeSupport", PhxCapitalShipSubsystem.PhxSubsystemType.LifeSupport,
-            new Vector3(0f, -8f, 0f), critical: true, @internal: true);
-        AddSubsystem(shipGo, "MainReactor", PhxCapitalShipSubsystem.PhxSubsystemType.MainReactor,
-            new Vector3(0f, 0f, -30f), critical: true, @internal: true);
-
-        // hangar entrance marker
-        GameObject hangar = new GameObject("HangarEntrance");
-        hangar.transform.SetParent(shipGo.transform, false);
-        hangar.transform.localPosition = new Vector3(0f, -12f, 60f);
-        ship.HangarEntrance = hangar.transform;
-
-        // in-atmosphere ships fall onto the city when destroyed
-        PhxCapitalShipDestruction seq = shipGo.AddComponent<PhxCapitalShipDestruction>();
-        seq.InAtmosphere = def.InAtmosphereSpaceLayer;
-    }
-
-    static void AddSubsystem(GameObject ship, string name,
-        PhxCapitalShipSubsystem.PhxSubsystemType type, Vector3 localPos, bool critical, bool @internal)
-    {
-        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-        go.name = name;
-        go.transform.SetParent(ship.transform, false);
-        go.transform.localPosition = localPos;
-        go.transform.localScale = Vector3.one * 8f;
-
-        PhxCapitalShipSubsystem sys = go.AddComponent<PhxCapitalShipSubsystem>();
-        sys.Type = type;
-        sys.IsCritical = critical;
-        sys.IsInternal = @internal;
-        sys.MaxHealth = type == PhxCapitalShipSubsystem.PhxSubsystemType.MainReactor ? 4000f : 2000f;
+        PhxCapitalShipFactory.Spawn(
+            team,
+            team == 1 ? "Alliance Flagship" : "Imperial Flagship",
+            position: Root.transform.TransformPoint(position),
+            facingTarget: Root.transform.position,
+            inAtmosphere: def.InAtmosphereSpaceLayer,
+            parent: Root.transform);
     }
 
     static void Tint(GameObject go, Color color)

@@ -13,14 +13,18 @@ All new code lives in `UnityProject/Assets/Runtime/BF3Legacy/`.
 | Feature | Status | Code |
 |---|---|---|
 | Capital ship destruction | Playable systems + greybox ships | `CapitalShip/` |
+| Capital ship interiors (hangar→reactor→bridge) | Implemented, ES/BF3-accurate layout | `CapitalShip/PhxShipInterior.cs` |
+| Escape pods, hangar turret stations, autoguns | Implemented | `CapitalShip/` |
 | Ion cannon (ground↔space link) | Implemented | `CapitalShip/PhxIonCannon.cs` |
-| Lightsaber dismemberment | Implemented (mesh extraction sever) | `Dismemberment/` |
+| Vertical Battlefront on ALL maps (stock + mods) | Implemented, atmosphere/orbit per planet | `VerticalBattlefront/` |
+| Melee weapons (`melee` ODF class, lightsabers) | Implemented | `GameClasses/weapons/PhxMeleeWeapon.cs` |
+| Lightsaber dismemberment on melee kills | Implemented (mesh extraction sever) | `Dismemberment/` |
+| Soldier damage & death | Implemented (was a TODO upstream) | `GameClasses/soldier/PhxSoldier.cs` |
 | Modern AI (squads, flanking, difficulty tiers) | Implemented | `AI/` |
 | Modern lighting (ACES, SSAO, SSR, volumetrics) | Implemented | `Graphics/PhxModernLighting.cs` |
 | 4K graphics mode | Implemented | `Graphics/PhxResolutionManager.cs` |
 | Mod support (load order, toggling, detection) | Implemented | `Mods/PhxModManager.cs` |
 | BF3 map recreations | 6 greybox layouts, data-driven | `Maps/` |
-| Vertical Battlefront (ground→space) | Space layer w/ capital ships per map | `Maps/PhxBF3MapBuilder.cs` |
 
 Everything is toggleable via `bf3legacy.json` in Unity's persistent data path
 (created with defaults on first run) — see `PhxBF3Config` in `PhxBF3.cs`.
@@ -48,6 +52,43 @@ board and destroy the reactor, exactly like the source games.
 `PhxCapitalShip` keeps a per-team registry (`GetShipOfTeam`) so game modes,
 HUD and AI can query ship state; `OnStateChanged` / `OnShipDestroyed` events
 drive scoring and voice-over hooks.
+
+### Interior playspace (`PhxShipInterior`)
+
+Every capital ship has a fully walkable interior, laid out from what is
+documented of Elite Squadron's boarding runs and the BF3 leaked builds:
+
+```
+ BOW                                                              STERN
+ ┌─────────────┬───────┬—————————————————————────┬───────────┬────────┐
+ │   HANGAR    │JUNCT. │ corridor (port)         │  REACTOR  │ BRIDGE │
+ │ mouth+shield│ pods  ├─────────────────────────┤  CHAMBER  │        │
+ │ turret alc. │ pods  │ shield gen│mainfr.│life │  core     │        │
+ │ droids,spawn│       ├───────────┴───────┴─────┤  spawn    │        │
+ │             │ pods  │ corridor (starboard)    │           │        │
+ └─────────────┴───────┴─────────────────────────┴───────────┴────────┘
+```
+
+- **Hangar** (bow): shielded mouth (drops with the ship's shields), landing
+  space, health/ammo droid stations, defender spawn pad, and two **manned
+  anti-fighter turret stations** (`PhxShipTurretStation`) — a friendly soldier
+  standing at the console mans the external hull gun, which then engages
+  enemy flyers.
+- **Junction**: four **escape pod bays** (`PhxEscapePod`). Linger a moment to
+  launch; if the ship is already dying the pod fires immediately — BF3's
+  "watch the destruction from an escape pod". Pods arc down and deliver the
+  passenger to their team's nearest command post (or a drift point in space).
+- **Twin narrow corridors** (ES's hallways) guarded by ceiling
+  **autoguns** (`PhxShipAutogun`, BF3's interior defense weapon). All autoguns
+  go offline when the auto-turret mainframe is sabotaged.
+- **Systems rooms** between the corridors: shield generator, auto-turret
+  mainframe, life support — the BF2-heritage criticals that gate the reactor.
+- **Reactor chamber** (aft): the reactor core column, the kill objective.
+- **Bridge** (sternmost, deepest compartment — BF3: "fight your way to the
+  bridge"): non-critical subsystem, destroying it is optional score/flavor.
+
+The hull around the interior is built from break-section plates, so the
+destruction sequence tears the actual ship apart.
 
 ## Lightsaber dismemberment
 
@@ -85,6 +126,39 @@ raised LOD bias.
 > HDRP 10.x (Unity 2020.3, this project's pinned version); re-verify in the
 > editor after any HDRP upgrade.
 
+## Vertical battlefront on every map
+
+`PhxVerticalBattlefront` (on the persistent BF3Legacy host) watches for map
+loads and builds the space layer over **any** map — stock SWBF2, BF3 Legacy
+mod maps, or other addons:
+
+- **Planet surface maps** (Coruscant, Hoth, Tatooine, …): capital ships fly
+  **in atmosphere**, looming ~450 m over the battlefield exactly like Elite
+  Squadron's ships loom over every planetary battle.
+- **Space and vacuum maps** (`spa*`, Polis Massa): ships sit in **orbit**
+  (~900 m) instead.
+- **Interior maps** (Tantive IV, Death Star): no space layer — there's no sky.
+- **Unknown addon maps** (including BF3 Legacy content) default to atmosphere
+  unless their script name looks like a space map.
+
+The transition is seamless — same scene, no loading (Free Radical's core
+pitch). A `PhxSpaceTransitionBand` trigger at ~55 % of ship altitude marks the
+seam and provides the hook for sky-fade/music/HUD callouts. The current map's
+lua script name is exposed via `PhxGame.CurrentMapScript`.
+
+## Melee weapons & dismemberment wiring
+
+The SWBF2 `melee` ODF class (lightsabers) was unimplemented in Phoenix; the
+new `PhxMeleeWeapon` (registered in `PhxClassRegister`) performs an arc sweep
+per swing and damages everything in reach. Soldier damage flow is now real:
+
+- `PhxSoldier` implements `IPhxDamageableInstance` — blaster bolts, autoguns
+  and melee all actually kill now (`Die()` was previously a TODO).
+- Lethal hits from a weapon whose class or name contains "saber" (or with
+  `IsLightSaber = 1` in the ODF) call `PhxDismemberment.TrySever` with the
+  hit position — severing the nearest limb, honoring the configured gore
+  level. Corpses are frozen and cleaned up after 15 s.
+
 ## Mod support & BF3 Legacy mod compatibility
 
 `PhxModManager` layers on top of the existing `GameData/addon` discovery:
@@ -98,6 +172,50 @@ raised LOD bias.
   installed, `PhxModManager.IsBF3LegacyInstalled` is set and BF3 features can
   light up on its maps. This is the preferred way to get *real* BF3 assets —
   the runtime loads them through the standard lvl pipeline.
+
+## Installing the BF3 Legacy mod (3.1) — yes, it's just an addon folder
+
+The current all-in-one release,
+[Battlefront 3 Legacy Mod (3.1)](https://www.moddb.com/addons/battlefront-3-legacy-mod-31),
+ships as **standard SWBF2 addon content** — the original 2005 game is
+required, which is exactly the setup Phoenix expects (the user supplies their
+own BF2 install):
+
+1. Extract the release into your BF2 install's `GameData/addon/` folder, so
+   each mod folder contains its own `addme.script`
+   (`GameData/addon/<FOLDER>/addme.script`). The 3.1 pack bundles the
+   Pre-Demo 3.0 content, Era Mod 1.4, Death Star II, the GCW space demo, map
+   fixes and the MoreMaps patch.
+2. Launch Phoenix with `Game Path String` pointing at that BF2 install.
+   `PhxGame` discovers every addon via its `addme.script`;
+   `PhxModManager` lists them, applies `modorder.txt` ordering, and flags
+   `IsBF3LegacyInstalled`.
+3. The mod's maps then load through the normal lvl pipeline like any other
+   SWBF2 map, and the vertical battlefront layer activates over them.
+
+Caveats: the release notes assume the *retail* game patched with the
+community 1.3 patch and recommend an HD HUD mod — those target the original
+executable's quirks. Phoenix reimplements the engine, so HUD patching is
+irrelevant here, but any 1.3-era Lua APIs the mod's mission scripts call must
+exist in `PhxLuaAPI`; missing-function log warnings on map load are the mod
+compatibility TODO list.
+
+## Debugging mods and maps
+
+- **In the Unity editor**: open `Runtime/Scenes/PhxMainScene`, set
+  `Game Path String` on the *Game* object, leave `Mission List Path` empty,
+  and press Play. Everything logs to the Console: addon registration
+  (`RegisterAddonScript`), lvl load failures, missing ODF classes, Lua
+  errors from `PhxLuaRuntime`, and all `[BF3Legacy]` systems.
+- **Mod triage**: use `GameData/addon/modorder.txt` — `!foldername` disables
+  a mod without deleting it; binary-search a broken load order this way.
+- **Built player logs**: `%USERPROFILE%\AppData\LocalLow\<company>\<product>\Player.log`
+  (Linux: `~/.config/unity3d/.../Player.log`) contains the same output.
+- **BF3 Legacy config**: `bf3legacy.json` next to the player log — flip
+  features (`EnhancedAI`, `VerticalBattlefront`, `Dismemberment`, …) to
+  isolate a misbehaving system, then relaunch.
+- **Boot straight into a map**: `PhxSettings.BootSWBF2Map` accepts a map
+  script name (e.g. `geo1c_con`) to skip the menu while iterating.
 
 ## BF3 map recreations
 
@@ -133,14 +251,15 @@ art (or superseded entirely by the BF3 Legacy mod's own level files).
 
 ## Roadmap
 
-- Wire `PhxDismemberment` into saber melee kill resolution once melee damage
-  lands in `PhxSoldier`.
 - AI pathing on imported SWBF2 planning/path data (`PhxPath`/`SWBFPath`)
-  instead of straight-line movement.
-- Capital ship interiors as boardable playspaces (BF3's ship-deck combat),
-  with AI boarding parties tasked by the director.
-- Seamless flight transition band between ground layer and space layer.
+  instead of straight-line movement; AI boarding parties tasked by the
+  director once shields drop.
+- Full seat/camera possession for the hangar turret stations (`PhxSeat`
+  integration) instead of stand-to-man auto control.
+- Swing animations + blade trail visuals for `PhxMeleeWeapon`, and saber
+  blocking/deflection.
 - Optional AI-upscaled texture pack loading through the mod system for true
   4K-res assets.
 - Remaining documented BF3 maps: Yavin 4, Hoth, Endor, Mustafar, Kashyyyk,
   Dathomir, Death Star II.
+- Per-mod Lua API compatibility sweep for BF3 Legacy 3.1 mission scripts.

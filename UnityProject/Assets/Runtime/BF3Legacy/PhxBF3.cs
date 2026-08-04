@@ -53,6 +53,10 @@ public static class PhxBF3
         {
             Host.AddComponent<PhxResolutionManager>();
         }
+        if (Config.VerticalBattlefront)
+        {
+            Host.AddComponent<PhxVerticalBattlefront>();
+        }
 
         PhxModManager.Scan();
 

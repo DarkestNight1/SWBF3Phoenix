@@ -53,6 +53,10 @@ public class PhxGame : MonoBehaviour
 
     public PhxPath AddonPath { get; private set; }
     public PhxPath StdLVLPC { get; private set; }
+
+    // mapluafile of the currently entered map (e.g. "cor1c_con"), null in main menu.
+    // Used by BF3 Legacy to decide per-map vertical battlefront setup.
+    public string CurrentMapScript { get; private set; }
     public string VersionString { get; private set; }
     public int VersionMajor { get; private set; }
     public int VersionMinor { get; private set; }
@@ -182,6 +186,7 @@ public class PhxGame : MonoBehaviour
 
         MapRotation.Clear();
         MapRotationIdx = -1;
+        CurrentMapScript = null;
 
         bInitMainMenu = bInit;
         ShowLoadscreen(bInit);
@@ -213,6 +218,7 @@ public class PhxGame : MonoBehaviour
     {
         Debug.Assert(Env == null || Env.IsLoaded);
 
+        CurrentMapScript = mapScript;
         ShowLoadscreen();
         RemoveMenu(false);
 
