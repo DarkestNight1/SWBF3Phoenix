@@ -374,27 +374,27 @@ public static class PhxLuaAPI
 	}
 	public static int? AddAIGoal(int teamIdx, string goalName, float goalWeight)
 	{
-		return null;
+		return PhxAIGoals.Add(teamIdx, goalName, goalWeight);
 	}
 
 	public static int? AddAIGoal(int teamIdx, string goalName, float goalWeight, string captureRegion)
 	{
-		return null;
+		return PhxAIGoals.Add(teamIdx, goalName, goalWeight, captureRegion);
 	}
 
 	public static int? AddAIGoal(int teamIdx, string goalName, float goalWeight, string captureRegion, int flagPtr)
 	{
-		return null;
+		return PhxAIGoals.Add(teamIdx, goalName, goalWeight, captureRegion, flagPtr);
 	}
 
 	public static void DeleteAIGoal(int? goalPtr)
     {
-
+		if (goalPtr.HasValue) PhxAIGoals.Delete(goalPtr.Value);
     }
 
 	public static void ClearAIGoals(int teamIdx)
     {
-
+		PhxAIGoals.ClearTeam(teamIdx);
     }
 
 	public static void SetAIVehicleNotifyRadius(float radius)

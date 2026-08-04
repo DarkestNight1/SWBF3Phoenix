@@ -67,9 +67,10 @@ public class PhxScene
 
         // Must be cleared HERE, not in Import(): the map's ScriptInit runs
         // during RunMain() - before CreateScene()/Import() - and that is what
-        // calls SpaceAssaultEnable/AddCriticalSystem. Resetting in Import
-        // would wipe the configuration the script just supplied.
+        // calls SpaceAssaultEnable/AddCriticalSystem/AddAIGoal. Resetting in
+        // Import would wipe the configuration the script just supplied.
         PhxSpaceAssault.Reset();
+        PhxAIGoals.Reset();
 
         Animator = new PhxSceneAnimator();
     }

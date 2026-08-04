@@ -48,6 +48,14 @@ public abstract class PhxInstance : PhxComponent
     // Every SWBF2 object has a Team
     public PhxProp<int> Team = new PhxProp<int>(0);
 
+    // The odf class this instance was created from, without needing to know
+    // the concrete generic type. Used to read shared class properties such as
+    // HealthType, which drive damage scaling for every object type.
+    public virtual PhxClass GetClassRef()
+    {
+        return null;
+    }
+
 
     public virtual void InitInstance(ISWBFProperties instOrClass, PhxClass classProperties)
     {
@@ -81,6 +89,11 @@ public abstract class PhxInstance<T> : PhxInstance where T : PhxClass
 {
     public bool IsInit => C != null;
     public T C { get; private set; } = null;
+
+    public override PhxClass GetClassRef()
+    {
+        return C;
+    }
 
 
     public override void InitInstance(ISWBFProperties instOrClass, PhxClass classProperties)

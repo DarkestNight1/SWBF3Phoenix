@@ -6,16 +6,31 @@ using UnityEngine.Rendering.HighDefinition;
 
 
 
-public class PhxOrdnanceClass : PhxClass 
+public class PhxOrdnanceClass : PhxClass
 {
     public PhxProp<float> MaxDamage = new PhxProp<float>(1f);
 
-    public PhxProp<float> VehicleScale =  new PhxProp<float>(1f);
+    // Per-health-type damage scales. Default is -1 meaning "not set in the
+    // odf", which lets the legacy HealthScale/ArmorScale values below take
+    // effect; PhxDamage.Resolve() collapses these to real numbers.
+    public PhxProp<float> VehicleScale =  new PhxProp<float>(-1f);
     public PhxProp<float> ShieldScale =   new PhxProp<float>(1f);
-    public PhxProp<float> PersonScale =   new PhxProp<float>(1f);
-    public PhxProp<float> AnimalScale =   new PhxProp<float>(1f);
-    public PhxProp<float> DroidScale =    new PhxProp<float>(1f);
-    public PhxProp<float> BuildingScale = new PhxProp<float>(1f);
+    public PhxProp<float> PersonScale =   new PhxProp<float>(-1f);
+    public PhxProp<float> AnimalScale =   new PhxProp<float>(-1f);
+    public PhxProp<float> DroidScale =    new PhxProp<float>(-1f);
+    public PhxProp<float> BuildingScale = new PhxProp<float>(-1f);
+
+    // Legacy grouped scales still used by stock and mod odfs:
+    // HealthScale sets person/animal/droid, ArmorScale sets vehicle/building.
+    public PhxProp<float> HealthScale =   new PhxProp<float>(-1f);
+    public PhxProp<float> ArmorScale =    new PhxProp<float>(-1f);
+
+    public PhxDamageScales GetDamageScales()
+    {
+        return PhxDamage.Resolve(PersonScale, AnimalScale, DroidScale,
+                                 VehicleScale, BuildingScale,
+                                 HealthScale, ArmorScale);
+    }
 
     public PhxProp<string> GeometryName = new PhxProp<string>(null);
 

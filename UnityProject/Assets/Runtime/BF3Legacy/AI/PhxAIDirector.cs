@@ -145,10 +145,31 @@ public class PhxAIDirector : MonoBehaviour
 
         int squadCount = Mathf.Max(1, members.Count / SquadSize);
 
-        // Squad role split: ~1/3 defend owned posts (if any), one squad boards
-        // a vulnerable capital ship, the rest attack. Attackers always get at
-        // least one squad when there's anything to take.
-        int defendSquads = owned.Count > 0 ? Mathf.Max(squadCount / 3, squadCount > 1 ? 1 : 0) : 0;
+        // How many squads defend vs attack. If the mission script declared AI
+        // goals, honour their relative weights ("a goal with weight 2 gets
+        // twice as many units as weight 1"); otherwise fall back to our own
+        // ~1/3 defensive split.
+        int defendSquads;
+        Dictionary<PhxAIGoal, int> allocation = PhxAIGoals.Allocate(team, squadCount);
+        if (allocation != null)
+        {
+            int defendShare = 0;
+            foreach (KeyValuePair<PhxAIGoal, int> kv in allocation)
+            {
+                // Defend (and CTF defence) hold ground; Conquest/Destroy/
+                // Deathmatch push forward.
+                if (kv.Key.Type == PhxAIGoalType.Defend)
+                {
+                    defendShare += kv.Value;
+                }
+            }
+            defendSquads = owned.Count > 0 ? Mathf.Min(defendShare, squadCount) : 0;
+        }
+        else
+        {
+            defendSquads = owned.Count > 0 ? Mathf.Max(squadCount / 3, squadCount > 1 ? 1 : 0) : 0;
+        }
+
         bool sendBoarders = boardable != null && squadCount > 1;
 
         for (int s = 0; s < squadCount; ++s)

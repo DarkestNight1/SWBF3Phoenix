@@ -62,7 +62,38 @@ actually behave (all fixed; helpers live in `PhxRuntimeAssets`):
 | Procedural animation could accumulate | The additive spine offset multiplied onto the bone each frame assuming the animator had reset it. If it hadn't (paused, culled, or a bank that doesn't drive the spine) the rotation would spin up without bound. The layer now explicitly removes its previous contribution first, so it can never accumulate. |
 | Mod scan ran before the game path was known | `PhxModManager.Scan()` at bootstrap could find nothing and never retry, leaving the mod list permanently empty. Added `EnsureScanned()`, called on map load. |
 
-## Damage model
+## Damage model (audited against the mod tools documentation)
+
+The documented model is that ordnance/explosion damage is scaled by the
+**target's `HealthType`**, not by what kind of object it is in code:
+
+- `HealthType` = `person | animal | droid | vehicle | building | mine`
+  (defaults: soldier→person, tauntaun→animal, droideka→droid, vehicles→
+  vehicle, buildings→building).
+- The attacker declares `PersonScale`, `AnimalScale`, `DroidScale`,
+  `VehicleScale`, `BuildingScale`.
+- Legacy grouped properties still in use: `HealthScale` sets
+  person/animal/droid; `ArmorScale` sets vehicle/building.
+
+| Issue | Status | Detail |
+|---|---|---|
+| Scale picked by C# type | FIXED | The bolt chose `PersonScale` for anything that was a `PhxSoldier` and `VehicleScale`/`BuildingScale` by C# class. A battle droid (`HealthType = droid`) therefore took person-scaled damage and `DroidScale`/`AnimalScale` were never used at all. `PhxDamage.GetHealthType` now reads the odf property off the target's class. |
+| `HealthScale` / `ArmorScale` unparsed | FIXED | Neither existed on `PhxOrdnanceClass`/`PhxExplosionClass`, so any odf using the legacy form silently got unscaled damage. Both are now parsed; specific scales default to a `-1` "unset" sentinel so the legacy value applies only when the specific one is absent (`PhxDamage.Resolve`). |
+| **Explosions did no damage at all** | FIXED | `PhxExplosionManager.AddExplosion` played the effect and had the damage/push logic left as comments — so grenades, rockets, detpacks and vehicle deaths were harmless. Now applies health-type-scaled damage and physics push with the documented **linear falloff between the inner and outer radius** (full effect inside inner, none beyond outer), deduplicated per instance so a multi-collider target isn't hit once per limb. |
+| Melee ignored scales | FIXED | `PhxMeleeWeapon` applied raw `MaxDamage`; it now uses the same health-type scaling and accepts the scale properties. |
+| No generic way to read class props | FIXED | Added `PhxInstance.GetClassRef()` (overridden in `PhxInstance<T>`) so shared class properties like `HealthType` can be read without knowing the concrete generic type. |
+
+## AI goals
+
+`AddAIGoal` / `DeleteAIGoal` / `ClearAIGoals` were stubs returning null, so
+every mission script's force allocation was discarded. Per the documentation,
+weight is relative — "a goal with weight 2 will get twice as many units as a
+goal with weight 1" — and Conquest/Deathmatch need no target while
+Defend/Destroy/CTF must name one. `PhxAIGoals` now records goals and
+allocates squads proportionally, replacing the AI director's hardcoded
+attack/defend ratio whenever a map declares goals.
+
+## Damage model (implementation notes)
 
 - Ordnance→target damage now flows through odf values end to end
   (weapon `OrdnanceName` → ordnance `MaxDamage` × per-target scale).

@@ -27,6 +27,23 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
         // MaxDamage covers the common case, default one-shots basic infantry.
         public PhxProp<float> MaxDamage = new PhxProp<float>(300f);
 
+        // Same per-health-type scaling every other damage source uses
+        // (-1 = not set in the odf; see PhxDamage.Resolve)
+        public PhxProp<float> PersonScale = new PhxProp<float>(-1f);
+        public PhxProp<float> AnimalScale = new PhxProp<float>(-1f);
+        public PhxProp<float> DroidScale = new PhxProp<float>(-1f);
+        public PhxProp<float> VehicleScale = new PhxProp<float>(-1f);
+        public PhxProp<float> BuildingScale = new PhxProp<float>(-1f);
+        public PhxProp<float> HealthScale = new PhxProp<float>(-1f);
+        public PhxProp<float> ArmorScale = new PhxProp<float>(-1f);
+
+        public PhxDamageScales GetDamageScales()
+        {
+            return PhxDamage.Resolve(PersonScale, AnimalScale, DroidScale,
+                                     VehicleScale, BuildingScale,
+                                     HealthScale, ArmorScale);
+        }
+
         // Reach and sweep arc of the swing
         public PhxProp<float> LightSaberLength = new PhxProp<float>(3.0f);
         public PhxProp<float> DamageArc = new PhxProp<float>(120f);
@@ -127,14 +144,10 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
             alreadyHit.Add(instance);
 
             Vector3 hitPos = coll.ClosestPoint(origin + forward * C.LightSaberLength * 0.5f);
-            if (instance is PhxSoldier soldier)
-            {
-                soldier.AddDamageFrom(C.MaxDamage, hitPos, isSaber: bIsSaber);
-            }
-            else if (instance is IPhxDamageableInstance damageable)
-            {
-                damageable.AddDamage(C.MaxDamage);
-            }
+
+            // scaled by the target's HealthType, like all other damage
+            PhxDamage.ApplyToCollider(coll, C.MaxDamage, C.GetDamageScales(),
+                                      hitPos, isSaber: bIsSaber);
         }
         return true;
     }
