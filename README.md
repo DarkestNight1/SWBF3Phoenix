@@ -1,9 +1,11 @@
-# SWBF2 Phoenix Project
+# SWBF3 Phoenix Project
 
-This project is a re-implementation of the old Star Wars Battlefront II (2005) game, utilizing the Unity game engine.<br/>
+This project is a fork of [SWBF2 Phoenix](https://github.com/Ben1138/SWBF2Phoenix) — a re-implementation of the old Star Wars Battlefront II (2005) game, utilizing the Unity game engine.<br/>
 It does so by loading all assets and scripts from the original game files at runtime, providing a compatible API layer for the original, compiled Lua scripts.<br/>
 <br/>
 This project aims for full compatibility with the vanilla game files, and as best as possible with custom maps.<br/>
+<br/>
+On top of that, this fork adds the **BF3 Legacy** feature set — recreating Free Radical's cancelled Battlefront III / Elite Squadron on the Phoenix runtime: capital ship destruction, ground-to-space "Vertical Battlefront" layers, lightsaber dismemberment, modernized squad AI with difficulty tiers, modern HDRP lighting + 4K graphics, extended mod support (including detection of the community [Battlefront III Legacy mod](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy)), and data-driven greybox recreations of documented BF3 maps (Coruscant, Cato Neimoidia, Dantooine, Bespin, Desolation Station, Tatooine). See [docs/BF3Legacy.md](docs/BF3Legacy.md).<br/>
 <br/>
 *Click image to view Video*<br/>
 [![Star Wars Battlefront II (2005) Unity Runtime - Update - Tech Demo](https://img.youtube.com/vi/hjSlM5hEfGk/0.jpg)](https://www.youtube.com/watch?v=hjSlM5hEfGk)
