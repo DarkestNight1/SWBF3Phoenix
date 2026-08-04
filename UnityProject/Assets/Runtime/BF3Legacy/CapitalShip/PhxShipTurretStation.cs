@@ -111,6 +111,14 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
             EnsureGun();
             PossessedPawn = playerPawn;
             PossessedController = playerPawn.GetController();
+
+            // E is also the soldier's vehicle enter/exit key
+            // (PhxPlayerController) - consume it so manning a turret next to
+            // a vehicle doesn't also try to board that vehicle this frame.
+            if (PossessedController != null)
+            {
+                PossessedController.Enter = false;
+            }
             playerPawn.UnAssign();
 
             // start aiming outward from the hull
@@ -206,6 +214,8 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
 
     // ------------------------------------------------------ AI / auto control
 
+    float OperatorScanTimer;
+
     void UpdateOperator()
     {
         // occupied while a living friendly soldier stands at the console
@@ -215,6 +225,12 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
             Operator = null;
         }
         if (Operator != null) return;
+
+        // finding a new operator is a physics query - don't run it every
+        // frame on every station in the level
+        OperatorScanTimer -= Time.deltaTime;
+        if (OperatorScanTimer > 0f) return;
+        OperatorScanTimer = 0.5f;
 
         int count = Physics.OverlapSphereNonAlloc(transform.position, UseRadius, OverlapCache);
         for (int i = 0; i < count; ++i)
@@ -268,12 +284,12 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
         ExternalGun.transform.SetParent(Ship.transform, false);
         ExternalGun.transform.localPosition = ExternalGunLocalPos;
         ExternalGun.transform.localScale = new Vector3(2f, 3f, 2f);
-        ExternalGun.GetComponent<Renderer>().material.color = new Color(0.6f, 0.62f, 0.68f);
+        PhxRuntimeAssets.Tint(ExternalGun, new Color(0.6f, 0.62f, 0.68f));
 
         Tracer = ExternalGun.AddComponent<LineRenderer>();
         Tracer.startWidth = 0.25f;
         Tracer.endWidth = 0.25f;
-        Tracer.material = new Material(Shader.Find("Sprites/Default"));
+        Tracer.material = PhxRuntimeAssets.CreateLineMaterial(new Color(0.4f, 1f, 0.4f));
         Tracer.startColor = new Color(0.4f, 1f, 0.4f);
         Tracer.endColor = new Color(0.4f, 1f, 0.4f, 0.2f);
         Tracer.enabled = false;

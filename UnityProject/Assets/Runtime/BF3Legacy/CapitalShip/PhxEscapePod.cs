@@ -26,9 +26,16 @@ public class PhxEscapePod : MonoBehaviour
     static readonly Collider[] OverlapCache = new Collider[16];
 
 
+    float ScanTimer;
+
     void Update()
     {
         if (Launched || Ship == null) return;
+
+        // physics query - throttled, there are several pods per ship
+        ScanTimer -= Time.deltaTime;
+        if (ScanTimer > 0f) return;
+        ScanTimer = 0.25f;
 
         // find a living soldier lingering in the bay (any team - stealing an
         // enemy pod is a legitimate escape)
@@ -57,7 +64,8 @@ public class PhxEscapePod : MonoBehaviour
             BoardTimer = 0f;
         }
 
-        BoardTimer += Time.deltaTime;
+        // accumulate the throttle interval, not a single frame
+        BoardTimer += 0.25f;
 
         // ship dying? launch immediately - that's the BF3 fantasy
         bool urgent = Ship.State == PhxCapitalShip.PhxShipState.Dying;

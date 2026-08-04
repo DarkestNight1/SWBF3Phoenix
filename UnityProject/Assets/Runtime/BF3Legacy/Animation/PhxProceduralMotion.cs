@@ -30,6 +30,12 @@ public class PhxProceduralMotion : MonoBehaviour
     float SwayPhase;
     bool Hooked;
 
+    // The offset we applied last frame. We explicitly remove it before
+    // applying a new one, so the additive layer can never accumulate - even
+    // on frames where the animator didn't overwrite the bone (paused,
+    // culled, or an animation bank that doesn't drive the spine).
+    Quaternion AppliedOffset = Quaternion.identity;
+
 
     void Start()
     {
@@ -66,7 +72,19 @@ public class PhxProceduralMotion : MonoBehaviour
 
     void LateUpdate()
     {
-        if (Spine == null || (Soldier != null && Soldier.IsDead))
+        if (Spine == null)
+        {
+            return;
+        }
+
+        // always undo our previous contribution first
+        if (AppliedOffset != Quaternion.identity)
+        {
+            Spine.localRotation = Spine.localRotation * Quaternion.Inverse(AppliedOffset);
+            AppliedOffset = Quaternion.identity;
+        }
+
+        if (Soldier != null && Soldier.IsDead)
         {
             return;
         }
@@ -101,8 +119,8 @@ public class PhxProceduralMotion : MonoBehaviour
         RecoilKick = Mathf.Lerp(RecoilKick, 0f, dt * RecoilRecovery);
 
         // additive on top of the animator's pose (we run in LateUpdate)
-        Spine.localRotation = Spine.localRotation *
-            Quaternion.Euler(-RecoilKick + sway * 0.4f, 0f, CurrentLean);
+        AppliedOffset = Quaternion.Euler(-RecoilKick + sway * 0.4f, 0f, CurrentLean);
+        Spine.localRotation = Spine.localRotation * AppliedOffset;
     }
 }
 

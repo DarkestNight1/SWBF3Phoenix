@@ -107,7 +107,7 @@ public class PhxIonBeam : MonoBehaviour
         go.transform.position = mid;
         go.transform.up = (to - from).normalized;
         go.transform.localScale = new Vector3(4f, (to - from).magnitude * 0.5f, 4f);
-        go.GetComponent<Renderer>().material.color = new Color(0.4f, 0.7f, 1f, 0.8f);
+        PhxRuntimeAssets.Tint(go, new Color(0.4f, 0.7f, 1f, 0.8f));
 
         PhxIonBeam beam = go.AddComponent<PhxIonBeam>();
         beam.Duration = duration;

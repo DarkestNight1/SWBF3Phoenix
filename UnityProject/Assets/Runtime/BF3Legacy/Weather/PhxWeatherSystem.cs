@@ -133,16 +133,18 @@ public class PhxWeatherSystem : MonoBehaviour
         {
             if (light.type != LightType.Directional) continue;
 
+            // NOTE: must go through the helper - under HDRP the effective
+            // intensity lives on HDAdditionalLightData, not Light.intensity.
             switch (tod)
             {
                 case PhxTimeOfDay.Dusk:
-                    light.intensity *= 0.55f;
+                    PhxRuntimeAssets.ScaleIntensity(light, 0.55f);
                     light.color = Color.Lerp(light.color, new Color(1f, 0.6f, 0.35f), 0.5f);
                     Vector3 e = light.transform.eulerAngles;
                     light.transform.rotation = Quaternion.Euler(Mathf.Min(e.x, 18f), e.y, e.z);
                     break;
                 case PhxTimeOfDay.Night:
-                    light.intensity *= 0.12f;
+                    PhxRuntimeAssets.ScaleIntensity(light, 0.12f);
                     light.color = Color.Lerp(light.color, new Color(0.55f, 0.65f, 1f), 0.7f);
                     break;
             }
@@ -232,7 +234,7 @@ public class PhxWeatherSystem : MonoBehaviour
         ParticleSystemRenderer psr = go.GetComponent<ParticleSystemRenderer>();
         if (psr.sharedMaterial == null || psr.sharedMaterial.shader == null)
         {
-            psr.material = new Material(Shader.Find("Sprites/Default"));
+            psr.material = PhxRuntimeAssets.CreateLineMaterial(profile.ParticleTint);
         }
         return ps;
     }
@@ -241,24 +243,22 @@ public class PhxWeatherSystem : MonoBehaviour
     {
         GameObject flashGo = new GameObject("LightningFlash");
         flashGo.transform.SetParent(WeatherRoot.transform, false);
-        Light flash = flashGo.AddComponent<Light>();
-        flash.type = LightType.Directional;
-        flash.color = new Color(0.85f, 0.9f, 1f);
-        flash.intensity = 0f;
+        Light flash = PhxRuntimeAssets.CreateDirectionalLight(
+            flashGo, new Color(0.85f, 0.9f, 1f), 0f, castShadows: false);
 
         while (true)
         {
             yield return new WaitForSeconds(Random.Range(6f, 20f));
 
-            // double-strike flicker
+            // double-strike flicker (Lux - briefly outshines the sun)
             for (int i = 0; i < Random.Range(1, 3); ++i)
             {
-                flash.intensity = Random.Range(2f, 4f);
+                PhxRuntimeAssets.SetIntensity(flash, Random.Range(60000f, 130000f), directional: true);
                 yield return new WaitForSeconds(0.08f);
-                flash.intensity = 0.3f;
+                PhxRuntimeAssets.SetIntensity(flash, 12000f, directional: true);
                 yield return new WaitForSeconds(0.06f);
             }
-            flash.intensity = 0f;
+            PhxRuntimeAssets.SetIntensity(flash, 0f, directional: true);
         }
     }
 }

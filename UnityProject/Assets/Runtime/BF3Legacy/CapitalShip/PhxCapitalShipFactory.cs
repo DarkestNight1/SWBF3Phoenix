@@ -38,7 +38,7 @@ public static class PhxCapitalShipFactory
         engines.transform.SetParent(shipGo.transform, false);
         engines.transform.localPosition = new Vector3(0f, 0f, PhxShipInterior.SternZ - 8f);
         engines.transform.localScale = new Vector3(PhxShipInterior.HullWidth * 0.7f, PhxShipInterior.HullHeight * 0.7f, 12f);
-        engines.GetComponent<Renderer>().material.color = new Color(0.4f, 0.5f, 0.9f);
+        PhxRuntimeAssets.Tint(engines, new Color(0.4f, 0.5f, 0.9f));
         PhxCapitalShipSubsystem engineSys = engines.AddComponent<PhxCapitalShipSubsystem>();
         engineSys.Type = PhxCapitalShipSubsystem.PhxSubsystemType.Engines;
         engineSys.IsCritical = true;
@@ -46,11 +46,7 @@ public static class PhxCapitalShipFactory
         engineSys.MaxHealth = 3000f;
         ship.RegisterSubsystem(engineSys);
 
-        Light engineGlow = engines.AddComponent<Light>();
-        engineGlow.type = LightType.Point;
-        engineGlow.color = new Color(0.5f, 0.6f, 1f);
-        engineGlow.range = 60f;
-        engineGlow.intensity = 2000f;
+        PhxRuntimeAssets.CreatePointLight(engines, new Color(0.5f, 0.6f, 1f), 60f, 60000f);
 
         // destruction environment
         PhxCapitalShipDestruction seq = shipGo.GetComponent<PhxCapitalShipDestruction>();

@@ -19,6 +19,13 @@ public static class PhxGamePathDetector
 
     public static string TryDetect()
     {
+        // an explicit choice (first-run setup panel) always wins
+        string configured = PhxBF3.Config != null ? PhxBF3.Config.GamePathOverride : null;
+        if (IsValidGamePath(configured))
+        {
+            return configured.Replace('\\', '/');
+        }
+
         foreach (string candidate in EnumerateCandidates())
         {
             if (IsValidGamePath(candidate))
@@ -27,6 +34,18 @@ public static class PhxGamePathDetector
             }
         }
         return null;
+    }
+
+    /// <summary>Locations probed by auto-detection, for the setup UI to show.</summary>
+    public static System.Collections.Generic.List<string> GetProbedPaths()
+    {
+        var list = new System.Collections.Generic.List<string>();
+        foreach (string c in EnumerateCandidates())
+        {
+            list.Add(c.Replace('\\', '/'));
+            if (list.Count >= 12) break;
+        }
+        return list;
     }
 
     public static bool IsValidGamePath(string path)

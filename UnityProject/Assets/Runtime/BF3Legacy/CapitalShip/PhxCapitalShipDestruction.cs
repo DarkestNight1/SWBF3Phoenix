@@ -188,6 +188,9 @@ public class PhxShipBreakSection : MonoBehaviour
 /// </summary>
 public class PhxShipExplosionFlash : MonoBehaviour
 {
+    // Lumen - a capital ship secondary explosion is genuinely bright
+    public const float ExplosionIntensity = 250000f;
+
     float Radius;
     float Life;
     float MaxLife = 1.2f;
@@ -205,12 +208,8 @@ public class PhxShipExplosionFlash : MonoBehaviour
         PhxShipExplosionFlash fx = go.AddComponent<PhxShipExplosionFlash>();
         fx.Radius = radius;
 
-        Light l = go.AddComponent<Light>();
-        l.type = LightType.Point;
-        l.color = new Color(1f, 0.6f, 0.2f);
-        l.range = radius * 4f;
-        l.intensity = 8000f;
-        fx.Glow = l;
+        fx.Glow = PhxRuntimeAssets.CreatePointLight(go, new Color(1f, 0.6f, 0.2f),
+                                                   radius * 4f, ExplosionIntensity);
     }
 
     void Awake()
@@ -234,7 +233,7 @@ public class PhxShipExplosionFlash : MonoBehaviour
         }
         if (Glow != null)
         {
-            Glow.intensity = Mathf.Lerp(8000f, 0f, f);
+            PhxRuntimeAssets.SetIntensity(Glow, Mathf.Lerp(ExplosionIntensity, 0f, f));
         }
         if (Life >= MaxLife)
         {
@@ -262,7 +261,7 @@ public class PhxShipShockwave : MonoBehaviour
         wave.Duration = Mathf.Max(duration, 0.1f);
 
         Renderer r = go.GetComponent<Renderer>();
-        r.material.color = new Color(0.6f, 0.8f, 1f, 0.6f);
+        PhxRuntimeAssets.SetColor(r.material, new Color(0.6f, 0.8f, 1f, 0.6f));
     }
 
     void Update()
@@ -274,7 +273,7 @@ public class PhxShipShockwave : MonoBehaviour
         Renderer r = GetComponent<Renderer>();
         Color c = r.material.color;
         c.a = 0.6f * (1f - f);
-        r.material.color = c;
+        PhxRuntimeAssets.SetColor(r.material, c);
 
         if (f >= 1f)
         {

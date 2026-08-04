@@ -69,6 +69,9 @@ public class PhxVerticalBattlefront : MonoBehaviour
         TransitionBand = null;
         if (scene == null) return;
 
+        // bootstrap may have run before the game path was known
+        PhxModManager.EnsureScanned();
+
         string mapScript = PhxGame.Instance != null ? PhxGame.Instance.CurrentMapScript : null;
         if (string.IsNullOrEmpty(mapScript)) return;
 

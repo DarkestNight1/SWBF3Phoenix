@@ -41,6 +41,10 @@ public static class PhxBF3
         Host = new GameObject("BF3Legacy");
         GameObject.DontDestroyOnLoad(Host);
 
+        // Always present: guides the user through setup if no BF2 install is
+        // found, instead of failing to a black screen.
+        Host.AddComponent<PhxFirstRunSetup>();
+
         if (Config.EnhancedAI)
         {
             Host.AddComponent<PhxAIDirector>();
@@ -74,6 +78,8 @@ public static class PhxBF3
             Host.AddComponent<PhxTextureUpscaler>();
         }
 
+        // Mods are also re-scanned on map load (PhxModManager.EnsureScanned),
+        // in case PhxGame wasn't ready at bootstrap time.
         PhxModManager.Scan();
 
         Debug.Log($"[BF3Legacy] Initialized v{Version} " +
@@ -124,6 +130,11 @@ public static class PhxBF3
 [Serializable]
 public class PhxBF3Config
 {
+    // Path to the user's Star Wars Battlefront II (2005) install. Empty means
+    // "auto-detect". Set by the first-run setup panel so users never have to
+    // edit the Unity scene or hand-edit settings.
+    public string GamePathOverride = "";
+
     // Feature toggles
     public bool CapitalShipDestruction = true;
     public bool Dismemberment = true;

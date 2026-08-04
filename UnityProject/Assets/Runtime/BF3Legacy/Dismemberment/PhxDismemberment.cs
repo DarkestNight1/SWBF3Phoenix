@@ -232,12 +232,7 @@ public static class PhxDismemberment
         GameObject glow = new GameObject("CauterizeGlow");
         glow.transform.position = pos;
 
-        Light l = glow.AddComponent<Light>();
-        l.type = LightType.Point;
-        l.color = CauterizeColor;
-        l.range = 0.6f;
-        l.intensity = 40f;
-
+        PhxRuntimeAssets.CreatePointLight(glow, CauterizeColor, 0.6f, 400f);
         glow.AddComponent<PhxFadeAndDie>().Duration = 1.5f;
     }
 }
@@ -254,8 +249,9 @@ public class PhxFadeAndDie : MonoBehaviour
         Light l = GetComponent<Light>();
         if (l != null)
         {
-            if (StartIntensity < 0f) StartIntensity = l.intensity;
-            l.intensity = Mathf.Lerp(StartIntensity, 0f, Life / Duration);
+            if (StartIntensity < 0f) StartIntensity = 400f;
+            // must go through the helper - HDRP ignores Light.intensity writes
+            PhxRuntimeAssets.SetIntensity(l, Mathf.Lerp(StartIntensity, 0f, Life / Duration));
         }
         Life += Time.deltaTime;
         if (Life >= Duration)

@@ -28,7 +28,7 @@ public class PhxShipAutogun : MonoBehaviour
         Beam = gameObject.AddComponent<LineRenderer>();
         Beam.startWidth = 0.08f;
         Beam.endWidth = 0.08f;
-        Beam.material = new Material(Shader.Find("Sprites/Default"));
+        Beam.material = PhxRuntimeAssets.CreateLineMaterial(new Color(1f, 0.3f, 0.2f));
         Beam.startColor = new Color(1f, 0.3f, 0.2f);
         Beam.endColor = new Color(1f, 0.3f, 0.2f, 0.2f);
         Beam.enabled = false;

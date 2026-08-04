@@ -34,6 +34,23 @@ behavior, FIXED = corrected in this fork, TODO = known gap.
 | `Eject` index check | FIXED | The guard was `if (i < Seats.Count \|\| Seats[i] != null \|\| ...)` — an OR chain, so an out-of-range index fell through to `Seats[i]` and threw `IndexOutOfRangeException` instead of returning false. Now AND-ed. |
 | Seat aiming was camera-only | FIXED | `PhxSeat.Tick` derived its weapon target from a raycast relative to `CAM.transform.position`, which is meaningless for an AI occupant. Seats now accept an `AimOverride` that AI sets; the player path is unchanged. |
 
+## HDRP / build-safety audit
+
+Issues found reviewing the BF3 Legacy code against how HDRP and player builds
+actually behave (all fixed; helpers live in `PhxRuntimeAssets`):
+
+| Issue | Why it mattered |
+|---|---|
+| Runtime lights had no `HDAdditionalLightData` | HDRP drives punctual lights through that component. Every light created from script — explosions, cauterize glow, ship room/subsystem lights, command post markers, the map sun, lightning — risked **not rendering at all**. All now go through `PhxRuntimeAssets.CreatePointLight/CreateDirectionalLight`, which adds the component and sets intensity in HDRP's physical units (Lumen / Lux) rather than builtin-pipeline values. |
+| `Light.intensity` writes during fades | Under HDRP the effective intensity lives on `HDAdditionalLightData`, so explosion/glow fades and the day-night relight silently did nothing. Fades now go through `SetIntensity` / `ScaleIntensity`. |
+| `material.color` on HDRP/Lit | HDRP/Lit exposes `_BaseColor`, not `_Color`; `material.color = x` was a no-op, so greybox tinting would have rendered default-grey. All assignments now route through `PhxRuntimeAssets.SetColor`, which writes whichever property exists. |
+| `Shader.Find("Sprites/Default")` | Shaders referenced only from script can be stripped from player builds, yielding null materials (invisible/magenta line effects). Now a cached multi-candidate lookup with a primitive-material fallback. |
+| Turret `E` key collided with vehicle enter | `E` is already the soldier's vehicle enter/exit key in `PhxPlayerController`. Manning a hangar turret beside a vehicle could trigger both; the possession path now consumes the input. |
+| Per-frame `OverlapSphere` in turret stations / escape pods | Several instances per ship each ran a physics query every frame. Now throttled (0.5 s / 0.25 s), with the boarding timer accumulating the throttle interval rather than a frame delta. |
+| AI boarding teleport wrote `transform.position` | Writing a transform directly on a physics body desyncs the rigidbody and can tunnel through the hull. Now zeroes velocity and sets `Rigidbody.position`. |
+| Procedural animation could accumulate | The additive spine offset multiplied onto the bone each frame assuming the animator had reset it. If it hadn't (paused, culled, or a bank that doesn't drive the spine) the rotation would spin up without bound. The layer now explicitly removes its previous contribution first, so it can never accumulate. |
+| Mod scan ran before the game path was known | `PhxModManager.Scan()` at bootstrap could find nothing and never retry, leaving the mod list permanently empty. Added `EnsureScanned()`, called on map load. |
+
 ## Damage model
 
 - Ordnance→target damage now flows through odf values end to end

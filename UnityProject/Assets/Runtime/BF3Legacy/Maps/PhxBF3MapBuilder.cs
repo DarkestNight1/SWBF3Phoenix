@@ -93,11 +93,7 @@ public class PhxBF3MapBuilder : MonoBehaviour
             marker.transform.localScale = new Vector3(1.2f, 1.5f, 1.2f);
             Tint(marker, TeamColor(cp.StartingTeam));
 
-            Light glow = marker.AddComponent<Light>();
-            glow.type = LightType.Point;
-            glow.color = TeamColor(cp.StartingTeam);
-            glow.range = 12f;
-            glow.intensity = 200f;
+            PhxRuntimeAssets.CreatePointLight(marker, TeamColor(cp.StartingTeam), 12f, 3000f);
         }
 
         // ---- lighting ----
@@ -160,11 +156,10 @@ public class PhxBF3MapBuilder : MonoBehaviour
         sun.transform.SetParent(Root.transform, false);
         sun.transform.rotation = Quaternion.Euler(def.SunDirection);
 
-        Light light = sun.AddComponent<Light>();
-        light.type = LightType.Directional;
-        light.color = def.SkyTint;
-        light.intensity = def.SunIntensity;
-        light.shadows = LightShadows.Soft;
+        // SunIntensity is authored as a relative multiplier; HDRP directional
+        // lights are in Lux (full daylight ~100k)
+        PhxRuntimeAssets.CreateDirectionalLight(sun, def.SkyTint,
+                                                def.SunIntensity * 70000f, castShadows: true);
     }
 
     void BuildCapitalShip(PhxBF3MapDatabase.PhxBF3MapDef def, int team, Vector3 position)
@@ -183,7 +178,7 @@ public class PhxBF3MapBuilder : MonoBehaviour
         Renderer r = go.GetComponent<Renderer>();
         if (r != null)
         {
-            r.material.color = color;
+            PhxRuntimeAssets.SetColor(r.material, color);
         }
     }
 

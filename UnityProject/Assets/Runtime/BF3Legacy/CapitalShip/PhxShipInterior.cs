@@ -75,7 +75,7 @@ public static class PhxShipInterior
         shield.transform.localPosition = new Vector3(0f, FloorY + MouthHeight * 0.5f, BowZ);
         shield.transform.localScale = new Vector3(MouthWidth, MouthHeight, 0.5f);
         Renderer sr = shield.GetComponent<Renderer>();
-        sr.material.color = new Color(0.4f, 0.7f, 1f, 0.35f);
+        PhxRuntimeAssets.SetColor(sr.material, new Color(0.4f, 0.7f, 1f, 0.35f));
         ship.HangarShieldVisual = shield;
 
         // ================= hangar (z 60..135) =================
@@ -148,7 +148,7 @@ public static class PhxShipInterior
         core.transform.SetParent(t, false);
         core.transform.localPosition = new Vector3(0f, midY, -95f);
         core.transform.localScale = new Vector3(8f, innerH * 0.5f, 8f);
-        core.GetComponent<Renderer>().material.color = new Color(0.5f, 0.9f, 1f);
+        PhxRuntimeAssets.Tint(core, new Color(0.5f, 0.9f, 1f));
         PhxCapitalShipSubsystem reactor = core.AddComponent<PhxCapitalShipSubsystem>();
         reactor.Type = PhxCapitalShipSubsystem.PhxSubsystemType.MainReactor;
         reactor.IsCritical = true;
@@ -156,11 +156,7 @@ public static class PhxShipInterior
         reactor.MaxHealth = 4000f;
         ship.RegisterSubsystem(reactor);
 
-        Light coreGlow = core.AddComponent<Light>();
-        coreGlow.type = LightType.Point;
-        coreGlow.color = new Color(0.5f, 0.9f, 1f);
-        coreGlow.range = 30f;
-        coreGlow.intensity = 600f;
+        PhxRuntimeAssets.CreatePointLight(core, new Color(0.5f, 0.9f, 1f), 30f, 20000f);
 
         // second defender spawn covering the reactor approach
         SpawnPad(ship, t, new Vector3(0f, FloorY, -70f));
@@ -180,7 +176,7 @@ public static class PhxShipInterior
         go.transform.SetParent(parent, false);
         go.transform.localPosition = center;
         go.transform.localScale = size;
-        go.GetComponent<Renderer>().material.color = new Color(0.45f, 0.47f, 0.52f);
+        PhxRuntimeAssets.Tint(go, new Color(0.45f, 0.47f, 0.52f));
         return go;
     }
 
@@ -229,11 +225,9 @@ public static class PhxShipInterior
         GameObject go = new GameObject("RoomLight");
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos;
-        Light l = go.AddComponent<Light>();
-        l.type = LightType.Point;
-        l.range = range;
-        l.intensity = 300f;
-        l.color = new Color(0.9f, 0.95f, 1f);
+        // shadowless: a ship carries ~10 of these and shadowed point lights
+        // are the single most expensive thing we could add here
+        PhxRuntimeAssets.CreatePointLight(go, new Color(0.9f, 0.95f, 1f), range, 6000f);
     }
 
     static void SubsystemConsole(PhxCapitalShip ship, Transform parent, string name,
@@ -244,7 +238,7 @@ public static class PhxShipInterior
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos;
         go.transform.localScale = new Vector3(4f, 4f, 4f);
-        go.GetComponent<Renderer>().material.color = color;
+        PhxRuntimeAssets.Tint(go, color);
 
         PhxCapitalShipSubsystem sys = go.AddComponent<PhxCapitalShipSubsystem>();
         sys.Type = type;
@@ -253,11 +247,7 @@ public static class PhxShipInterior
         sys.MaxHealth = 2000f;
         ship.RegisterSubsystem(sys);
 
-        Light glow = go.AddComponent<Light>();
-        glow.type = LightType.Point;
-        glow.color = color;
-        glow.range = 10f;
-        glow.intensity = 150f;
+        PhxRuntimeAssets.CreatePointLight(go, color, 10f, 2000f);
     }
 
     static void TurretStation(PhxCapitalShip ship, Transform parent, Vector3 pos, bool lookRight)
@@ -267,7 +257,7 @@ public static class PhxShipInterior
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos + Vector3.up * 1f;
         go.transform.localScale = new Vector3(2f, 1f, 2f);
-        go.GetComponent<Renderer>().material.color = new Color(0.7f, 0.7f, 0.75f);
+        PhxRuntimeAssets.Tint(go, new Color(0.7f, 0.7f, 0.75f));
 
         PhxShipTurretStation station = go.AddComponent<PhxShipTurretStation>();
         station.Ship = ship;
@@ -282,7 +272,7 @@ public static class PhxShipInterior
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos + Vector3.up * 2f;
         go.transform.localScale = new Vector3(2.5f, 2f, 2.5f);
-        go.GetComponent<Renderer>().material.color = new Color(0.75f, 0.72f, 0.65f);
+        PhxRuntimeAssets.Tint(go, new Color(0.75f, 0.72f, 0.65f));
 
         PhxEscapePod pod = go.AddComponent<PhxEscapePod>();
         pod.Ship = ship;
@@ -295,7 +285,7 @@ public static class PhxShipInterior
         go.transform.SetParent(parent, false);
         go.transform.localPosition = pos;
         go.transform.localScale = Vector3.one * 1.5f;
-        go.GetComponent<Renderer>().material.color = new Color(0.8f, 0.3f, 0.25f);
+        PhxRuntimeAssets.Tint(go, new Color(0.8f, 0.3f, 0.25f));
 
         PhxShipAutogun gun = go.AddComponent<PhxShipAutogun>();
         gun.Ship = ship;

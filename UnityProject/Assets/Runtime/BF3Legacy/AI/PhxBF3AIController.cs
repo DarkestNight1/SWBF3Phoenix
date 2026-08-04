@@ -391,6 +391,16 @@ public class PhxBF3AIController : PhxAIController
         if (BoardMusterTimer <= 0f && BoardTarget.HangarEntrance != null)
         {
             Vector3 dropPoint = BoardTarget.HangarEntrance.position;
+
+            // move the rigidbody, not just the transform - a direct transform
+            // write on a physics body desyncs it and can tunnel through the hull
+            Rigidbody body = Pawn.GetInstance().GetComponent<Rigidbody>();
+            if (body != null)
+            {
+                body.velocity = Vector3.zero;
+                body.angularVelocity = Vector3.zero;
+                body.position = dropPoint;
+            }
             Pawn.GetInstance().transform.position = dropPoint;
             Debug.Log($"[BF3Legacy] AI boarding party inserted into {BoardTarget.ShipName}");
             State = PhxAIState.Sabotage;

@@ -45,6 +45,18 @@ public static class PhxModManager
     static readonly string[] BF3LegacyMarkers = { "bf3", "battlefront3", "battlefront iii", "legacy" };
 
 
+    static bool ScanSucceeded;
+
+    /// <summary>
+    /// Scan once, lazily. Bootstrap runs before the game path may be known
+    /// (or valid), so callers on the map-load path use this to make sure the
+    /// mod list actually got built.
+    /// </summary>
+    public static void EnsureScanned()
+    {
+        if (!ScanSucceeded) Scan();
+    }
+
     public static void Scan()
     {
         Mods.Clear();
@@ -56,6 +68,7 @@ public static class PhxModManager
             Debug.Log("[BF3Legacy] No addon folder found, mod scan skipped");
             return;
         }
+        ScanSucceeded = true;
 
         string addonDir = game.AddonPath;
         List<string> loadOrder = ReadLoadOrder(addonDir, out HashSet<string> disabled);
