@@ -42,6 +42,12 @@ public class PhxAIDirector : MonoBehaviour
         Controllers.Remove(controller);
     }
 
+    /// <summary>Drop every controller (called on map change).</summary>
+    public static void ResetAll()
+    {
+        Controllers.Clear();
+    }
+
     public static PhxAISkillProfile GetSkillProfile()
     {
         return PhxAISkillProfile.ForDifficulty(PhxBF3.Config.AIDifficulty).WithJitter();
@@ -57,9 +63,22 @@ public class PhxAIDirector : MonoBehaviour
         Replan();
     }
 
+    /// <summary>
+    /// True once this controller's pawn is gone. NOTE: Pawn is an *interface*
+    /// reference, so `Pawn == null` uses plain reference equality and does
+    /// NOT catch a destroyed Unity object. Going through GetInstance() gets
+    /// us a MonoBehaviour, where Unity's overloaded null check applies -
+    /// without this, controllers from previous maps never get pruned.
+    /// </summary>
+    static bool IsStale(PhxBF3AIController c)
+    {
+        if (c == null || c.Pawn == null) return true;
+        return c.Pawn.GetInstance() == null;
+    }
+
     void Replan()
     {
-        Controllers.RemoveAll(c => c == null || c.Pawn == null);
+        Controllers.RemoveAll(IsStale);
         if (Controllers.Count == 0)
         {
             Squads.Clear();

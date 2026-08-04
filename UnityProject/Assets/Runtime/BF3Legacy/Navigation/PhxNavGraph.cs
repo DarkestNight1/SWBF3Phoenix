@@ -63,6 +63,22 @@ public class PhxNavGraph
         public Quaternion Rotation;
         public Vector3 HalfExtents;
         public bool Enabled = true;
+
+        // Per the mod tools docs, a barrier carries the SAME size filter set
+        // as planning arcs (SOLDIER / HOVER / SMALL / MEDIUM / HUGE): "each
+        // barrier has a set of filters that determine what AI types can pass
+        // through them". A set bit therefore means that size is BLOCKED.
+        //
+        // A flag of 0 carries no filter information; we treat that as
+        // "blocks everything", which is the conservative reading and matches
+        // how a barrier with no filters behaves in the editor.
+        public uint Flag;
+
+        public bool Blocks(EArcFilterFlags size)
+        {
+            if (Flag == 0) return true;
+            return ((EArcFilterFlags)Flag & size) != 0;
+        }
     }
 
     public static PhxNavGraph Instance { get; private set; } = new PhxNavGraph();
@@ -184,6 +200,7 @@ public class PhxNavGraph
                 HalfExtents = new Vector3(Mathf.Abs(size.x),
                                           Mathf.Max(Mathf.Abs(size.y), 25f),
                                           Mathf.Abs(size.z)),
+                Flag = b.Flag,
             });
         }
 
@@ -242,11 +259,18 @@ public class PhxNavGraph
 
     // ------------------------------------------------------------- querying
 
-    public bool IsBlockedByBarrier(Vector3 worldPos)
+    /// <summary>
+    /// Is this point inside a barrier that blocks the given unit size?
+    /// Barriers are size-filtered: one that keeps vehicles out must not stop
+    /// infantry, which is why the size has to be passed in.
+    /// </summary>
+    public bool IsBlockedByBarrier(Vector3 worldPos, PhxNavSize size)
     {
+        EArcFilterFlags sizeFlag = ToFilter(size);
+
         foreach (PhxBarrier b in Barriers)
         {
-            if (!b.Enabled) continue;
+            if (!b.Enabled || !b.Blocks(sizeFlag)) continue;
             Vector3 local = Quaternion.Inverse(b.Rotation) * (worldPos - b.Position);
             if (Mathf.Abs(local.x) <= b.HalfExtents.x &&
                 Mathf.Abs(local.y) <= b.HalfExtents.y &&
@@ -266,13 +290,16 @@ public class PhxNavGraph
 
         for (int i = 0; i < Hubs.Count; ++i)
         {
-            // a hub is only useful if at least one usable arc touches it
+            // A hub is only useful if at least one arc this unit size can
+            // actually traverse touches it. (Previously hubs with NO arcs
+            // fell through this check and could be selected as the nearest,
+            // which then guaranteed pathfinding failure.)
             bool usable = false;
             foreach (int a in Hubs[i].ArcIndices)
             {
                 if (!Arcs[a].Blocked && (Arcs[a].Filter & need) != 0) { usable = true; break; }
             }
-            if (!usable && Hubs[i].ArcIndices.Count > 0) continue;
+            if (!usable) continue;
 
             float d = (Hubs[i].Position - position).sqrMagnitude;
             if (d < bestDist)
@@ -344,8 +371,8 @@ public class PhxNavGraph
                 int next = arc.To;
                 if (Closed[next]) continue;
 
-                // avoid routing through disabled-by-Lua keep-out volumes
-                if (IsBlockedByBarrier(Hubs[next].Position)) continue;
+                // avoid routing through keep-out volumes that block this size
+                if (IsBlockedByBarrier(Hubs[next].Position, size)) continue;
 
                 float tentative = GScore[current] + arc.Length;
                 if (tentative < GScore[next])

@@ -44,6 +44,15 @@ public class PhxAIVehicleOperator
     float TargetRefreshTimer;
     Component CurrentTarget;
 
+    // Ground vehicles path over the map's connectivity graph using their own
+    // odf AISizeType, so a tank uses tank-passable arcs rather than infantry
+    // routes (and is stopped by vehicle barriers, not infantry ones).
+    readonly List<Vector3> NavPath = new List<Vector3>();
+    int NavIndex;
+    Vector3 NavGoal = Vector3.positiveInfinity;
+    float NavRepathTimer;
+    readonly PhxNavSize NavSize;
+
     public const float CombatAltitude = 60f;
     const float StrafeBreakDistance = 90f;
 
@@ -57,6 +66,10 @@ public class PhxAIVehicleOperator
         Seat = seat;
         Role = vehicle is PhxFlyer ? PhxVehicleRole.Air : PhxVehicleRole.Ground;
         LastPosition = vehicle.transform.position;
+
+        NavSize = vehicle.IsInit
+            ? PhxNavGraph.SizeFromAIType(vehicle.C.AISizeType)
+            : PhxNavSize.Medium;
     }
 
     public bool IsAir => Role == PhxVehicleRole.Air;
@@ -296,6 +309,10 @@ public class PhxAIVehicleOperator
             return;
         }
 
+        // steer toward the next graph waypoint rather than straight at the
+        // objective, so vehicles use roads/ramps instead of driving at cliffs
+        goal = NextNavWaypoint(goal, deltaTime);
+
         Vector3 toGoal = goal - t.position;
         toGoal.y = 0f;
         float dist = toGoal.magnitude;
@@ -357,6 +374,52 @@ public class PhxAIVehicleOperator
             Seat.AimOverride = null;
             Controller.ShootPrimary = false;
         }
+    }
+
+    /// <summary>
+    /// Resolve the immediate steering target from the planning graph. Returns
+    /// the final goal unchanged when there's no graph or no route, so
+    /// behaviour degrades to direct driving rather than stopping.
+    /// </summary>
+    Vector3 NextNavWaypoint(Vector3 goal, float deltaTime)
+    {
+        if (!PhxNavGraph.Instance.IsLoaded) return goal;
+
+        Vector3 pos = Vehicle.transform.position;
+        if (Vector3.Distance(pos, goal) < 25f)
+        {
+            NavPath.Clear();
+            return goal;
+        }
+
+        NavRepathTimer -= deltaTime;
+        if ((goal - NavGoal).sqrMagnitude > 100f || (NavPath.Count == 0 && NavRepathTimer <= 0f))
+        {
+            NavRepathTimer = 3f;
+            NavGoal = goal;
+            NavIndex = 0;
+            PhxNavGraph.Instance.FindPath(pos, goal, NavSize, NavPath);
+        }
+
+        while (NavIndex < NavPath.Count)
+        {
+            Vector3 waypoint = NavPath[NavIndex];
+            Vector3 flat = waypoint - pos;
+            flat.y = 0f;
+
+            // vehicles are big and fast - accept waypoints generously
+            if (flat.magnitude < 10f)
+            {
+                if (++NavIndex >= NavPath.Count)
+                {
+                    NavPath.Clear();
+                    break;
+                }
+                continue;
+            }
+            return waypoint;
+        }
+        return goal;
     }
 
     // -------------------------------------------------------------- targets

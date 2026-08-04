@@ -63,10 +63,22 @@ public class PhxVerticalBattlefront : MonoBehaviour
         PhxScene scene = PhxGame.GetScene();
         if (scene == ActiveScene) return;
 
-        // scene changed: reset and (maybe) build the space layer
-        ActiveScene = scene;
+        // Scene changed. Our ships and the transition band are root objects,
+        // not children of a world root, so map teardown does NOT destroy them
+        // - they would otherwise pile up across map changes.
+        foreach (PhxCapitalShip ship in SpawnedShips)
+        {
+            if (ship != null) Destroy(ship.gameObject);
+        }
         SpawnedShips.Clear();
-        TransitionBand = null;
+
+        if (TransitionBand != null)
+        {
+            Destroy(TransitionBand);
+            TransitionBand = null;
+        }
+
+        ActiveScene = scene;
         if (scene == null) return;
 
         // bootstrap may have run before the game path was known

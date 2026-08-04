@@ -45,12 +45,22 @@ public static class PhxSpaceAssault
     public static IReadOnlyList<PhxCriticalSystemDef> CriticalSystems => Pending;
 
 
+    // Ship controller objects we created ourselves. They are not parented to
+    // a world root, so map teardown won't destroy them - we must.
+    static readonly List<GameObject> OwnedShipObjects = new List<GameObject>();
+
     public static void Reset()
     {
         Enabled = false;
         Pending.Clear();
         ShipsByTeam.Clear();
         ResolveScheduled = false;
+
+        foreach (GameObject go in OwnedShipObjects)
+        {
+            if (go != null) Object.Destroy(go);
+        }
+        OwnedShipObjects.Clear();
     }
 
     /// <summary>Lua: SpaceAssaultEnable</summary>
@@ -99,8 +109,16 @@ public static class PhxSpaceAssault
     /// </summary>
     public static void ResolveAll()
     {
-        ResolveScheduled = false;
         if (!Enabled) return;
+
+        // Lua calls this during ScriptInit, long before world instances
+        // exist. Binding then would resolve nothing and log a warning per
+        // system, so wait until the scene has finished loading - the
+        // OnPostLoad subscription will call us again.
+        PhxEnvironment env = PhxGame.GetEnvironment();
+        if (env == null || !env.IsLoaded) return;
+
+        ResolveScheduled = false;
 
         PhxScene scene = PhxGame.GetScene();
         if (scene == null) return;
@@ -111,7 +129,10 @@ public static class PhxSpaceAssault
         {
             if (def.Bound != null) continue;
 
-            PhxInstance inst = scene.GetInstance<PhxInstance>(def.InstanceName);
+            // probe silently first - GetInstance<T>(name) logs a warning per
+            // miss, and a space map declares many systems
+            int? idx = scene.GetInstanceIndex(def.InstanceName);
+            PhxInstance inst = idx.HasValue ? scene.GetInstance<PhxInstance>(idx.Value) : null;
             if (inst == null)
             {
                 missing++;
@@ -162,6 +183,7 @@ public static class PhxSpaceAssault
 
         GameObject go = new GameObject($"SpaceAssaultShip_Team{team}");
         go.transform.position = nearPosition;
+        OwnedShipObjects.Add(go);
 
         PhxCapitalShip ship = go.AddComponent<PhxCapitalShip>();
         ship.Team = team;

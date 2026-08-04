@@ -131,6 +131,32 @@ detects this and stands down so the two systems never both spawn ships.
 10. **Branch weights** — `PlanSet.GetBranchWeights` is available and would let
     AI prefer the routes the designers weighted, not just the shortest path.
 
+## Audit pass — issues found against the documentation and fixed
+
+Re-checking the first navigation implementation against the mod tools docs and
+the LibSWBF2 C++ chunk parsing turned up several real defects:
+
+| Issue | Source of truth | Fix |
+|---|---|---|
+| **Barriers ignored their size filter.** Every barrier blocked every unit. | Docs: barrier flags are SOLDIER/HOVER/SMALL/MEDIUM/HUGE — "the same flags set in the editor when creating the barriers or the path planning graph", and "AI cannot chart a course to a command post within a barrier filtering out that AI type". | `Barrier.Flag` is now read and matched against the unit's size class, so a vehicle barrier no longer stops infantry. `IsBlockedByBarrier` takes the size. |
+| **AI always pathed as SOLDIER.** Tanks used infantry routes. | Docs: `AISizeType` in the ODF "is the size category that the soldier/vehicle will use when referencing the connectivity graph and new barrier system", defaulting to SOLDIER. | Soldier AI reads `AISizeType` off its class (re-evaluated when the pawn changes); ground vehicle AI reads it off the vehicle class and now paths over the graph too. |
+| **Space assault config was wiped before use.** | `PhxEnvironment.RunMain()` executes the map's `ScriptInit` at stage ExecuteMain; `CreateScene()`/`Import()` runs later. | `PhxSpaceAssault.Reset()` moved out of `Import()` into the `PhxScene` constructor, which runs before any Lua. Without this, `SpaceAssaultEnable`/`AddCriticalSystem` results were discarded and the feature could never work. |
+| **Isolated hubs were selectable as path start/goal**, guaranteeing pathfinding failure. | — | `FindNearestHub` now skips any hub with no arc traversable by that unit size. |
+| **Destroyed pawns were never pruned.** | Unity's overloaded `== null` does not apply to *interface* references, so `Pawn == null` stayed false for a destroyed object. | Staleness checks go through `GetInstance()` (a MonoBehaviour) in both `PhxAIDirector` and the controller's `Tick` guard — the latter would otherwise throw on every tick after a soldier died. `PhxAIDirector.ResetAll()` is called on map load. |
+| **Capital ships leaked across maps.** | Ships and the transition band are root objects, not children of a world root, so map teardown didn't destroy them. | Both `PhxVerticalBattlefront` and `PhxSpaceAssault` now destroy what they created. |
+| Premature binding logged a warning per critical system. | — | `ResolveAll` waits for `PhxEnvironment.IsLoaded`, and probes with the silent `GetInstanceIndex` instead of the warning-emitting `GetInstance<T>(name)`. |
+
+### Remaining assumption to verify on real maps
+
+Barrier flag *polarity*. The documentation says a barrier "filters out" listed
+AI types, which we read as **set bit = that size is blocked**. A flag of `0`
+carries no filter information and is treated as blocking everything
+(conservative). Both readings live in one small method
+(`PhxNavGraph.PhxBarrier.Blocks`) so this is a one-line flip if real maps show
+the opposite. Symptom to watch for: AI either walking straight through
+obvious keep-out zones (polarity inverted) or refusing to path at all near
+barriers (flag 0 handling too strict).
+
 ## Verification status
 
 All of the above is written against the LibSWBF2 wrapper surface as it exists

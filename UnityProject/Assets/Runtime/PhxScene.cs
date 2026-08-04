@@ -65,6 +65,12 @@ public class PhxScene
         ModelLoader.Instance.PhyMat = PhxGame.Instance.GroundPhyMat;
         ENV.OnPostLoad += CalcCPCamPositions;
 
+        // Must be cleared HERE, not in Import(): the map's ScriptInit runs
+        // during RunMain() - before CreateScene()/Import() - and that is what
+        // calls SpaceAssaultEnable/AddCriticalSystem. Resetting in Import
+        // would wipe the configuration the script just supplied.
+        PhxSpaceAssault.Reset();
+
         Animator = new PhxSceneAnimator();
     }
 
@@ -203,7 +209,7 @@ public class PhxScene
         // spawned during load already has routes available.
         PhxNavGraph.Reset();
         PhxHintNodes.Reset();
-        PhxSpaceAssault.Reset();
+        PhxAIDirector.ResetAll();
         PhxNavGraph.Instance.LoadPlanning(ENV.GetWorldLevel());
 
         foreach (World world in worldLayers)

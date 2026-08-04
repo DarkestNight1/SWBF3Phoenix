@@ -70,6 +70,29 @@ public class PhxBF3AIController : PhxAIController
     Vector3 NavGoal = Vector3.positiveInfinity;
     float NavRepathTimer;
 
+    // Which connectivity-graph / barrier size class this unit uses. The mod
+    // tools define AISizeType in the odf exactly for this; it defaults to
+    // SOLDIER when absent.
+    PhxNavSize CachedNavSize = PhxNavSize.Soldier;
+    object CachedNavSizePawn;
+
+    PhxNavSize NavSize
+    {
+        get
+        {
+            // recompute when we're assigned a different pawn (respawn as a
+            // different class changes the size category)
+            if (!ReferenceEquals(CachedNavSizePawn, Pawn))
+            {
+                CachedNavSizePawn = Pawn;
+                CachedNavSize = (Pawn is PhxSoldier soldier && soldier.IsInit)
+                    ? PhxNavGraph.SizeFromAIType(soldier.C.AISizeType)
+                    : PhxNavSize.Soldier;
+            }
+            return CachedNavSize;
+        }
+    }
+
     // Tactical hint node we've claimed (cover / snipe position)
     PhxHintNode ClaimedHint;
     float HintScanTimer;
@@ -113,7 +136,11 @@ public class PhxBF3AIController : PhxAIController
     {
         // Note: intentionally NOT calling PhxAIController.Tick - it overwrites
         // ViewDirection from the legacy Target field.
-        if (Pawn == null)
+        // Pawn is an interface reference, so `== null` is plain reference
+        // equality and does not detect a destroyed Unity object - go through
+        // GetInstance() so Unity's null check applies, otherwise every call
+        // below throws once the soldier is gone.
+        if (Pawn == null || Pawn.GetInstance() == null)
         {
             return;
         }
@@ -808,7 +835,7 @@ public class PhxBF3AIController : PhxAIController
                 NavRepathTimer = 2f;   // don't re-path every frame on failure
                 NavGoal = goal;
                 NavIndex = 0;
-                PhxNavGraph.Instance.FindPath(PawnPosition(), goal, PhxNavSize.Soldier, NavPath);
+                PhxNavGraph.Instance.FindPath(PawnPosition(), goal, NavSize, NavPath);
             }
 
             if (NavIndex < NavPath.Count)
