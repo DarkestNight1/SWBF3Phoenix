@@ -30,6 +30,12 @@ public class PhxMainMenu : PhxMenuInterface
     List<SubIcon> EraSubs = new List<SubIcon>();
     List<string>  RotationLuaFiles = new List<string>();
 
+    // Raw mission list entry per map. Stock 'missionlist_ExpandModelist' only
+    // reports modes and eras the stock shell knows about, so mod-defined ones
+    // (BF3 Legacy's Orbital Assault, its two BF3 eras) are dropped and the map
+    // shows up unplayable. Keeping the entry lets us read its flags directly.
+    List<PhxLuaRuntime.Table> MapEntries = new List<PhxLuaRuntime.Table>();
+
     // These are just for convenience, so the user doesn't
     // have to re-check his last checked modes and eras
     HashSet<string> LastCheckedModes = new HashSet<string>();
@@ -50,65 +56,132 @@ public class PhxMainMenu : PhxMenuInterface
         ModeSubs.Clear();
         EraSubs.Clear();
 
+        HashSet<string> stockModeKeys = new HashSet<string>();
+        HashSet<string> stockEraKeys = new HashSet<string>();
+
         object[] res = RT.CallLuaFunction("missionlist_ExpandModelist", 1, mapluafile);
-        PhxLuaRuntime.Table modes = res[0] as PhxLuaRuntime.Table;
-        foreach (KeyValuePair<object, object> entry in modes)
+        PhxLuaRuntime.Table modes = res != null && res.Length > 0 ? res[0] as PhxLuaRuntime.Table : null;
+        if (modes != null)
         {
-            PhxLuaRuntime.Table mode = entry.Value as PhxLuaRuntime.Table;
-            string modeNamePath = mode.Get<string>("showstr");
-            if (mode.Get("bIsWildcard") == null)
+            foreach (KeyValuePair<object, object> entry in modes)
             {
-                PhxListBoxItem item = LstModes.AddItem(ENV.GetLocalized(modeNamePath));
-                Texture2D icon = TextureLoader.Instance.ImportUITexture(mode.Get<string>("icon"));
-                item.SetIcon(icon);
-
-                string key = mode.Get<string>("key");
-                item.SetChecked(LastCheckedModes.Contains(key));
-                item.OnCheckChanged += (bool check) =>
+                PhxLuaRuntime.Table mode = entry.Value as PhxLuaRuntime.Table;
+                string modeNamePath = mode.Get<string>("showstr");
+                if (mode.Get("bIsWildcard") == null)
                 {
-                    if (check)
-                    {
-                        LastCheckedModes.Add(key);
-                    }
-                    else
-                    {
-                        LastCheckedModes.Remove(key);
-                    }
-                };
+                    Texture2D icon = TextureLoader.Instance.ImportUITexture(mode.Get<string>("icon"));
+                    string key = mode.Get<string>("key");
+                    stockModeKeys.Add(key);
 
-                ModeSubs.Add(new SubIcon { Sub = mode.Get<string>("subst"), Icon = icon });
+                    AddModeItem(ENV.GetLocalized(modeNamePath), key, mode.Get<string>("subst"), icon);
+                }
             }
         }
 
         res = RT.CallLuaFunction("missionlist_ExpandEralist", 1, mapluafile);
-        PhxLuaRuntime.Table eras = res[0] as PhxLuaRuntime.Table;
-        foreach (KeyValuePair<object, object> entry in eras)
+        PhxLuaRuntime.Table eras = res != null && res.Length > 0 ? res[0] as PhxLuaRuntime.Table : null;
+        if (eras != null)
         {
-            PhxLuaRuntime.Table era = entry.Value as PhxLuaRuntime.Table;
-            string eraNamePath = era.Get<string>("showstr");
-            if (era.Get("bIsWildcard") == null)
+            foreach (KeyValuePair<object, object> entry in eras)
             {
-                PhxListBoxItem item = LstEras.AddItem(ENV.GetLocalized(eraNamePath));
-                Texture2D icon = TextureLoader.Instance.ImportUITexture(era.Get<string>("icon2"));
-                item.SetIcon(icon);
-
-                string key = era.Get<string>("key");
-                item.SetChecked(LastCheckedEras.Contains(key));
-                item.OnCheckChanged += (bool check) =>
+                PhxLuaRuntime.Table era = entry.Value as PhxLuaRuntime.Table;
+                string eraNamePath = era.Get<string>("showstr");
+                if (era.Get("bIsWildcard") == null)
                 {
-                    if (check)
-                    {
-                        LastCheckedEras.Add(key);
-                    }
-                    else
-                    {
-                        LastCheckedEras.Remove(key);
-                    }
-                };
+                    Texture2D icon = TextureLoader.Instance.ImportUITexture(era.Get<string>("icon2"));
+                    string key = era.Get<string>("key");
+                    stockEraKeys.Add(key);
 
-                EraSubs.Add(new SubIcon { Sub = era.Get<string>("subst"), Icon = icon });
+                    AddEraItem(ENV.GetLocalized(eraNamePath), key, era.Get<string>("subst"), icon);
+                }
             }
         }
+
+        AddModdedSubs(newIdx, stockModeKeys, stockEraKeys);
+    }
+
+    /// <summary>
+    /// Fill in modes and eras the map declares but the stock shell doesn't
+    /// recognise. Without this every BF3 Legacy map lists zero playable
+    /// combinations, because its eras ('x', 'y') and its Orbital Assault mode
+    /// are defined by the mod, not by Battlefront II.
+    /// </summary>
+    void AddModdedSubs(int mapIdx, HashSet<string> stockModeKeys, HashSet<string> stockEraKeys)
+    {
+        if (mapIdx < 0 || mapIdx >= MapEntries.Count) return;
+
+        PhxLuaRuntime.Table mapEntry = MapEntries[mapIdx];
+
+        foreach (PhxBF3LegacyContent.PhxBF3ModeInfo mode in PhxBF3LegacyContent.ExpandModes(mapEntry))
+        {
+            if (stockModeKeys.Contains(mode.Key) || HasSub(ModeSubs, mode.Subst)) continue;
+            AddModeItem(mode.DisplayName, mode.Key, mode.Subst, LoadIcon(mode.Icon));
+        }
+
+        foreach (PhxBF3LegacyContent.PhxBF3ModeInfo era in PhxBF3LegacyContent.ExpandEras(mapEntry))
+        {
+            if (stockEraKeys.Contains(era.Key) || HasSub(EraSubs, era.Subst)) continue;
+            AddEraItem(era.DisplayName, era.Key, era.Subst, LoadIcon(era.Icon));
+        }
+    }
+
+    // The stock expansion keys entries the same way we do, but that is a
+    // convention rather than a guarantee - matching on what actually gets
+    // substituted into the map script name catches a duplicate either way.
+    static bool HasSub(List<SubIcon> subs, string sub)
+    {
+        foreach (SubIcon s in subs)
+        {
+            if (string.Equals(s.Sub, sub, System.StringComparison.OrdinalIgnoreCase)) return true;
+        }
+        return false;
+    }
+
+    // A mod-declared mode may name no icon at all, and a named one may not
+    // exist in any loaded lvl - either way the item just shows without one.
+    static Texture2D LoadIcon(string name)
+    {
+        return string.IsNullOrEmpty(name) ? null : TextureLoader.Instance.ImportUITexture(name);
+    }
+
+    void AddModeItem(string label, string key, string subst, Texture2D icon)
+    {
+        PhxListBoxItem item = LstModes.AddItem(label);
+        item.SetIcon(icon);
+        item.SetChecked(LastCheckedModes.Contains(key));
+        item.OnCheckChanged += (bool check) =>
+        {
+            if (check)
+            {
+                LastCheckedModes.Add(key);
+            }
+            else
+            {
+                LastCheckedModes.Remove(key);
+            }
+        };
+
+        ModeSubs.Add(new SubIcon { Sub = subst, Icon = icon });
+    }
+
+    void AddEraItem(string label, string key, string subst, Texture2D icon)
+    {
+        PhxListBoxItem item = LstEras.AddItem(label);
+        item.SetIcon(icon);
+        item.SetChecked(LastCheckedEras.Contains(key));
+        item.OnCheckChanged += (bool check) =>
+        {
+            if (check)
+            {
+                LastCheckedEras.Add(key);
+            }
+            else
+            {
+                LastCheckedEras.Remove(key);
+            }
+        };
+
+        EraSubs.Add(new SubIcon { Sub = subst, Icon = icon });
     }
 
     void AddMap()
@@ -194,8 +267,17 @@ public class PhxMainMenu : PhxMenuInterface
             bool bIsModLevel  = map.Get<bool>("isModLevel");
             string mapName    = ENV.GetLocalizedMapName(mapluafile);
 
+            // Mod maps often ship no localized name; fall back to what the BF3
+            // Legacy content table knows rather than showing a raw key.
+            if (string.IsNullOrEmpty(mapName))
+            {
+                PhxBF3LegacyContent.PhxBF3MapInfo info = PhxBF3LegacyContent.GetMapInfo(mapluafile);
+                mapName = info != null ? info.DisplayName : mapluafile;
+            }
+
             LstMaps.AddItem(mapName, bIsModLevel);
             MapLuaFiles.Add(mapluafile);
+            MapEntries.Add(map);
         }
     }
 }

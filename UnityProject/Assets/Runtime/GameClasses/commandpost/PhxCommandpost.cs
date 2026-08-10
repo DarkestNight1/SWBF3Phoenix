@@ -111,21 +111,14 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
 
 
         Team.OnValueChanged += ApplyTeam;
-        CaptureRegion.OnValueChanged += (PhxRegion oldRegion) =>
-        {
-            if (oldRegion != null)
-            {
-                oldRegion.OnEnter -= AddToCapture;
-                oldRegion.OnLeave -= RemoveFromCapture;
-            }
 
-            PhxRegion newRegion = CaptureRegion.Get();
-            if (newRegion != null)
-            {
-                newRegion.OnEnter += AddToCapture;
-                newRegion.OnLeave += RemoveFromCapture;
-            }
-        };
+        // Either property can name the capture zone, and either can arrive
+        // after Init during InitInstance's property assignment - so both
+        // re-run the same hookup rather than each owning half of it.
+        CaptureRegion.OnValueChanged += (PhxRegion _) => UpdateCaptureRegion();
+        ControlRegion.OnValueChanged += (PhxRegion _) => UpdateCaptureRegion();
+
+        UpdateCaptureRegion();
 
         if (C.HoloOdf.Get() != null)
         {
@@ -138,10 +131,86 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
         
     }
 
+    // The zone currently driving capture, and our own stand-in if the map
+    // supplied neither region.
+    PhxRegion ActiveCaptureRegion;
+    SphereCollider FallbackCollider;
+    PhxRegion FallbackRegion;
+
+    // Radius of the stand-in zone. BF2's own control zones are roughly this
+    // across; only used when a post names no region at all.
+    const float FallbackCaptureRadius = 8f;
+
+    static readonly HashSet<string> ReportedCaptureSource = new HashSet<string>();
+
+    /// <summary>
+    /// Hook whichever region actually drives this post's capture.
+    /// </summary>
+    /// <remarks>
+    /// Capture is entirely trigger-driven: no region means nothing is ever
+    /// added to CaptureControllers, CaptureCount stays 0, Tick's capture branch
+    /// never runs, the team never changes - and since the holo animation and
+    /// colour only update from ApplyTeam, the post also never visibly reacts.
+    /// A post with no usable region is therefore not "hard to capture", it is
+    /// silently impossible.
+    ///
+    /// Only CaptureRegion was ever consulted; ControlRegion was declared and
+    /// never read, so a post naming its zone there could never be taken. Both
+    /// are tried here, and if neither resolves we fall back to a sphere around
+    /// the post - the same approach PhxPowerupstation uses for droids without
+    /// an authored region.
+    /// </remarks>
+    void UpdateCaptureRegion()
+    {
+        if (ActiveCaptureRegion != null)
+        {
+            ActiveCaptureRegion.OnEnter -= AddToCapture;
+            ActiveCaptureRegion.OnLeave -= RemoveFromCapture;
+        }
+
+        PhxRegion region = CaptureRegion.Get() ?? ControlRegion.Get();
+        string source = CaptureRegion.Get() != null ? "CaptureRegion"
+                      : ControlRegion.Get() != null ? "ControlRegion"
+                      : "fallback sphere";
+
+        if (region == null)
+        {
+            if (FallbackRegion == null)
+            {
+                FallbackCollider = gameObject.AddComponent<SphereCollider>();
+                FallbackCollider.radius = FallbackCaptureRadius;
+                FallbackCollider.isTrigger = true;
+                FallbackRegion = gameObject.AddComponent<PhxRegion>();
+            }
+            region = FallbackRegion;
+        }
+        else if (FallbackRegion != null)
+        {
+            // An authored region arrived - retire the stand-in so a soldier
+            // isn't counted twice.
+            Destroy(FallbackRegion);
+            Destroy(FallbackCollider);
+            FallbackRegion = null;
+            FallbackCollider = null;
+        }
+
+        ActiveCaptureRegion = region;
+        ActiveCaptureRegion.OnEnter += AddToCapture;
+        ActiveCaptureRegion.OnLeave += RemoveFromCapture;
+
+        // Say which path each post took, once. If posts are falling back, the
+        // region names in the map data aren't resolving and that is worth
+        // knowing directly rather than inferring from "capture feels broken".
+        if (ReportedCaptureSource.Add(name))
+        {
+            Debug.Log($"[Commandpost] '{name}' capture zone from {source}.");
+        }
+    }
+
     public float GetCaptureProgress()
     {
         return CaptureTimer / C.CaptureTime;
-    }    
+    }
 
     public void RemoveFromCapture(IPhxControlableInstance other)
     {
@@ -282,12 +351,30 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
                 HoloIcon.Hide();
             return; 
         }
-        if (Match.Teams[Team].Hologram == null) { LoadIcon(ref Match.Teams[Team].Hologram); }
+        // HoloIcon is only created when the class has a HoloOdf that resolves,
+        // so it is legitimately null on posts whose hologram data is missing -
+        // every other branch here already tests for that. This one did not, and
+        // threw during ApplyTeam while the scene was still being imported,
+        // which aborted the rest of the instance import.
+        if (HoloIcon == null) return;
+
+        EnsureTeamHologram();
 
         HoloIcon.LoadIcon(Match.GetTeamHologram(Team), Team);
+        HoloIcon.Show();
+    }
 
-        if (HoloIcon != null)
-            HoloIcon.Show();
+    // Team is a 1-based team number; indexing Match.Teams with it directly
+    // read the wrong team's hologram (and overran the array for the last
+    // team), so go through the converting accessors.
+    void EnsureTeamHologram()
+    {
+        if (Match.GetTeamHologram(Team) == null)
+        {
+            GameObject icon = null;
+            LoadIcon(ref icon);
+            Match.SetTeamHologram(Team, icon);
+        }
     }
 
     public void ChangeColorIcon()
@@ -297,22 +384,31 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
                 HoloIcon.Hide();
             return; 
         }
-        if (Match.Teams[Team].Hologram == null) { LoadIcon(ref Match.Teams[Team].Hologram); }
+        // Same unguarded dereference as ChangeIcon had - see the note there.
+        if (HoloIcon == null) return;
+
+        EnsureTeamHologram();
 
         HoloIcon.ChangeColorIcon(Team);
-
-        if(HoloIcon!=null)
-            HoloIcon.Show();
+        HoloIcon.Show();
     }
 
     private void LoadIcon(ref GameObject icon)
     {
         string name = Match.getTeamName(Team); //Odf use full name but teams only 3 first chars
+        if (string.IsNullOrEmpty(name)) return;   // unnamed/out-of-range team - nothing to match against
         if (name.Equals("imp")) { name = "emp"; } //Do not know how to solve better atm
 
         for (int i = 0; i < C.HoloImageGeometry.GetCount(); i++)
         {
-            if (name.Equals(C.HoloImageGeometry.Get<string>(1, i).Substring(0, 3).ToLower()))
+            // The odf's team field is matched on its first three characters.
+            // Substring(0, 3) throws on any entry shorter than that, and a
+            // throw here escapes all the way out of the scene import - so a
+            // single malformed HoloImageGeometry row could cost the whole map.
+            string odfTeam = C.HoloImageGeometry.Get<string>(1, i);
+            if (odfTeam == null || odfTeam.Length < 3) continue;
+
+            if (name.Equals(odfTeam.Substring(0, 3).ToLower()))
             {
                 icon = ModelLoader.Instance.GetGameObjectFromModel(C.HoloImageGeometry.Get<string>(0, i), "");
             }

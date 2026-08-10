@@ -71,6 +71,11 @@ public class PhxVehicleProperties : PhxClass
     public PhxProp<string> HealthType = new PhxProp<string>("vehicle");
     public PhxProp<float>  MaxHealth = new PhxProp<float>(100.0f);
 
+    // The odf's own death explosion. Vehicle deaths previously produced no
+    // blast at all - a tank could be destroyed while a soldier stood against
+    // it and the soldier was unharmed.
+    public PhxProp<PhxClass> ExplosionName = new PhxProp<PhxClass>(null);
+
     public PhxProp<float> CollisionScale = new PhxProp<float>(1f);
 
     // In the "human" bank with name: "human_{Pilot9Pose}" ?
@@ -103,7 +108,8 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
                                     IPhxSeatable,
                                     IPhxTickablePhysics,
                                     IPhxTickable,
-                                    IPhxDamageableInstance
+                                    IPhxDamageableInstance,
+                                    IPhxDestructible
 {
     protected static PhxGame GAME => PhxGame.Instance;
     protected static PhxMatch MTC => PhxGame.GetMatch();
@@ -189,6 +195,12 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
             DamageEffects.Add(NewDamageEffect);
         }
+
+        // Health has to start full here: CurHealth's declared default is 100,
+        // which is only right for a vehicle whose MaxHealth happens to be 100.
+        CurHealth.Set(C.MaxHealth.Get());
+
+        PhxDestructionRegistry.Register(this);
     }
 
 
@@ -256,6 +268,17 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
     public bool IsDestroyed { get; private set; }
 
+    // ------------------------------------------------------ IPhxDestructible
+    // A vehicle, a building and a capital-ship subsystem are the same thing to
+    // objectives, the HUD, scoring and AI target selection; this is the face
+    // all three present to them.
+    public PhxDestructibleKind DestructibleKind => PhxDestructibleKind.Vehicle;
+    public GameObject GetGameObject() => gameObject;
+    public string GetDestructibleName() => name;
+    public int GetTeam() => Team.Get();
+    public float GetHealth() => CurHealth.Get();
+    public float GetMaxHealth() => C == null ? 0f : C.MaxHealth.Get();
+
     /// <summary>
     /// Vehicles were previously invulnerable - nothing implemented
     /// IPhxDamageableInstance, so all ordnance hits were dropped. Damage now
@@ -290,7 +313,18 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
             }
         }
 
+        // The authored break-up, before the wreck goes away: PhxChunkSpawner
+        // reparents the pieces it takes off this model, so it has to run while
+        // the model is still here.
+        Rigidbody body = GetComponent<Rigidbody>();
+        Vector3 velocity = body != null && !body.isKinematic ? body.velocity : Vector3.zero;
+        PhxChunkSpawner.Spawn(C?.ChunkSection, transform, velocity);
+
+        PhxExplosionManager.AddExplosion(null, C?.ExplosionName.Get() as PhxExplosionClass,
+                                         transform.position, transform.rotation);
+
         OnDeath?.Invoke(this);
+        PhxDestructionRegistry.NotifyDestroyed(this);
         SCENE?.DestroyInstance(this);
     }
 
@@ -481,7 +515,7 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
     public override void Destroy()
     {
-
+        PhxDestructionRegistry.Unregister(this);
     }
 
 

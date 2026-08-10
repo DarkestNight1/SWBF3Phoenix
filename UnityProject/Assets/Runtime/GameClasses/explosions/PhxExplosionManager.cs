@@ -70,6 +70,13 @@ public static class PhxExplosionManager
         // Play effect
         Scene.EffectsManager.PlayEffectOnce(Exp.Effect.Get(), Position, Rotation);
 
+        // And what the ground it went off on does about it: crater, displaced
+        // material, scorch, flash. Driven off the surface under the blast, so
+        // snow, sand, metal and water each answer in their own terms rather
+        // than every explosion looking the same everywhere.
+        BFImpactResponse.PlayExplosion(Position, Mathf.Max(Exp.DamageRadiusOuter, Exp.PushRadiusOuter),
+                                       Originator?.Pawn?.GetInstance()?.gameObject);
+
         // Damage and push were never applied here, so every explosive weapon
         // in the game (grenades, rockets, detpacks, vehicle deaths) did
         // nothing at all. Both fall off linearly between their inner and
@@ -111,7 +118,10 @@ public static class PhxExplosionManager
                 float falloff = PhxDamage.RadialFalloff(dist, Exp.DamageRadiusInner, damageOuter);
                 if (falloff > 0f)
                 {
-                    PhxDamage.ApplyToCollider(coll, maxDamage * falloff, scales, targetPos);
+                    // Originator is the controller that set the blast off, so
+                    // grenades, rockets and detpacks credit their thrower.
+                    PhxDamage.ApplyToCollider(coll, maxDamage * falloff, scales, targetPos,
+                                              isSaber: false, instigator: Originator);
                 }
             }
 

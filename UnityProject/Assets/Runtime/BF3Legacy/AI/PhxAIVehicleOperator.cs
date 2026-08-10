@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -398,7 +399,11 @@ public class PhxAIVehicleOperator
             NavRepathTimer = 3f;
             NavGoal = goal;
             NavIndex = 0;
-            PhxNavGraph.Instance.FindPath(pos, goal, NavSize, NavPath);
+            // Vehicles get the permissive capability set: a "jump" arc on a
+            // vehicle-sized route is a drop the vehicle can take, and refusing
+            // those would strand ground vehicles on maps that use them.
+            PhxNavGraph.Instance.FindPath(pos, goal, NavSize, NavPath,
+                                          PhxNavCapabilities.JetInfantry);
         }
 
         while (NavIndex < NavPath.Count)
@@ -481,6 +486,27 @@ public class PhxAIVehicleOperator
         }
 
         return best;
+    }
+
+    /// <summary>
+    /// Authored landing spot nearest a destination, or the destination itself.
+    /// </summary>
+    /// <remarks>
+    /// LAND hint nodes are where the designers decided a transport can
+    /// actually put down: clear of geometry, on ground that will take it, and
+    /// somewhere troops disembarking are useful. Dropping onto the objective
+    /// itself instead is how AI transports end up wedged in a doorway or
+    /// hovering over a roof - and it is a hint type this project imported and
+    /// then never read.
+    ///
+    /// Only air units use these; a ground vehicle has no landing to do.
+    /// </remarks>
+    public Vector3 ResolveLandingSpot(Vector3 destination, float searchRadius = 80f)
+    {
+        if (!IsAir) return destination;
+
+        PhxHintNode node = PhxHintNodes.FindNearest(destination, PhxHintType.Land, searchRadius);
+        return node != null ? node.Position : destination;
     }
 
     /// <summary>Clear controller state when the AI leaves the vehicle.</summary>

@@ -13,14 +13,15 @@ using LibSWBF2.Utils;
 /// PhxVehicleTurret already handle - PhxSeat's section scan was already
 /// aware of WALKERSECTION.
 ///
-/// Movement: SWBF2 walkers are animation-driven (leg cycles with foot
-/// planting). Reproducing that needs the walker animation banks driven by
-/// travel speed, which is a substantial piece of work on its own. Until then
-/// this drives the body over the terrain - raycast ground-following with
-/// tank-style steering - so walkers spawn, carry troops, aim and fire
-/// correctly. Legs will visually slide rather than step.
+/// Movement is animation-driven, as the original is: the leg cycle plays at
+/// the rate the machine is covering ground, the feet are placed on what is
+/// actually under them, and the hull rides on the feet rather than on a single
+/// probe under its centre. That behaviour lives in
+/// <see cref="PhxWalkerLocomotion"/>; this class owns driving and steering and
+/// hands it the resulting ground speed.
 ///
-/// TODO: drive the leg animation from distance travelled and add foot IK.
+/// A walker whose bank has no recognisable leg-cycle clip still drives - it
+/// falls back to a centre probe, which is what every walker did before.
 /// </summary>
 public class PhxWalker : PhxVehicle
 {
@@ -33,6 +34,10 @@ public class PhxWalker : PhxVehicle
         // Height the body rides above the ground (legs' length)
         public PhxProp<float> WalkerHeight = new PhxProp<float>(4f);
 
+        // Kicked up where a foot lands. Absent from most walker odfs, in which
+        // case footfalls are silent-and-clean rather than wrong.
+        public PhxProp<string> FootstepEffect = new PhxProp<string>("");
+
         // NOTE: AnimationName/GeometryName etc. come from PhxVehicleProperties.
         // Do NOT redeclare base props here - PhxInstance.InitInstance walks
         // fields reflectively and duplicate names break that scan.
@@ -41,6 +46,7 @@ public class PhxWalker : PhxVehicle
     PhxWalker.ClassProperties W;
     PhxSeat DriverSeat;
     Rigidbody Body;
+    PhxWalkerLocomotion Legs;
 
     float CurrentSpeed;
 
@@ -102,6 +108,20 @@ public class PhxWalker : PhxVehicle
         }
 
         SetIgnoredCollidersOnAllWeapons();
+
+        Legs = new PhxWalkerLocomotion(transform, C.AnimationName.Get(), W.WalkerHeight.Get(), GroundMask);
+        Legs.OnFootPlanted += OnFootPlanted;
+
+        Debug.Log($"[Phoenix] Walker '{C.Name}': {Legs.FootCount} foot node(s), " +
+                  $"leg animation {(Legs.IsAnimated ? "active" : "unavailable")}.");
+    }
+
+    void OnFootPlanted(Vector3 position)
+    {
+        string effect = W?.FootstepEffect.Get();
+        if (string.IsNullOrEmpty(effect) || SCENE == null) return;
+
+        SCENE.EffectsManager.PlayEffectOnce(effect, position, Quaternion.identity);
     }
 
     public override Vector3 GetCameraPosition()
@@ -123,6 +143,14 @@ public class PhxWalker : PhxVehicle
         {
             seat.Tick(deltaTime);
         }
+
+        // Foot placement has to run here, not in TickPhysics: PhxScene ticks
+        // the animation system first and instances afterwards precisely so
+        // that instances can adjust the pose it produced. Correcting the feet
+        // in the physics tick would write into a skeleton the next animation
+        // update overwrites, and nothing would ever be visible.
+        Legs?.TickFeet(deltaTime);
+
         UnityEngine.Profiling.Profiler.EndSample();
     }
 
@@ -158,17 +186,45 @@ public class PhxWalker : PhxVehicle
             Body.MoveRotation(Body.rotation * Quaternion.Euler(0f, turn, 0f));
         }
 
+        // The legs cycle at whatever rate covers the ground actually passing
+        // beneath them, so speeding up or reversing changes the gait rather
+        // than the slide rate.
+        Legs?.SetGroundSpeed(CurrentSpeed);
+
         Vector3 next = Body.position + transform.forward * (CurrentSpeed * deltaTime);
 
-        // ground following: keep the body a fixed height above the surface and
-        // align to the slope, so walkers climb terrain instead of clipping it
-        Vector3 probeOrigin = next + Vector3.up * (W.WalkerHeight + 10f);
-        if (Physics.Raycast(probeOrigin, Vector3.down, out RaycastHit hit,
-                            W.WalkerHeight + 40f, GroundMask, QueryTriggerInteraction.Ignore))
-        {
-            next.y = hit.point.y + W.WalkerHeight;
+        // Where the hull sits: on the feet when the legs found ground, and on
+        // a single centre probe otherwise (a walker with no recognisable leg
+        // animation, or one striding over a gap).
+        float supportHeight = next.y;
+        Vector3 supportNormal = Vector3.up;
+        bool supported = Legs != null && Legs.GetBodySupport(out supportHeight, out supportNormal);
 
-            Quaternion slope = Quaternion.FromToRotation(transform.up, hit.normal) * Body.rotation;
+        if (!supported)
+        {
+            Vector3 probeOrigin = next + Vector3.up * (W.WalkerHeight + 10f);
+            if (Physics.Raycast(probeOrigin, Vector3.down, out RaycastHit hit,
+                                W.WalkerHeight + 40f, GroundMask, QueryTriggerInteraction.Ignore))
+            {
+                supportHeight = hit.point.y;
+                supportNormal = hit.normal;
+                supported = true;
+            }
+            else
+            {
+                supportHeight = next.y;
+                supportNormal = Vector3.up;
+            }
+        }
+
+        if (supported)
+        {
+            // Lerped rather than snapped: the support height moves with every
+            // footfall, and following it exactly makes the hull bob one step
+            // per step. A walker's mass is the point - it should lag its legs.
+            next.y = Mathf.Lerp(Body.position.y, supportHeight + W.WalkerHeight, deltaTime * 3f);
+
+            Quaternion slope = Quaternion.FromToRotation(transform.up, supportNormal) * Body.rotation;
             Body.MoveRotation(Quaternion.Slerp(Body.rotation, slope, deltaTime * 2f));
         }
 

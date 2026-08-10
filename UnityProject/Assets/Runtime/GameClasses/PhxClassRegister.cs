@@ -29,7 +29,26 @@ public static class PhxClassRegister
         { "destructablebuilding", new GameBaseClass(typeof(PhxDestructableBuilding.ClassProperties), typeof(PhxDestructableBuilding))   },
         { "armedbuilding",  new GameBaseClass(typeof(PhxArmedBuilding.ClassProperties),  typeof(PhxArmedBuilding))  },
 
-        
+        // Plain and animated buildings. Both were unregistered, so every
+        // indestructible structure on every map imported as geometry with no
+        // instance behind it: no odf collision masks applied, no attached odfs
+        // or effects built, and nothing addressable by name from Lua. A
+        // building is a prop that does not move and an animatedbuilding is an
+        // animated prop, so they map onto exactly those implementations
+        // rather than duplicating them. (Destructible structures are a
+        // different class and keep their own implementation above.)
+        { "building",         new GameBaseClass(typeof(PhxProp.ClassProperties),         typeof(PhxProp))         },
+        { "animatedbuilding", new GameBaseClass(typeof(PhxAnimatedProp.ClassProperties), typeof(PhxAnimatedProp)) },
+
+        // Mission objects. Unregistered until now, which meant a map could
+        // parse them perfectly and still have no minefields, no beacons and no
+        // usable terminals - and objectives written around them could never
+        // complete.
+        { "mine",           new GameBaseClass(typeof(PhxMine.ClassProperties),           typeof(PhxMine))           },
+        { "beacon",         new GameBaseClass(typeof(PhxBeacon.ClassProperties),         typeof(PhxBeacon))         },
+        { "remoteterminal", new GameBaseClass(typeof(PhxRemoteTerminal.ClassProperties), typeof(PhxRemoteTerminal)) },
+
+
         // This probably doesn't need to be an instance, but skin changer mods might modify leafpatch classes
         // e.g. season changer on Marth's Pioneer Trails...
         { "leafpatch",      new GameBaseClass(typeof(PhxLeafPatchClass),                 typeof(PhxLeafPatch))      },
@@ -77,9 +96,13 @@ public static class PhxClassRegister
         { "explosion",      new GameBaseClass(typeof(PhxExplosionClass),                 null)                      },
     };
 
+    // Both lookups tolerate a null name. A class whose inheritance chain never
+    // resolved has no base class name to offer, and Dictionary.TryGetValue
+    // throws on a null key rather than missing - so the caller least able to
+    // do anything about it got an exception instead of "no such class".
     public static Type GetPhxInstanceType(string name)
     {
-        if (TypeDB.TryGetValue(name, out GameBaseClass cl))
+        if (!string.IsNullOrEmpty(name) && TypeDB.TryGetValue(name, out GameBaseClass cl))
         {
             return cl.InstanceType;
         }
@@ -88,10 +111,22 @@ public static class PhxClassRegister
 
     public static Type GetPhxClassType(string name)
     {
-        if (TypeDB.TryGetValue(name, out GameBaseClass cl))
+        if (!string.IsNullOrEmpty(name) && TypeDB.TryGetValue(name, out GameBaseClass cl))
         {
             return cl.ClassType;
         }
         return null;
+    }
+
+    /// <summary>
+    /// Base class names with a runtime implementation. Used by the import
+    /// validation pass to tell "this odf class has no behaviour" apart from
+    /// "this odf class failed to load", which look identical in a scene.
+    /// </summary>
+    public static IEnumerable<string> RegisteredBaseClasses => TypeDB.Keys;
+
+    public static bool IsRegistered(string baseClassName)
+    {
+        return !string.IsNullOrEmpty(baseClassName) && TypeDB.ContainsKey(baseClassName);
     }
 }

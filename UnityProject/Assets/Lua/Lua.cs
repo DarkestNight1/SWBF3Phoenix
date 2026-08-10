@@ -52,7 +52,20 @@ public sealed class Lua
 	// only way to differentiate is the actual function pointer, which is always the same in that scenario.
 	// As a stupid workaround, we provide an arbitrary pool of predefined static functions, with every one 
 	// of them only executing the associated function provided in this map below.
-	static CFunction[] CallbackMap = new CFunction[200];
+	// Lua needs a plain function pointer per callback, which rules out
+	// closures, so each slot has a hand-rolled static thunk (CBFuncN below)
+	// and the table has a fixed size. Raised from 200 to 320: PhxLuaAPI grew
+	// past 200 registered functions, and RegisterCallback then returned null
+	// for every one after that - a null function pointer handed to Lua
+	// segfaults inside lua_pcall the moment a script calls it, which reads as
+	// "Unity crashed loading the map" rather than anything diagnosable.
+	//
+	// Keep MaxCallbacks, CallbackMap and the ProvidedCallbacks array in step;
+	// the bounds checks below derive from the array so only this line and the
+	// generated thunks need touching next time.
+	public const int MaxCallbacks = 320;
+
+	static CFunction[] CallbackMap = new CFunction[MaxCallbacks];
 
 
 	public Lua()
@@ -100,14 +113,18 @@ public sealed class Lua
 		// TODO: linear search is baaad. 
 		// But does it really matter here?
 		int i = 0;
-		while (i < 200)
+		while (i < MaxCallbacks)
 		{
 			if (CallbackMap[i] == null) break;
 			i++;
 		}
-		if (i >= 200)
+		if (i >= MaxCallbacks)
 		{
-			OnError?.Invoke("Exceeded static callbacks of 200!");
+			// Returning null here hands Lua a null function pointer, which
+			// segfaults on the first call rather than failing here, so make
+			// the cause unmissable in the log.
+			OnError?.Invoke($"Exceeded static Lua callbacks ({MaxCallbacks})! " +
+			                "Raise Lua.MaxCallbacks and add matching CBFunc thunks.");
 			return null;
 		}
 		UsedCallbackCount++;
@@ -844,6 +861,18 @@ public sealed class Lua
 		CBFunc170, CBFunc171, CBFunc172, CBFunc173, CBFunc174, CBFunc175, CBFunc176, CBFunc177, CBFunc178, CBFunc179,
 		CBFunc180, CBFunc181, CBFunc182, CBFunc183, CBFunc184, CBFunc185, CBFunc186, CBFunc187, CBFunc188, CBFunc189,
 		CBFunc190, CBFunc191, CBFunc192, CBFunc193, CBFunc194, CBFunc195, CBFunc196, CBFunc197, CBFunc198, CBFunc199,
+		CBFunc200, CBFunc201, CBFunc202, CBFunc203, CBFunc204, CBFunc205, CBFunc206, CBFunc207, CBFunc208, CBFunc209, 
+		CBFunc210, CBFunc211, CBFunc212, CBFunc213, CBFunc214, CBFunc215, CBFunc216, CBFunc217, CBFunc218, CBFunc219, 
+		CBFunc220, CBFunc221, CBFunc222, CBFunc223, CBFunc224, CBFunc225, CBFunc226, CBFunc227, CBFunc228, CBFunc229, 
+		CBFunc230, CBFunc231, CBFunc232, CBFunc233, CBFunc234, CBFunc235, CBFunc236, CBFunc237, CBFunc238, CBFunc239, 
+		CBFunc240, CBFunc241, CBFunc242, CBFunc243, CBFunc244, CBFunc245, CBFunc246, CBFunc247, CBFunc248, CBFunc249, 
+		CBFunc250, CBFunc251, CBFunc252, CBFunc253, CBFunc254, CBFunc255, CBFunc256, CBFunc257, CBFunc258, CBFunc259, 
+		CBFunc260, CBFunc261, CBFunc262, CBFunc263, CBFunc264, CBFunc265, CBFunc266, CBFunc267, CBFunc268, CBFunc269, 
+		CBFunc270, CBFunc271, CBFunc272, CBFunc273, CBFunc274, CBFunc275, CBFunc276, CBFunc277, CBFunc278, CBFunc279, 
+		CBFunc280, CBFunc281, CBFunc282, CBFunc283, CBFunc284, CBFunc285, CBFunc286, CBFunc287, CBFunc288, CBFunc289, 
+		CBFunc290, CBFunc291, CBFunc292, CBFunc293, CBFunc294, CBFunc295, CBFunc296, CBFunc297, CBFunc298, CBFunc299, 
+		CBFunc300, CBFunc301, CBFunc302, CBFunc303, CBFunc304, CBFunc305, CBFunc306, CBFunc307, CBFunc308, CBFunc309, 
+		CBFunc310, CBFunc311, CBFunc312, CBFunc313, CBFunc314, CBFunc315, CBFunc316, CBFunc317, CBFunc318, CBFunc319, 
 	};
 
 	delegate int AOTCallbackDelegate(lua_State_ptr l);
@@ -1248,4 +1277,244 @@ public sealed class Lua
 	static int CBFunc198(lua_State_ptr l) => CallbackMap[198].Invoke(GetLuaInstance(l));
     [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
 	static int CBFunc199(lua_State_ptr l) => CallbackMap[199].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc200(lua_State_ptr l) => CallbackMap[200].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc201(lua_State_ptr l) => CallbackMap[201].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc202(lua_State_ptr l) => CallbackMap[202].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc203(lua_State_ptr l) => CallbackMap[203].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc204(lua_State_ptr l) => CallbackMap[204].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc205(lua_State_ptr l) => CallbackMap[205].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc206(lua_State_ptr l) => CallbackMap[206].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc207(lua_State_ptr l) => CallbackMap[207].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc208(lua_State_ptr l) => CallbackMap[208].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc209(lua_State_ptr l) => CallbackMap[209].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc210(lua_State_ptr l) => CallbackMap[210].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc211(lua_State_ptr l) => CallbackMap[211].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc212(lua_State_ptr l) => CallbackMap[212].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc213(lua_State_ptr l) => CallbackMap[213].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc214(lua_State_ptr l) => CallbackMap[214].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc215(lua_State_ptr l) => CallbackMap[215].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc216(lua_State_ptr l) => CallbackMap[216].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc217(lua_State_ptr l) => CallbackMap[217].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc218(lua_State_ptr l) => CallbackMap[218].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc219(lua_State_ptr l) => CallbackMap[219].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc220(lua_State_ptr l) => CallbackMap[220].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc221(lua_State_ptr l) => CallbackMap[221].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc222(lua_State_ptr l) => CallbackMap[222].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc223(lua_State_ptr l) => CallbackMap[223].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc224(lua_State_ptr l) => CallbackMap[224].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc225(lua_State_ptr l) => CallbackMap[225].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc226(lua_State_ptr l) => CallbackMap[226].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc227(lua_State_ptr l) => CallbackMap[227].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc228(lua_State_ptr l) => CallbackMap[228].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc229(lua_State_ptr l) => CallbackMap[229].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc230(lua_State_ptr l) => CallbackMap[230].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc231(lua_State_ptr l) => CallbackMap[231].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc232(lua_State_ptr l) => CallbackMap[232].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc233(lua_State_ptr l) => CallbackMap[233].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc234(lua_State_ptr l) => CallbackMap[234].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc235(lua_State_ptr l) => CallbackMap[235].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc236(lua_State_ptr l) => CallbackMap[236].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc237(lua_State_ptr l) => CallbackMap[237].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc238(lua_State_ptr l) => CallbackMap[238].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc239(lua_State_ptr l) => CallbackMap[239].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc240(lua_State_ptr l) => CallbackMap[240].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc241(lua_State_ptr l) => CallbackMap[241].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc242(lua_State_ptr l) => CallbackMap[242].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc243(lua_State_ptr l) => CallbackMap[243].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc244(lua_State_ptr l) => CallbackMap[244].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc245(lua_State_ptr l) => CallbackMap[245].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc246(lua_State_ptr l) => CallbackMap[246].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc247(lua_State_ptr l) => CallbackMap[247].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc248(lua_State_ptr l) => CallbackMap[248].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc249(lua_State_ptr l) => CallbackMap[249].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc250(lua_State_ptr l) => CallbackMap[250].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc251(lua_State_ptr l) => CallbackMap[251].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc252(lua_State_ptr l) => CallbackMap[252].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc253(lua_State_ptr l) => CallbackMap[253].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc254(lua_State_ptr l) => CallbackMap[254].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc255(lua_State_ptr l) => CallbackMap[255].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc256(lua_State_ptr l) => CallbackMap[256].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc257(lua_State_ptr l) => CallbackMap[257].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc258(lua_State_ptr l) => CallbackMap[258].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc259(lua_State_ptr l) => CallbackMap[259].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc260(lua_State_ptr l) => CallbackMap[260].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc261(lua_State_ptr l) => CallbackMap[261].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc262(lua_State_ptr l) => CallbackMap[262].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc263(lua_State_ptr l) => CallbackMap[263].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc264(lua_State_ptr l) => CallbackMap[264].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc265(lua_State_ptr l) => CallbackMap[265].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc266(lua_State_ptr l) => CallbackMap[266].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc267(lua_State_ptr l) => CallbackMap[267].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc268(lua_State_ptr l) => CallbackMap[268].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc269(lua_State_ptr l) => CallbackMap[269].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc270(lua_State_ptr l) => CallbackMap[270].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc271(lua_State_ptr l) => CallbackMap[271].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc272(lua_State_ptr l) => CallbackMap[272].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc273(lua_State_ptr l) => CallbackMap[273].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc274(lua_State_ptr l) => CallbackMap[274].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc275(lua_State_ptr l) => CallbackMap[275].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc276(lua_State_ptr l) => CallbackMap[276].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc277(lua_State_ptr l) => CallbackMap[277].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc278(lua_State_ptr l) => CallbackMap[278].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc279(lua_State_ptr l) => CallbackMap[279].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc280(lua_State_ptr l) => CallbackMap[280].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc281(lua_State_ptr l) => CallbackMap[281].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc282(lua_State_ptr l) => CallbackMap[282].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc283(lua_State_ptr l) => CallbackMap[283].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc284(lua_State_ptr l) => CallbackMap[284].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc285(lua_State_ptr l) => CallbackMap[285].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc286(lua_State_ptr l) => CallbackMap[286].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc287(lua_State_ptr l) => CallbackMap[287].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc288(lua_State_ptr l) => CallbackMap[288].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc289(lua_State_ptr l) => CallbackMap[289].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc290(lua_State_ptr l) => CallbackMap[290].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc291(lua_State_ptr l) => CallbackMap[291].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc292(lua_State_ptr l) => CallbackMap[292].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc293(lua_State_ptr l) => CallbackMap[293].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc294(lua_State_ptr l) => CallbackMap[294].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc295(lua_State_ptr l) => CallbackMap[295].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc296(lua_State_ptr l) => CallbackMap[296].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc297(lua_State_ptr l) => CallbackMap[297].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc298(lua_State_ptr l) => CallbackMap[298].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc299(lua_State_ptr l) => CallbackMap[299].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc300(lua_State_ptr l) => CallbackMap[300].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc301(lua_State_ptr l) => CallbackMap[301].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc302(lua_State_ptr l) => CallbackMap[302].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc303(lua_State_ptr l) => CallbackMap[303].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc304(lua_State_ptr l) => CallbackMap[304].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc305(lua_State_ptr l) => CallbackMap[305].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc306(lua_State_ptr l) => CallbackMap[306].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc307(lua_State_ptr l) => CallbackMap[307].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc308(lua_State_ptr l) => CallbackMap[308].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc309(lua_State_ptr l) => CallbackMap[309].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc310(lua_State_ptr l) => CallbackMap[310].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc311(lua_State_ptr l) => CallbackMap[311].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc312(lua_State_ptr l) => CallbackMap[312].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc313(lua_State_ptr l) => CallbackMap[313].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc314(lua_State_ptr l) => CallbackMap[314].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc315(lua_State_ptr l) => CallbackMap[315].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc316(lua_State_ptr l) => CallbackMap[316].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc317(lua_State_ptr l) => CallbackMap[317].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc318(lua_State_ptr l) => CallbackMap[318].Invoke(GetLuaInstance(l));
+    [MonoPInvokeCallback(typeof(AOTCallbackDelegate))]
+	static int CBFunc319(lua_State_ptr l) => CallbackMap[319].Invoke(GetLuaInstance(l));
 }

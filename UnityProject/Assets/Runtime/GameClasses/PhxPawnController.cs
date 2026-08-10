@@ -29,6 +29,15 @@ public abstract class PhxPawnController
     public PhxCommandpost CapturePost;
     public int Team = 0;
 
+    // Scoreboard, per BF2: Score is the objective/kill points shown in the
+    // leftmost column, Kills and Deaths the two beside it. Kept on the
+    // controller rather than the pawn so a player's tally survives respawning,
+    // which replaces the pawn each time.
+    public string DisplayName = "";
+    public int Score = 0;
+    public int Kills = 0;
+    public int Deaths = 0;
+
 
 
     public bool IsIdle => !ShootPrimary && !Crouch && MoveDirection == Vector2.zero;

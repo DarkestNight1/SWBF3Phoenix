@@ -37,6 +37,17 @@ public struct PhxDamageScales
     public float Vehicle;
     public float Building;
 
+    /// <summary>
+    /// Unscaled: every health type takes the attack's full damage. For damage
+    /// sources that are not ordnance and declare no scales of their own - a
+    /// force power, a scripted kill - where the alternative is a zeroed struct
+    /// that silently does nothing.
+    /// </summary>
+    public static PhxDamageScales Default => new PhxDamageScales
+    {
+        Person = 1f, Animal = 1f, Droid = 1f, Vehicle = 1f, Building = 1f,
+    };
+
     public float For(PhxHealthType type)
     {
         switch (type)
@@ -127,7 +138,8 @@ public static class PhxDamage
     /// </summary>
     public static float ApplyToCollider(Collider collider, float maxDamage,
                                         PhxDamageScales scales, Vector3 hitPos,
-                                        bool isSaber = false)
+                                        bool isSaber = false,
+                                        PhxPawnController instigator = null)
     {
         if (collider == null) return 0f;
 
@@ -135,7 +147,7 @@ public static class PhxDamage
         if (soldier != null)
         {
             float dmg = maxDamage * scales.For(GetHealthType(soldier));
-            if (dmg > 0f) soldier.AddDamageFrom(dmg, hitPos, isSaber);
+            if (dmg > 0f) soldier.AddDamageFrom(dmg, hitPos, isSaber, instigator);
             return dmg;
         }
 

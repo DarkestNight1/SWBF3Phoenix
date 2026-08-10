@@ -85,11 +85,22 @@ public class PhxCamera : MonoBehaviour
         }
         else if (Mode == CamMode.Follow)
         {
-            Vector3 rotPoint = FollowInstance.GetInstance().transform.position;
+            // The followed pawn can vanish while the camera is still in Follow
+            // mode - death, map unload, leaving play mode - and dereferencing it
+            // unguarded throws a NullReferenceException from LateUpdate every
+            // single frame.
+            var followed = FollowInstance?.GetInstance();
+            PhxMatch match = PhxGame.GetMatch();
+            if (followed == null || match == null || match.Player == null)
+            {
+                return;
+            }
+
+            Vector3 rotPoint = followed.transform.position;
             rotPoint.y += PositionOffset.y;
 
             //Vector3 viewDir = (FollowInstance.GetTargetPosition() - rotPoint).normalized;
-            Vector3 viewDir = PhxGame.GetMatch().Player.ViewDirection;
+            Vector3 viewDir = match.Player.ViewDirection;
             Vector3 camTargetPos = rotPoint + viewDir * PositionOffset.z;
             Quaternion camTargetRot = Quaternion.LookRotation(viewDir);
             camTargetPos += camTargetRot * new Vector3(PositionOffset.x, 0f, 0f);

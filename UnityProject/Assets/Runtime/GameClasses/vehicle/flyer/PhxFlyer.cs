@@ -520,7 +520,21 @@ public class PhxFlyer : PhxVehicle
 
         if (CurrentState != PhxFlyerState.Grounded)
         {
-            Body.MovePosition(Body.position + deltaTime * transform.TransformDirection(LocalVel));            
+            Vector3 next = Body.position + deltaTime * transform.TransformDirection(LocalVel);
+
+            // The mission's flight envelope (SetMin/MaxFlyHeight, and the
+            // separate player pair). Maps set these to keep flyers out of the
+            // skybox and off the deck; with them unset this is a no-op, which
+            // is what every map got before.
+            //
+            // Applied to the resulting position rather than to velocity so a
+            // flyer pressed against the ceiling slides along it instead of
+            // stalling: killing the vertical component would also kill the
+            // forward one it is mixed into.
+            bool isPlayer = IsPlayerSoldier(Driver);
+            next.y = PhxAIDirectives.ClampFlyHeight(next.y, isPlayer);
+
+            Body.MovePosition(next);
         }
 
     }

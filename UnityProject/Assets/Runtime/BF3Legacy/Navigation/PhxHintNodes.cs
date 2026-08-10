@@ -47,10 +47,23 @@ public class PhxHintNode
     public Vector3 Position;
     public Quaternion Rotation;
 
-    // parsed properties
-    public string Mode;            // "Attack" / "Defend" / ...
-    public string Posture;         // "Stand" / "Crouch" / "Prone"
-    public string CommandPost;     // owning CP name, if any
+    // Parsed properties. Names taken from the ModTools .hnt sources, which are
+    // plain text - a node looks like:
+    //     Hint("HintNode0", "2")
+    //     { Position(...); Rotation(...); Radius(2.0);
+    //       PrimaryStance(1); SecondaryStance(24); Mode(0); }
+    //
+    // An earlier version read "Posture" and "CommandPost", which appear nowhere
+    // in that data (2045 nodes carry PrimaryStance, 2006 SecondaryStance, 50
+    // Radius, and none carry the other two), so those fields were always empty
+    // and every stance the level designers authored was discarded.
+    public string Mode;              // behaviour mode, numeric in the data
+    public int PrimaryStance;        // stand / crouch / prone, see StanceFromRaw
+    public int SecondaryStance;
+    public float Radius = 2f;        // influence radius; 2 is the editor default
+
+    /// <summary>The authored record this node projects.</summary>
+    public BFHintNodeDefinition Source;
 
     // runtime occupancy so two bots don't fight over one node
     public object Occupant;
@@ -76,36 +89,55 @@ public static class PhxHintNodes
         LoggedUnknownTypes.Clear();
     }
 
-    public static void Load(World world)
+    public static void Load(BFWorldDefinition world)
     {
-        if (world == null) return;
+        if (world == null || world.HintNodes.Count == 0) return;
 
-        HintNode[] hints = world.GetHintNodes();
-        if (hints == null || hints.Length == 0) return;
+        uint modeHash = HashUtils.GetFNV("Mode");
+        uint primaryHash = HashUtils.GetFNV("PrimaryStance");
+        uint secondaryHash = HashUtils.GetFNV("SecondaryStance");
+        uint radiusHash = HashUtils.GetFNV("Radius");
 
-        foreach (HintNode h in hints)
+        foreach (BFHintNodeDefinition h in world.HintNodes)
         {
             PhxHintNode node = new PhxHintNode
             {
                 Name = h.Name,
-                RawType = (int)h.Type,
-                Type = TypeFromRaw((int)h.Type),
-                Position = UnityUtils.Vec3FromLibWorld(h.Position),
-                Rotation = UnityUtils.QuatFromLibWorld(h.Rotation),
+                RawType = h.RawType,
+                Type = TypeFromRaw(h.RawType),
+                Position = h.Position,
+                Rotation = h.Rotation,
+                Source = h,
             };
 
-            h.GetProperties(out uint[] props, out string[] values);
-            if (props != null)
+            for (int i = 0; i < h.Properties.Count; ++i)
             {
-                for (int i = 0; i < props.Length; ++i)
+                BFProperty prop = h.Properties[i];
+                if (prop.Hash == modeHash)
                 {
-                    if (props[i] == HashUtils.GetFNV("Mode")) node.Mode = values[i];
-                    else if (props[i] == HashUtils.GetFNV("Posture")) node.Posture = values[i];
-                    else if (props[i] == HashUtils.GetFNV("CommandPost")) node.CommandPost = values[i];
+                    node.Mode = prop.Value;
+                }
+                else if (prop.Hash == primaryHash)
+                {
+                    int.TryParse(prop.Value, out node.PrimaryStance);
+                }
+                else if (prop.Hash == secondaryHash)
+                {
+                    int.TryParse(prop.Value, out node.SecondaryStance);
+                }
+                else if (prop.Hash == radiusHash)
+                {
+                    if (float.TryParse(prop.Value, System.Globalization.NumberStyles.Float,
+                                       System.Globalization.CultureInfo.InvariantCulture,
+                                       out float radius) && radius > 0f)
+                    {
+                        node.Radius = radius;
+                    }
                 }
             }
 
             Nodes.Add(node);
+            BFSourceDatabase.Active.MarkImported(h.Source);
         }
 
         Debug.Log($"[BF3Legacy] {Nodes.Count} AI hint nodes loaded " +
@@ -120,16 +152,49 @@ public static class PhxHintNodes
         return n;
     }
 
+    /// <summary>
+    /// Whether a stance value means crouched or prone rather than standing.
+    /// </summary>
+    /// <remarks>
+    /// The ZeroEditor guide describes stances as "stand, crouch, go prone, or
+    /// face left or right", but does not publish the numbering, and the stock
+    /// data only ever uses a small set of values (1 and 24 dominate). Treating
+    /// non-zero, non-one values as low is a reading of that data, not a
+    /// documented mapping - revisit if a stance ever looks wrong in game.
+    /// </remarks>
+    public static bool StanceIsLow(int stance)
+    {
+        return stance > 1;
+    }
+
     static PhxHintType TypeFromRaw(int raw)
     {
+        // The TYPE chunk is read as a raw uint16, and the values that come out
+        // of stock maps are 48, 50, 55, 56 - which are the ASCII codes for
+        // '0', '2', '7' and '8'. The type is stored as a digit character, not
+        // as a number, so every node fell outside the enum and the whole hint
+        // network was classified Unknown: the load line read
+        // "291 AI hint nodes loaded (cover: 0, snipe: 0, patrol: 0, jetjump: 0)"
+        // on a map that is plainly full of cover and sniping positions.
+        //
+        // Decode the digit, which puts the common types (snipe 0, cover 2)
+        // back in range and makes the hint network usable by the AI.
+        if (raw >= '0' && raw <= '9')
+        {
+            raw -= '0';
+        }
+
         if (raw >= 0 && raw <= (int)PhxHintType.Land)
         {
             return (PhxHintType)raw;
         }
 
+        // Types above Land do occur (7 and 8 are both present in stock maps)
+        // but their meaning is not established here, so they stay Unknown
+        // rather than being guessed into a behaviour.
         if (LoggedUnknownTypes.Add(raw))
         {
-            Debug.LogWarning($"[BF3Legacy] Unrecognised hint node type {raw} - " +
+            Debug.LogWarning($"[BF3Legacy] Hint node type {raw} has no known meaning - " +
                              "treated as Unknown (see PhxHintNodes.TypeFromRaw)");
         }
         return PhxHintType.Unknown;
@@ -173,6 +238,63 @@ public static class PhxHintNodes
                 bestScore = score;
                 best = node;
             }
+        }
+        return best;
+    }
+
+    /// <summary>
+    /// Every free node of a type within range of an anchor, appended to
+    /// <paramref name="into"/>. For behaviours that want a set rather than the
+    /// single nearest - a patrol route, the landing spots around a hangar.
+    /// </summary>
+    public static void FindAllWithin(Vector3 anchor, PhxHintType type, float maxRange,
+                                     List<PhxHintNode> into)
+    {
+        if (into == null) return;
+        into.Clear();
+
+        float now = Time.time;
+        float maxRangeSqr = maxRange * maxRange;
+
+        foreach (PhxHintNode node in Nodes)
+        {
+            if (node.Type != type || !node.IsFree(now)) continue;
+            if ((node.Position - anchor).sqrMagnitude > maxRangeSqr) continue;
+
+            into.Add(node);
+        }
+    }
+
+    /// <summary>
+    /// The next node of a patrol loop after <paramref name="current"/>: the
+    /// nearest other one of the same type, excluding where we already are.
+    /// </summary>
+    /// <remarks>
+    /// Designers place PATROL nodes as a scattered set rather than an ordered
+    /// route, so "the route" is whatever chaining them nearest-first produces.
+    /// Excluding the current node is what stops a lone patrol node making a
+    /// soldier stand still and call it patrolling.
+    /// </remarks>
+    public static PhxHintNode NextPatrolNode(PhxHintNode current, Vector3 anchor, float maxRange)
+    {
+        float now = Time.time;
+        float maxRangeSqr = maxRange * maxRange;
+
+        PhxHintNode best = null;
+        float bestDist = float.MaxValue;
+        Vector3 from = current != null ? current.Position : anchor;
+
+        foreach (PhxHintNode node in Nodes)
+        {
+            if (node.Type != PhxHintType.Patrol || node == current) continue;
+            if (!node.IsFree(now)) continue;
+            if ((node.Position - anchor).sqrMagnitude > maxRangeSqr) continue;
+
+            float d = (node.Position - from).sqrMagnitude;
+            if (d >= bestDist) continue;
+
+            bestDist = d;
+            best = node;
         }
         return best;
     }

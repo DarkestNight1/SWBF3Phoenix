@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.Profiling;
 using UnityEngine.Animations;
 using LibSWBF2.Utils;
+using LibSWBF2.Wrappers;
 using System.Runtime.ExceptionServices;
 
 public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, ICraAnimated, IPhxTickable, IPhxTickablePhysics, IPhxDamageableInstance
@@ -103,6 +104,31 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     public PhxProp<float> CurHealth = new PhxProp<float>(100.0f);
 
+    /// <summary>
+    /// Sprint stamina, in the same units as the class's EnergyBar. The odf
+    /// properties for this (EnergyBar, EnergyDrainSprint, EnergyRestore,
+    /// EnergyRestoreIdle, EnergyMinSprint, EnergyCostJump, EnergyCostRoll)
+    /// have always been parsed, but nothing consumed them - sprint was free
+    /// and unlimited, and the HUD had no bar to draw.
+    /// </summary>
+    public float CurEnergy { get; private set; } = 1f;
+
+    /// <summary>Full stamina for this class; 0 when the class declares none.</summary>
+    public float MaxEnergy => C != null ? C.EnergyBar.Get() : 0f;
+
+    /// <summary>Stamina as a 0..1 fraction, for the HUD. 1 when the class has no energy bar.</summary>
+    public float EnergyFraction => MaxEnergy > 0f ? Mathf.Clamp01(CurEnergy / MaxEnergy) : 1f;
+
+    /// <summary>Health as a 0..1 fraction, for the HUD.</summary>
+    public float HealthFraction
+    {
+        get
+        {
+            float max = C != null ? C.MaxHealth.Get() : 0f;
+            return max > 0f ? Mathf.Clamp01(CurHealth.Get() / max) : 0f;
+        }
+    }
+
     PhxHumanAnimator Animator;
     Rigidbody Body;
 
@@ -155,12 +181,41 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     // - 0 : Primary Weapon
     // - 1 : Secondary Weapon
     IPhxWeapon[][] Weapons = new IPhxWeapon[2][];
+
+    /// <summary>
+    /// Classes this unit carries that are placed rather than fired - mines,
+    /// beacons, deployable terminals. Named in a WEAPONSECTION like a weapon,
+    /// but they become objects in the world, not something held.
+    /// </summary>
+    public readonly List<PhxClass> Deployables = new List<PhxClass>();
+
+    /// <summary>The first deployable whose root base class matches, or null.</summary>
+    public PhxClass GetDeployable(string rootBaseClassName)
+    {
+        for (int i = 0; i < Deployables.Count; ++i)
+        {
+            EntityClass root = ClassLoader.GetRootClass(Deployables[i].EntityClass);
+            if (root != null && string.Equals(root.BaseClassName, rootBaseClassName,
+                                              StringComparison.OrdinalIgnoreCase))
+            {
+                return Deployables[i];
+            }
+        }
+        return null;
+    }
     int[] WeaponIdx = new int[2] { -1, -1 };
 
 
     public override void Init()
     {
         gameObject.layer = LayerMask.NameToLayer("SoldierAll");
+
+        // Start at full health and stamina. CurHealth is an instance property
+        // that stock odfs never set, so it kept its 100 default while MaxHealth
+        // came from the class - a 200-health unit would have read as half dead
+        // on the health bar from the moment it spawned.
+        CurHealth.Set(C.MaxHealth.Get());
+        CurEnergy = MaxEnergy;
 
         ViewConstraint.x = 45f;
 
@@ -188,18 +243,23 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         Debug.Assert(Neck != null);
         Debug.Assert(Spine != null);
 
-        Body = gameObject.AddComponent<Rigidbody>();
-        Body.mass = 0.1f;
-        Body.drag = 0.2f;
-        Body.angularDrag = 10f;
-        Body.interpolation = RigidbodyInterpolation.Interpolate;
-        Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        ConfigureBody();
 
         CapsuleCollider coll = gameObject.AddComponent<CapsuleCollider>();
         coll.height = 1.9f;
         coll.radius = 0.4f;
         coll.center = new Vector3(0f, 0.9f, 0f);
+
+        // Grounded defaults to false and is only otherwise set by
+        // UpdatePhysics's own CheckSphere, which hasn't run yet - so every
+        // spawn, even standing on solid authored ground, saw UpdateState's
+        // very first tick read "not grounded" and force a one-frame flash
+        // into the falling animation before physics caught up and corrected
+        // it. transform.position is already the final spawn placement by the
+        // time Init runs (PhxScene sets it before adding this component), so
+        // seed Grounded here with the same check UpdatePhysics uses instead
+        // of leaving it at the C# default.
+        Grounded = Physics.CheckSphere(transform.position, 0.4f, PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore);
 
 
         ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
@@ -233,6 +293,25 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                     if (medalProp != null && medalProp != 0)
                     {
                         // Skip medal/award weapons for now
+                        continue;
+                    }
+
+                    // Only actually build it if the class is something that can
+                    // be held and fired.
+                    //
+                    // A WEAPONSECTION can name a class whose runtime type is
+                    // not a weapon at all - a deployable, most obviously a
+                    // mine. Instantiating one of those here puts a live,
+                    // armed object on the soldier's weapon hardpoint: the
+                    // `as IPhxWeapon` yields null so nothing ever equips or
+                    // frees it, and a mine in particular then sits in the
+                    // carrier's hand looking for someone to blow up. Ask
+                    // first, and let the deployable path own those classes.
+                    Type weapType = PhxClassRegister.GetPhxInstanceType(
+                        ClassLoader.GetRootClass(weapClass.EntityClass)?.BaseClassName);
+                    if (weapType != null && !typeof(IPhxWeapon).IsAssignableFrom(weapType))
+                    {
+                        Deployables.Add(weapClass);
                         continue;
                     }
 
@@ -284,6 +363,13 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         // will weapons will most likely cause an animation bank change aswell
         NextWeapon(0);
         NextWeapon(1);
+
+        PhxHeroLoadout.Apply(this, Weapons);
+
+        // Presentation only: turns movement into surface interactions
+        // (footprints, puffs, ripples). Costs nothing on a map whose surfaces
+        // do not react.
+        gameObject.AddComponent<BFFootstepEmitter>();
     }
 
     public override void Destroy()
@@ -302,10 +388,61 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     public override IPhxWeapon GetPrimaryWeapon()
     {
-        return Weapons[0][WeaponIdx[0]];
+        return GetEquippedWeapon(0);
+    }
+
+    /// <summary>
+    /// The weapon currently selected on a channel, or null. Slots can be empty
+    /// (missing weapon odf) and the index can still be -1 before the first
+    /// NextWeapon call, so every read of Weapons[c][i] has to go through here.
+    /// </summary>
+    IPhxWeapon GetEquippedWeapon(int channel)
+    {
+        if (channel < 0 || channel >= Weapons.Length) return null;
+        IPhxWeapon[] slots = Weapons[channel];
+        if (slots == null) return null;
+        int idx = WeaponIdx[channel];
+        if (idx < 0 || idx >= slots.Length) return null;
+        return slots[idx];
+    }
+
+    /// <summary>
+    /// The secondary channel's weapon currently selected - grenades, detpacks,
+    /// mines and the other "item" slots BF2 draws along the bottom of the HUD.
+    /// </summary>
+    public IPhxWeapon GetSecondaryWeapon()
+    {
+        return GetEquippedWeapon(1);
+    }
+
+    /// <summary>How many slots a channel has (0 = primary, 1 = secondary).</summary>
+    public int GetWeaponCount(int channel)
+    {
+        if (channel < 0 || channel >= Weapons.Length) return 0;
+        return Weapons[channel]?.Length ?? 0;
+    }
+
+    /// <summary>A specific slot on a channel, or null if it's empty.</summary>
+    public IPhxWeapon GetWeapon(int channel, int idx)
+    {
+        if (channel < 0 || channel >= Weapons.Length) return null;
+        IPhxWeapon[] slots = Weapons[channel];
+        if (slots == null || idx < 0 || idx >= slots.Length) return null;
+        return slots[idx];
+    }
+
+    /// <summary>Index of the selected slot on a channel, or -1 if none is.</summary>
+    public int GetEquippedWeaponIdx(int channel)
+    {
+        if (channel < 0 || channel >= WeaponIdx.Length) return -1;
+        return WeaponIdx[channel];
     }
 
     public bool IsDead { get; private set; }
+
+    // True while landing/turn recovery suppresses movement input. AI stuck
+    // detection must not count these frames as "trying to move but stuck".
+    public bool IsMovementLocked => LandTimer > 0f || TurnTimer > 0f;
 
     // Whether we're currently piloting a vehicle seat (used by AI)
     public bool IsInVehicle => Context == PhxSoldierContext.Pilot;
@@ -343,16 +480,35 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         AddDamageFrom(damage, transform.position, false);
     }
 
+    // Who last damaged us, for kill credit. BF2 credits the last attacker
+    // rather than whoever did the most damage, so a single reference is all
+    // the scoreboard needs.
+    PhxPawnController LastAttacker;
+
     // Damage with hit context, so lethal saber hits can dismember (BF3 Legacy)
-    public void AddDamageFrom(float damage, Vector3 hitPos, bool isSaber)
+    public void AddDamageFrom(float damage, Vector3 hitPos, bool isSaber, PhxPawnController instigator = null)
     {
         if (IsDead)
         {
             return;
         }
 
+        if (instigator != null)
+        {
+            LastAttacker = instigator;
+        }
+
+        // Scripts watch named objects for damage (scripted set pieces, escort
+        // objectives). Keyed by instance name, lower case, as registered.
+        PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectDamageName, name.ToLower(),
+                                         SCENE?.GetInstanceIndex(this), damage);
+
         float health = CurHealth - damage;
-        if (health <= 0f)
+        bool fatal = health <= 0f;
+
+        ReportToPlayerHUD(instigator, hitPos, fatal);
+
+        if (fatal)
         {
             CurHealth.Set(0f);
             Die(hitPos, isSaber);
@@ -360,6 +516,39 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         else
         {
             AddHealth(-damage);
+
+            // Flinch, on the upper body only, so movement and fire continue.
+            Animator.PlayHitReaction(PhxHumanAnimator.ImpactDirFrom(transform, hitPos));
+        }
+    }
+
+    /// <summary>
+    /// Raise the local player's hit marker / damage indicator when this hit
+    /// involves them, in either direction. Kept here because this is the one
+    /// place that knows both ends of the exchange.
+    /// </summary>
+    void ReportToPlayerHUD(PhxPawnController instigator, Vector3 hitPos, bool fatal)
+    {
+        PhxPlayerController player = MTC?.Player;
+        if (player == null) return;
+
+        if (instigator != null && ReferenceEquals(instigator, player))
+        {
+            PhxHUDEvents.ReportDealtDamage(fatal);
+        }
+
+        // We're the one being hit. Prefer the attacker's own position for the
+        // direction indicator - the impact point is on our own body and would
+        // point nowhere useful.
+        if (ReferenceEquals(Controller, player))
+        {
+            Vector3 from = hitPos;
+            PhxInstance attacker = instigator?.Pawn?.GetInstance();
+            if (attacker != null)
+            {
+                from = attacker.transform.position;
+            }
+            PhxHUDEvents.ReportDamageTaken(from);
         }
     }
 
@@ -371,15 +560,66 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         }
         IsDead = true;
 
+        // A death spends one of the victim team's reinforcements, which is
+        // conquest's actual losing condition - nothing was decrementing them
+        // before, so a match could never be lost. The instigator now comes
+        // from the ordnance's owning weapon, so the kill is credited to the
+        // individual who fired rather than guessed from the team.
+        MTC?.ReportKill(LastAttacker, Controller, Team);
+
+        // Mission scripts hook these to drive mode logic (hunt counters,
+        // scripted events, campaign objectives). Instance indices are the
+        // "character" handles scripts pass around, same convention as
+        // OnFinishCapture. Fired before UnAssign, while Team is still ours.
+        int? victimIdx = SCENE?.GetInstanceIndex(this);
+        PhxInstance killerInst = LastAttacker?.Pawn?.GetInstance();
+        int? killerIdx = killerInst != null ? SCENE?.GetInstanceIndex(killerInst) : null;
+        PhxLuaEvents.Invoke(PhxLuaEvents.Event.OnCharacterDeath, victimIdx, killerIdx);
+        PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnCharacterDeathTeam, Team.Get(), victimIdx, killerIdx);
+
         if (isSaber)
         {
             PhxDismemberment.TrySever(gameObject, hitPos);
         }
 
-        // release the controller, freeze the corpse in place
+        // Whether the human player died has to be read before UnAssign clears
+        // the link, and decides if we hand back to the spawn menu below.
+        bool wasPlayer = Controller is PhxPlayerController;
+
+        // Release the controller. Tick/TickPhysics both early-out on IsDead, so
+        // the body is inert from here on regardless of what still references it.
         UnAssign();
+
+        // Play the death animation that matches where the shot came from.
+        // These are BF2's own clips (human_rifle_stand_death_*), so a soldier
+        // shot in the back falls forward, as in the original.
+        // Animator is a struct, so there is no null to test - PlayDeath guards
+        // on its own state array, which covers a default-constructed animator.
+        Animator.PlayDeath(PhxHumanAnimator.ImpactDirFrom(transform, hitPos));
+
+        // The corpse keeps its collider and gravity for a moment so it settles
+        // onto the ground as the animation plays out, rather than freezing
+        // mid-stride. Freezing happens in RemoveCorpse once it has landed.
+        StartCoroutine(RemoveCorpse());
+
+        if (wasPlayer)
+        {
+            StartCoroutine(ReturnPlayerToSpawnMenu());
+        }
+    }
+
+    System.Collections.IEnumerator RemoveCorpse()
+    {
+        // Let it fall for a beat, then stop simulating it so 30+ corpses don't
+        // stay in the physics broadphase for the rest of the round.
+        yield return new WaitForSeconds(2f);
+
         if (Body != null)
         {
+            // Order matters: Unity warns "Kinematic body only supports
+            // Speculative Continuous collision detection" if a body is switched
+            // to kinematic while still set to a sweep-based mode.
+            Body.collisionDetectionMode = CollisionDetectionMode.Discrete;
             Body.isKinematic = true;
         }
         CapsuleCollider coll = GetComponent<CapsuleCollider>();
@@ -388,14 +628,23 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             coll.enabled = false;
         }
 
-        StartCoroutine(RemoveCorpse());
-    }
-
-    System.Collections.IEnumerator RemoveCorpse()
-    {
-        yield return new WaitForSeconds(15f);
+        yield return new WaitForSeconds(13f);
         SCENE?.DestroyInstance(this);
     }
+
+    /// <summary>
+    /// BF2 shows the corpse briefly, then drops the player back to the class
+    /// select screen. Nothing did this before: PhxMatch.KillPlayer was only
+    /// ever reached from the pause menu, so dying in combat left the camera
+    /// stuck on a body with no way to respawn.
+    /// </summary>
+    System.Collections.IEnumerator ReturnPlayerToSpawnMenu()
+    {
+        yield return new WaitForSeconds(DeathCamSeconds);
+        MTC?.KillPlayer();
+    }
+
+    const float DeathCamSeconds = 2.5f;
 
     public void AddAmmo(float amount)
     {
@@ -425,6 +674,19 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         }
     }
 
+    // Shared rigidbody setup for spawn (Init) and vehicle exit (SetFree). The 80kg mass
+    // matters: depenetration against other 80kg soldiers must not launch this body.
+    void ConfigureBody()
+    {
+        Body = gameObject.AddComponent<Rigidbody>();
+        Body.mass = 80f;
+        Body.drag = 0.2f;
+        Body.angularDrag = 10f;
+        Body.interpolation = RigidbodyInterpolation.Interpolate;
+        Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
+        Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+    }
+
     public override void PlayIntroAnim()
     {
         Animator.PlayIntroAnim();
@@ -438,7 +700,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     void Reload()
     {
-        IPhxWeapon weap = Weapons[0][WeaponIdx[0]];
+        IPhxWeapon weap = GetEquippedWeapon(0);
         if (weap != null)
         {
             Animator.Anim.SetState(1, Animator.StandReload);
@@ -454,13 +716,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         Context = PhxSoldierContext.Free;
         CurrentSeat = null;
 
-        Body = gameObject.AddComponent<Rigidbody>();
-        Body.mass = 80f;
-        Body.drag = 0.2f;
-        Body.angularDrag = 10f;
-        Body.interpolation = RigidbodyInterpolation.Interpolate;
-        Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
-        Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
+        ConfigureBody();
 
         GetComponent<SkinnedMeshRenderer>().enabled = true;
         GetComponent<CapsuleCollider>().enabled = true;
@@ -662,6 +918,103 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
 
 
+    // Set when a sprint drains the bar, cleared only once enough has come back.
+    bool Winded;
+
+    /// <summary>
+    /// Fraction of the bar that must return before a winded soldier can sprint
+    /// again.
+    /// </summary>
+    /// <remarks>
+    /// Hysteresis, and it is not cosmetic. EnergyMinSprint is typically a tiny
+    /// floor, so gating on that alone let a soldier who ran the bar to zero
+    /// re-enter Sprint a frame or two later, empty it again, and repeat -
+    /// flipping between the sprint and run animations several times a second.
+    /// A human taps sprint and never notices; the AI holds it down permanently,
+    /// which is why their animation looked broken and the player's didn't.
+    /// </remarks>
+    const float RecoveredEnergyFraction = 0.35f;
+
+    /// <summary>
+    /// True when there is enough stamina left to break into a sprint.
+    /// EnergyMinSprint is the odf's own floor; Winded adds the recovery
+    /// requirement on top of it.
+    /// </summary>
+    bool CanStartSprint => MaxEnergy <= 0f || (!Winded && CurEnergy >= C.EnergyMinSprint.Get());
+
+    /// <summary>True once a sprint has drained the bar and must end.</summary>
+    bool IsEnergySpent => MaxEnergy > 0f && CurEnergy <= 0f;
+
+    /// <summary>True while too winded to sprint - the AI stops asking.</summary>
+    public bool IsWinded => Winded;
+
+    /// <summary>True while actually sprinting, for anything that reacts to it.</summary>
+    public bool IsSprinting => State == PhxControlState.Sprint;
+
+    /// <summary>
+    /// Spend stamina on something other than sprinting - a force power, a
+    /// saber deflection. Returns false and spends nothing when the bar cannot
+    /// cover it, so the caller can refuse the whole action rather than
+    /// performing a free one.
+    /// </summary>
+    /// <remarks>
+    /// Classes with no EnergyBar always succeed. That covers every non-hero
+    /// unit, which is exactly right: these costs are a hero resource, and a
+    /// class that declares no bar should not be silently unable to act.
+    /// </remarks>
+    public bool TrySpendEnergy(float amount)
+    {
+        if (amount <= 0f) return true;
+
+        float max = MaxEnergy;
+        if (max <= 0f) return true;
+        if (CurEnergy < amount) return false;
+
+        CurEnergy -= amount;
+        if (CurEnergy <= 0f)
+        {
+            Winded = true;
+        }
+        return true;
+    }
+
+    /// <summary>
+    /// Drain stamina while sprinting, restore it otherwise. Classes with no
+    /// EnergyBar (most vehicles-as-soldiers and some award units) opt out
+    /// entirely, keeping the old unlimited behaviour for them.
+    /// </summary>
+    void TickEnergy(float deltaTime)
+    {
+        float max = MaxEnergy;
+        if (max <= 0f) return;
+
+        if (State == PhxControlState.Sprint)
+        {
+            CurEnergy -= C.EnergyDrainSprint.Get() * deltaTime;
+        }
+        else
+        {
+            // BF2 splits recovery in two: a faster rate when standing still,
+            // a slower one while otherwise moving.
+            bool idle = Controller == null || Controller.MoveDirection.sqrMagnitude < 0.01f;
+            float restore = idle ? C.EnergyRestoreIdle.Get() : C.EnergyRestore.Get();
+            CurEnergy += restore * deltaTime;
+        }
+
+        CurEnergy = Mathf.Clamp(CurEnergy, 0f, max);
+
+        // Latch on empty, release only after a real recovery - see the note on
+        // RecoveredEnergyFraction.
+        if (CurEnergy <= 0f)
+        {
+            Winded = true;
+        }
+        else if (Winded && CurEnergy >= max * RecoveredEnergyFraction)
+        {
+            Winded = false;
+        }
+    }
+
     void UpdateState(float deltaTime)
     {
         if (Context == PhxSoldierContext.Pilot && Controller != null)
@@ -674,6 +1027,8 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         AnimationCorrection();
 
         AlertTimer = Mathf.Max(AlertTimer - deltaTime, 0f);
+
+        TickEnergy(deltaTime);
 
         if (Controller == null)
         {
@@ -720,9 +1075,18 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             
         }
 
+        // Flattening the view direction collapses to a zero vector whenever the
+        // controller is looking straight up or down - an AI aiming at a target
+        // directly overhead, or at its own feet. LookRotation answers that with
+        // a zero quaternion, which Rigidbody.MoveRotation then rejects outright
+        // ("Rotation quaternions must be unit length") and the soldier stops
+        // turning. Keep facing where we already face instead.
         Vector3 lookWalkForward = Controller.ViewDirection;
         lookWalkForward.y = 0f;
-        LookRot = Quaternion.LookRotation(lookWalkForward);
+        if (lookWalkForward.sqrMagnitude > 1e-6f)
+        {
+            LookRot = Quaternion.LookRotation(lookWalkForward);
+        }
 
         LandTimer = Mathf.Max(LandTimer - deltaTime, 0f);
         TurnTimer = Mathf.Max(TurnTimer - deltaTime, 0f);
@@ -857,24 +1221,32 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 // ---------------------------------------------------------------------------------------------
                 // Shooting
                 // ---------------------------------------------------------------------------------------------
-                if (Weapons[0][WeaponIdx[0]].GetReloadProgress() == 1f)
+                // Channels can legitimately hold no weapon: several stock
+                // classes reference award/dispenser weapons that aren't in the
+                // loaded side lvls ("Cannot find weapon class ..."), which
+                // leaves a null slot. Reaching through it threw a
+                // NullReferenceException every frame an AI held secondary fire.
+                IPhxWeapon primary = GetEquippedWeapon(0);
+                IPhxWeapon secondary = GetEquippedWeapon(1);
+
+                if (primary != null && primary.GetReloadProgress() == 1f)
                 {
                     if (Controller.ShootPrimary)
                     {
                         // only fire when not currently turning
                         //Weap.Fire = TurnTimer <= 0f;
 
-                        Weapons[0][WeaponIdx[0]].Fire(Controller, Controller.GetAimPosition());
+                        primary.Fire(Controller, Controller.GetAimPosition());
                         AlertTimer = AlertTime;
                     }
-                    else if (Controller.ShootSecondary)
+                    else if (Controller.ShootSecondary && secondary != null)
                     {
-                        Weapons[1][WeaponIdx[1]].Fire(Controller, Controller.GetAimPosition());
+                        secondary.Fire(Controller, Controller.GetAimPosition());
                         AlertTimer = AlertTime;
                     }
                     else if (Controller.Reload)
                     {
-                        Weapons[0][WeaponIdx[0]].Reload();
+                        primary.Reload();
                         //Anim.SetTrigger("Reload");
                     }
                 }
@@ -909,7 +1281,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             // Stand
             if (State == PhxControlState.Stand)
             {
-                if (Controller.MoveDirection.y > 0.2f && Controller.Sprint && Weapons[0][WeaponIdx[0]].GetReloadProgress() == 1f)
+                IPhxWeapon sprintWeap = GetEquippedWeapon(0);
+                if (Controller.MoveDirection.y > 0.2f && Controller.Sprint && CanStartSprint &&
+                    (sprintWeap == null || sprintWeap.GetReloadProgress() == 1f))
                 {
                     State = PhxControlState.Sprint;
                 }
@@ -924,7 +1298,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 }
 
                 // TODO: verify
-                else if (Controller.MoveDirection.y > 0.8f && Controller.Sprint)
+                else if (Controller.MoveDirection.y > 0.8f && Controller.Sprint && CanStartSprint)
                 {
                     State = PhxControlState.Sprint;
                 }
@@ -933,7 +1307,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             // Sprint
             if (State == PhxControlState.Sprint)
             {
-                if (Controller.MoveDirection.y < 0.8f || !Controller.Sprint)
+                // Running the bar dry drops you out of the sprint, same as
+                // letting go of the key.
+                if (Controller.MoveDirection.y < 0.8f || !Controller.Sprint || IsEnergySpent)
                 {
                     State = PhxControlState.Stand;
                 }
@@ -1002,18 +1378,34 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             return;
         }
 
-        // This doesn't seem to cause reordering within the native renderer...
-        // No way to check this besides performance comparison.
-        gameObject.layer = 2; // ignore raycast
-        Grounded = Physics.CheckSphere(transform.position, 0.4f);
-        gameObject.layer = 10; // soldier
+        // An earlier version of this check temporarily switched our own layer
+        // to "Ignore Raycast" so a self-overlap wouldn't register as ground -
+        // the capsule's bottom hemisphere (radius 0.4, centered 0.35m above
+        // this exact point) overlaps this exact sphere query, so without
+        // exclusion it always finds itself. That trick didn't work:
+        // Physics.CheckSphere's no-mask overload defaults to
+        // Physics.AllLayers, not Physics.DefaultRaycastLayers like Raycast
+        // does, so "Ignore Raycast" was never actually excluded - the check
+        // could self-detect (or detect a teammate standing close by) as
+        // ground, or simply be unreliable, either of which reads as
+        // "grounded" when there is nothing solid underneath: the falling
+        // animation flashes and the character drops through, since the only
+        // thing that lets gravity move a soldier at all is the not-grounded
+        // Jump state - the Stand/Crouch/Sprint states below pin position via
+        // MovePosition every tick regardless of gravity. An explicit mask,
+        // the same one SettleOnGround already uses to find a spawn point,
+        // removes the ambiguity and also correctly excludes other soldiers.
+        Grounded = Physics.CheckSphere(transform.position, 0.4f, PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore);
 
         if ((PrevState == PhxControlState.Stand || PrevState == PhxControlState.Sprint) && State == PhxControlState.Jump)
         {
             if (JumpTimer > 0f)
             {
-                // Intentional jump
-                Body.AddForce(Vector3.up * Mathf.Sqrt(C.JumpHeight * -2f * Physics.gravity.y) + CurrSpeed, ForceMode.VelocityChange);
+                // Intentional jump. Scaling JumpHeight rather than the launch
+                // velocity keeps the ODF value meaning what it says - a height
+                // in metres - so the relative feel of each class is preserved.
+                float jumpHeight = C.JumpHeight * Mathf.Max(0.1f, PhxBF3.Config.JumpHeightScale);
+                Body.AddForce(Vector3.up * Mathf.Sqrt(jumpHeight * -2f * Physics.gravity.y) + CurrSpeed, ForceMode.VelocityChange);
             }
             else
             {

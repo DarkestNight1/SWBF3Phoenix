@@ -171,6 +171,11 @@ public class PhxLuaRuntime
         Register<Action<object[]>>(printf);
         RegisterLuaFunctions(typeof(PhxLuaAPI));
 
+        // Callback slots are a fixed, hand-rolled table. Running out used to
+        // fail silently and only show up as a segfault inside lua_pcall much
+        // later, so state the headroom up front.
+        Debug.Log($"[Phx] Lua callbacks registered: {L.UsedCallbackCount}/{Lua.MaxCallbacks}");
+
         PhxGame inst = PhxGame.Instance;
         Debug.Assert(inst != null);
         L.PushString(inst.VersionString);
@@ -308,7 +313,13 @@ public class PhxLuaRuntime
         int numPushed = 0;
         for (int i = 0; i < values.Length; ++i)
         {
-            numPushed += PushValue(L, values[i], values[i].GetType(), bIsUnicode);
+            // A null element (e.g. a boxed int? with no value, such as a
+            // missing killer/victim instance index on a character-death
+            // event) has no Type to query - PushValue already handles null
+            // by pushing Lua nil, but only if we don't crash calling
+            // GetType() on it first.
+            object value = values[i];
+            numPushed += PushValue(L, value, value?.GetType(), bIsUnicode);
         }
         return numPushed;
     }
@@ -381,6 +392,10 @@ public class PhxLuaRuntime
 
     public bool Execute(IntPtr binary, ulong buffSize, string name)
     {
+        // Remembered so an unresolved global can name the script that wanted
+        // it - see ReportUnresolvedGlobal.
+        LastExecutedScript = name;
+
         if (Check(L.DoBuffer(binary, buffSize, name)))
         {
             Debug.LogFormat("'{0}' executed.", name);
@@ -388,6 +403,46 @@ public class PhxLuaRuntime
         }
         return false;
     }
+
+    static string LastExecutedScript = "<none>";
+    static readonly HashSet<string> ReportedMissingGlobals = new HashSet<string>();
+
+    /// <summary>
+    /// Turn a Lua "attempt to call global `X' (a nil value)" error into a single
+    /// actionable line naming the unimplemented API function.
+    ///
+    /// This matters more than it looks: a missing global is not a no-op. Lua
+    /// raises a runtime error and ABANDONS the rest of the script, so one
+    /// unimplemented function can disable an entire game mode. The same error
+    /// then repeats every frame, burying everything else in the console.
+    ///
+    /// Reporting each name once, with the script that wanted it, turns the noise
+    /// into a ranked worklist of what to implement next.
+    /// </summary>
+    void ReportUnresolvedGlobal(string luaErrMsg)
+    {
+        if (string.IsNullOrEmpty(luaErrMsg)) return;
+
+        const string marker = "attempt to call global ";
+        int start = luaErrMsg.IndexOf(marker, StringComparison.Ordinal);
+        if (start < 0) return;
+
+        // Lua quotes the name as `Name' - a backtick and a single quote.
+        start = luaErrMsg.IndexOf('`', start);
+        if (start < 0) return;
+        int end = luaErrMsg.IndexOf('\'', start + 1);
+        if (end < 0) return;
+
+        string globalName = luaErrMsg.Substring(start + 1, end - start - 1);
+        if (!ReportedMissingGlobals.Add(globalName)) return;
+
+        Debug.LogError($"[Phx] Unimplemented Lua API function '{globalName}', " +
+                       $"first wanted by script '{LastExecutedScript}'. The calling " +
+                       "script was aborted at that point - implement it in PhxLuaAPI.");
+    }
+
+    /// <summary>Every unimplemented global seen so far, for reporting.</summary>
+    public static IEnumerable<string> GetUnresolvedGlobals() => ReportedMissingGlobals;
 
     public bool ExecuteFile(string path)
     {
@@ -412,6 +467,36 @@ public class PhxLuaRuntime
         return CallLuaFunctionOnStack(nResults, bUnicodeParams, bUnicodeReturn, args);
     }
 
+    /// <summary>
+    /// Whether a global of this name exists and is callable.
+    /// </summary>
+    /// <remarks>
+    /// For the entry points BF2 treats as optional - ScriptPreInit, and the
+    /// per-mode hooks most maps don't define. Calling one and letting it fail
+    /// works, but reports a missing optional function as an error and leaves
+    /// the non-function value on the Lua stack, so probing every load
+    /// both cried wolf and leaked a stack slot each time.
+    /// </remarks>
+    public bool HasLuaFunction(string fnName)
+    {
+        if (string.IsNullOrEmpty(fnName)) return false;
+
+        L.GetGlobal(fnName);
+        bool exists = L.IsFunction(-1);
+        L.Pop(1);
+        return exists;
+    }
+
+    /// <summary>
+    /// Call <paramref name="fnName"/> only if the script defines it. Returns
+    /// false when it does not, without logging.
+    /// </summary>
+    public bool CallLuaFunctionIfPresent(string fnName, int nResults, params object[] args)
+    {
+        if (!HasLuaFunction(fnName)) return false;
+        return CallLuaFunction(fnName, nResults, args) != null;
+    }
+
     // Returns null on failure. If nResults was zero, the result will be an empty array
     object[] CallLuaFunction(int fnRefIdx, int nResults, bool bUnicodeParams, bool bUnicodeReturn, object[] args)
     {
@@ -427,6 +512,11 @@ public class PhxLuaRuntime
         if (!L.IsFunction(-1))
         {
             Debug.LogErrorFormat("Given LFunction does not point to a lua function but '{0}'!", L.Type(-1).ToString());
+
+            // Pop what we pushed. Returning without this leaves the offending
+            // value on the stack for the rest of the session, so every failed
+            // lookup permanently grew the stack.
+            L.Pop(1);
             return null;
         }
         PushValues(args, bUnicodeParams);
@@ -685,6 +775,7 @@ public class PhxLuaRuntime
             {
                 string luaErrMsg = L.ToString(-1);
                 Debug.LogErrorFormat("[LUA] {0} ERROR: {1}", error.ToString(), luaErrMsg);
+                ReportUnresolvedGlobal(luaErrMsg);
             }
             else
             {

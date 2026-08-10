@@ -56,11 +56,41 @@ public class PhxBolt : PhxOrdnance
         Body.transform.rotation = Rot;
         Body.velocity = Body.transform.forward * BoltClass.Velocity;
 
-        // Will need to unignore these!!!!
-        foreach (Collider IgnoredCollider in Originator.GetIgnoredColliders())
+        // A bolt must not hit the shooter it just left, so the firer's own
+        // colliders are ignored - but bolts are POOLED, and Physics.IgnoreCollision
+        // pairs persist on the collider until they are explicitly cleared.
+        // Leaving them set meant every recycled bolt accumulated permanent
+        // ignore pairs with everyone who had ever fired it: after a minute of
+        // combat a large share of bolts passed harmlessly through the player
+        // and through AI, so shots stopped registering as kills in both
+        // directions. Release the previous set before taking a new one.
+        ClearIgnoredColliders();
+
+        List<Collider> ignored = Originator.GetIgnoredColliders();
+        for (int i = 0; i < ignored.Count; ++i)
         {
-            Physics.IgnoreCollision(IgnoredCollider, Coll);
+            Collider c = ignored[i];
+            if (c == null) continue;
+            Physics.IgnoreCollision(c, Coll, true);
+            IgnoredColliders.Add(c);
         }
+    }
+
+    // Colliders this bolt is currently ignoring, so the pairs can be undone
+    // when it is recycled.
+    readonly List<Collider> IgnoredColliders = new List<Collider>();
+
+    void ClearIgnoredColliders()
+    {
+        for (int i = 0; i < IgnoredColliders.Count; ++i)
+        {
+            Collider c = IgnoredColliders[i];
+            // The shooter may have died and been destroyed since we fired; a
+            // destroyed collider has no pair left to undo.
+            if (c == null || Coll == null) continue;
+            Physics.IgnoreCollision(c, Coll, false);
+        }
+        IgnoredColliders.Clear();
     }
 
 
@@ -90,7 +120,46 @@ public class PhxBolt : PhxOrdnance
 
     public override void Destroy()
     {
-        
+        ClearIgnoredColliders();
+    }
+
+    /// <summary>
+    /// Hand the bolt to a saber wielder if the thing it hit is one and it
+    /// chooses to take it. A deflected bolt keeps flying on a new heading with
+    /// the deflector credited for anything it goes on to kill.
+    /// </summary>
+    bool TryDeflect(Collision coll, PhxPawnController instigator)
+    {
+        PhxSaberDeflect deflector = PhxSaberDeflect.Find(coll.collider);
+        if (deflector == null) return false;
+
+        Vector3 direction = Body.velocity.sqrMagnitude > 0.0001f
+            ? Body.velocity.normalized
+            : transform.forward;
+
+        Vector3 shooterPosition = instigator?.Pawn?.GetInstance() != null
+            ? instigator.Pawn.GetInstance().transform.position
+            : transform.position - direction * 20f;
+
+        Vector3? deflected = deflector.TryDeflect(transform.position, direction, shooterPosition);
+        if (!deflected.HasValue) return false;
+
+        // Reassign ownership: a returned bolt is the deflector's shot now, so
+        // the kill and the friendly-fire check both follow the blade.
+        PhxSoldier wielder = deflector.GetComponentInParent<PhxSoldier>();
+        IPhxWeapon saber = wielder?.GetPrimaryWeapon();
+        if (saber != null)
+        {
+            OwnerWeapon = saber;
+        }
+
+        Body.transform.rotation = Quaternion.LookRotation(deflected.Value);
+        Body.velocity = deflected.Value * BoltClass.Velocity;
+
+        SCENE.EffectsManager.PlayEffectOnce(BoltClass.ImpactEffectShield.Get(),
+                                            transform.position,
+                                            Quaternion.LookRotation(deflected.Value));
+        return true;
     }
 
     void OnCollisionEnter(Collision coll)
@@ -99,8 +168,25 @@ public class PhxBolt : PhxOrdnance
         // the TARGET'S HealthType (person/animal/droid/vehicle/building) -
         // not by what C# type it happens to be. See PhxDamage.
         ContactPoint contact = coll.GetContact(0);
+
+        // The firing controller, so the kill is credited to whoever pulled the
+        // trigger. OwnerWeapon is set in Setup() from the weapon that spawned
+        // this bolt; a weapon with no controller (a map turret firing on its
+        // own) leaves this null, which ReportKill treats as unattributed.
+        PhxPawnController instigator = OwnerWeapon?.GetOwnerController();
+
+        // A saber wielder gets first refusal on the bolt. Asked here rather
+        // than anywhere in the hero code because this is the one place a bolt
+        // and the thing it is about to hit are both known - and a deflected
+        // bolt must not have damaged anything on the way past.
+        if (TryDeflect(coll, instigator))
+        {
+            return;
+        }
+
         PhxDamage.ApplyToCollider(coll.collider, BoltClass.MaxDamage,
-                                  BoltClass.GetDamageScales(), contact.point);
+                                  BoltClass.GetDamageScales(), contact.point,
+                                  isSaber: false, instigator: instigator);
 
         if (gameObject.activeSelf)
         {
@@ -113,7 +199,7 @@ public class PhxBolt : PhxOrdnance
 
             SCENE.EffectsManager.PlayEffectOnce(BoltClass.ImpactEffectStatic.Get(), Pos, Rot);
 
-            PhxExplosionManager.AddExplosion(null, BoltClass.ExplosionName.Get() as PhxExplosionClass, Pos, Rot);
+            PhxExplosionManager.AddExplosion(instigator, BoltClass.ExplosionName.Get() as PhxExplosionClass, Pos, Rot);
             if (coll.gameObject.layer == LayerMask.NameToLayer("TerrainAll"))
             {
                 SCENE.EffectsManager.PlayEffectOnce(BoltClass.ImpactEffectTerrain.Get(), Point.point, Quaternion.identity);
@@ -135,9 +221,23 @@ public class PhxBolt : PhxOrdnance
 
             if (BoltClass.ExplosionName.Get() != null)
             {
-                PhxExplosionManager.AddExplosion(null, BoltClass.ExplosionName.Get() as PhxExplosionClass, Point.point, Quaternion.identity);            
+                PhxExplosionManager.AddExplosion(null, BoltClass.ExplosionName.Get() as PhxExplosionClass, Point.point, Quaternion.identity);
             }
-    
+
+            // Surface response on top of the ordnance's own authored effects:
+            // the flash that lights the wall around the hit, the scorch mark,
+            // and whatever the surface itself does about being hit (snow
+            // displacement, water ripples). The odf's effect above stays the
+            // artistic answer - this adds only what the 2005 format had no way
+            // to express.
+            BFImpactResponse.Play(Point.point, Point.normal,
+                                  Body.velocity.sqrMagnitude > 0.0001f
+                                      ? Body.velocity.normalized
+                                      : transform.forward,
+                                  BFSurfaceQuery.Resolve(coll.collider, Point.point),
+                                  scale: 1f, instigator: gameObject,
+                                  playSurfaceParticles: false);
+
             ParentPool.Free(this);
         }
     }

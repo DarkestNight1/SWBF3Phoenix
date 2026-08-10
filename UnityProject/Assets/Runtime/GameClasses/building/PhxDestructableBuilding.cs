@@ -9,15 +9,36 @@ using LibSWBF2.Wrappers;
 using System.Runtime.ExceptionServices;
 
 
-public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.ClassProperties>, IPhxTickable, IPhxDamageableInstance
+public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.ClassProperties>,
+                                        IPhxTickable, IPhxDamageableInstance, IPhxDestructible
 {
     protected static PhxScene SCENE => PhxGame.GetScene();
 
-    public class ClassProperties : PhxClass 
+    public class ClassProperties : PhxClass
     {
         public PhxProp<float> MaxHealth = new PhxProp<float>(100.0f);
 
         public PhxProp<PhxClass> ExplosionName = new PhxProp<PhxClass>(null);
+
+        // Buildings carry authored break-up geometry exactly like vehicles do;
+        // the same section, read the same way, so both go through
+        // PhxChunkSpawner rather than each inventing its own debris.
+        public PhxPropertySection ChunkSection = new PhxPropertySection(
+            "CHUNKSECTION",
+            ("ChunkGeometryName", new PhxProp<string>(null)),
+            ("ChunkNodeName", new PhxProp<string>(null)),
+            ("ChunkTerrainCollisions", new PhxProp<int>(1)),
+            ("ChunkTerrainEffect", new PhxProp<string>("")),
+            ("ChunkPhysics", new PhxProp<string>("")),
+            ("ChunkOmega", new PhxMultiProp(typeof(float), typeof(float), typeof(float))),
+            ("ChunkBounciness", new PhxProp<float>(0.0f)),
+            ("ChunkStickiness", new PhxProp<float>(0.0f)),
+            ("ChunkSpeed", new PhxProp<float>(1.0f)),
+            ("ChunkUpFactor", new PhxProp<float>(0.5f)),
+            ("ChunkTrailEffect", new PhxProp<string>("")),
+            ("ChunkSmokeEffect", new PhxProp<string>("")),
+            ("ChunkSmokeNodeName", new PhxProp<string>(""))
+        );
 
         // This is the reason for the addition of the IsGeometryManuallyInitialized check in ClassLoader.
         // The different geometries will be attached as children of the root and activated/deactivated
@@ -89,6 +110,7 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
         }
 
         CurHealth.Set(C.MaxHealth.Get());
+        PhxDestructionRegistry.Register(this);
 
         EntityClass EC = C.EntityClass;
         EC.GetAllProperties(out uint[] properties, out string[] values);
@@ -133,10 +155,11 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
         {
             if (!IsBuilt)
             {
-                BuiltGeometry.SetActive(true);
-                DestroyedGeometry.SetActive(false);
-                
+                if (BuiltGeometry != null) BuiltGeometry.SetActive(true);
+                if (DestroyedGeometry != null) DestroyedGeometry.SetActive(false);
+
                 IsBuilt = true;
+                PhxDestructionRegistry.Register(this);
 
                 // Call respawn events
                 PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectRespawnName, gameObject.name.ToLower());
@@ -152,31 +175,59 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
             if (IsBuilt)
             {
                 PhxExplosionManager.AddExplosion(null, C.ExplosionName.Get() as PhxExplosionClass, transform.position, transform.rotation);
-                
-                BuiltGeometry.SetActive(false);
-                DestroyedGeometry.SetActive(true);
+
+                // Authored break-up, thrown from the still-standing geometry
+                // before it is swapped out for the ruin.
+                PhxChunkSpawner.Spawn(C.ChunkSection, transform, Vector3.zero);
+
+                if (BuiltGeometry != null) BuiltGeometry.SetActive(false);
+                if (DestroyedGeometry != null) DestroyedGeometry.SetActive(true);
 
                 IsBuilt = false;
+                PhxDestructionRegistry.NotifyDestroyed(this);
 
-                // Call death events
-                PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectKillName, gameObject.name.ToLower());
+                // Call death events. Scripts subscribe by object name, by the
+                // owning team, or by odf class - all three describe the same
+                // kill, so all three fire together.
+                int? objIdx = PhxGame.GetScene()?.GetInstanceIndex(this);
+                PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectKillName, gameObject.name.ToLower(), objIdx);
+                PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectKillTeam, Team.Get(), objIdx);
+                PhxClass killedClass = GetClassRef();
+                if (killedClass != null)
+                {
+                    PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectKillClass, killedClass.Name.ToLower(), objIdx);
+                }
             }
         }
     }
 
-    public override void Destroy(){}
-
-
-    public void AddDamage(float damage)
+    public override void Destroy()
     {
-        if (CurHealth.Get() > 0f)
-        {
-            CurHealth.Set(-1f);
-        }
-        else 
-        {
-            CurHealth.Set(1f);
-        }
+        PhxDestructionRegistry.Unregister(this);
     }
 
+    // ------------------------------------------------------ IPhxDestructible
+    public PhxDestructibleKind DestructibleKind => PhxDestructibleKind.Building;
+    public GameObject GetGameObject() => gameObject;
+    public string GetDestructibleName() => name;
+    public int GetTeam() => Team.Get();
+    public float GetHealth() => CurHealth.Get();
+    public float GetMaxHealth() => C == null ? 0f : C.MaxHealth.Get();
+    public bool IsDestroyed => !IsBuilt;
+
+    /// <summary>
+    /// Subtract damage from health.
+    /// </summary>
+    /// <remarks>
+    /// This used to ignore <paramref name="damage"/> entirely and toggle
+    /// health between -1 and 1, so a destructible building was levelled by the
+    /// first scratch it took - a single rifle round destroyed a bunker - and
+    /// the next hit rebuilt it. MaxHealth was authored and never consulted.
+    /// </remarks>
+    public void AddDamage(float damage)
+    {
+        if (damage <= 0f || !IsBuilt) return;
+
+        CurHealth.Set(Mathf.Max(CurHealth.Get() - damage, 0f));
+    }
 }

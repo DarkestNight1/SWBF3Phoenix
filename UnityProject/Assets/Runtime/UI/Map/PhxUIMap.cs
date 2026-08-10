@@ -74,6 +74,13 @@ public class PhxUIMap : MonoBehaviour
 
     void Start()
     {
+        // Objective markers ride along on every map instance (HUD minimap and
+        // the character-select map alike); added here so no prefab needs it.
+        if (GetComponent<PhxUIMapMarkers>() == null)
+        {
+            gameObject.AddComponent<PhxUIMapMarkers>();
+        }
+
         RawImage image = GetComponent<RawImage>();
         Debug.Assert(image != null);
 

@@ -105,13 +105,25 @@ public sealed class PhxMultiProp : IPhxPropRef
 
     public T Get<T>(int argIdx)
     {
-        return Values.Count > 0 ? (T)Values[0][argIdx] : default;
+        return Get<T>(argIdx, 0);
     }
 
     //Should mix both with an optional argument (public T Get<T>(int argIdx, int secIdx = 0))
     public T Get<T>(int argIdx, int secIdx)
     {
-        return Values.Count > 0 ? (T)Values[secIdx][argIdx] : default;
+        // Bounds-check the index actually being used. This previously tested
+        // only "Values.Count > 0" and then indexed Values[secIdx], so any
+        // caller reading past the first entry threw IndexOutOfRange - and a
+        // throw here escapes through AssignProp all the way out of the scene
+        // import, costing the entire map for one short odf line.
+        if (secIdx < 0 || secIdx >= Values.Count) return default;
+
+        object[] args = Values[secIdx];
+        if (args == null || argIdx < 0 || argIdx >= args.Length) return default;
+
+        // A value that failed conversion is left null; don't unbox it into a
+        // value type.
+        return args[argIdx] is T typed ? typed : default;
     }
 
     public int GetCount()
@@ -129,7 +141,14 @@ public sealed class PhxMultiProp : IPhxPropRef
         {
             Debug.LogWarning($"Encountered more property args ({split.Count}) than expected ({ExpectedTypes.Length})! Ignoring surplus...");
         }
-        for (int i = 0; i < vals.Length; ++i)
+        // Convert only the args the odf actually supplied. Iterating to
+        // vals.Length regardless threw ArgumentOutOfRange on any line with
+        // fewer tokens than expected (a HoloImageGeometry naming a model but
+        // no team, say), and that throw escapes through AssignProp and out of
+        // the scene import - one short odf line used to cost the whole map.
+        // Missing trailing args stay at their default instead.
+        int provided = Mathf.Min(split.Count, vals.Length);
+        for (int i = 0; i < provided; ++i)
         {
             split[i] = split[i].Trim();
             try

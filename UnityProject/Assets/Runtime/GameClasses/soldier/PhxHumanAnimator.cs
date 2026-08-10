@@ -185,6 +185,35 @@ public struct PhxHumanAnimator
     int CurrentBankIdx;
     Dictionary<string, int> NameToBankIdx;
 
+    /// <summary>
+    /// Direction a death or hit came from, relative to the victim's facing.
+    /// The order matches the order of the state arrays below.
+    /// </summary>
+    public enum PhxImpactDir { Front = 0, Back = 1, Left = 2, Right = 3 }
+
+    // BF2 ships death and hit reactions only in the rifle bank - the lookup
+    // table has human_rifle_stand_death_* and human_rifle_stand_hit* but no
+    // pistol or bazooka equivalents - so they are registered once and shared
+    // by every weapon bank rather than per bank like locomotion.
+    static readonly string[] DEATH_ANIMS =
+    {
+        "human_rifle_stand_death_forward",
+        "human_rifle_stand_death_backward",
+        "human_rifle_stand_death_left",
+        "human_rifle_stand_death_right",
+    };
+
+    static readonly string[] HIT_ANIMS =
+    {
+        "human_rifle_stand_hitfront",
+        "human_rifle_stand_hitback",
+        "human_rifle_stand_hitleft",
+        "human_rifle_stand_hitright",
+    };
+
+    int[] DeathStates;
+    int[] HitStates;
+
 
     public PhxHumanAnimator(Transform root, string[] weaponAnimBanks)
     {
@@ -192,6 +221,13 @@ public struct PhxHumanAnimator
         ClipPlayers = new Dictionary<string, CraPlayer>();
         NameToBankIdx = new Dictionary<string, int>();
         CurrentBankIdx = 0;
+
+        // This is a struct, so every field has to be definitely assigned before
+        // the constructor may call any instance method (GetPlayer below is one).
+        // Allocating here rather than at the point of use keeps that rule
+        // satisfied; the contents are filled in after the banks are built.
+        DeathStates = new int[DEATH_ANIMS.Length];
+        HitStates = new int[HIT_ANIMS.Length];
 
         if (weaponAnimBanks == null || weaponAnimBanks.Length == 0)
         {
@@ -231,6 +267,19 @@ public struct PhxHumanAnimator
             }
         }
 
+        // Death plays on layer 0 (full body, replacing locomotion). Hit
+        // reactions play on layer 1 masked to the spine, so a soldier flinches
+        // from the waist up while still running - which is how BF2 reads.
+        for (int i = 0; i < DEATH_ANIMS.Length; ++i)
+        {
+            DeathStates[i] = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, DEATH_ANIMS[i], false));
+        }
+
+        for (int i = 0; i < HIT_ANIMS.Length; ++i)
+        {
+            HitStates[i] = Anim.AddState(1, GetPlayer(root, HUMANM_BANKS, HIT_ANIMS[i], false, "bone_a_spine"));
+        }
+
         Anim.SetState(0, StandIdle);
         Anim.SetState(1, CraSettings.STATE_NONE);
 
@@ -240,6 +289,54 @@ public struct PhxHumanAnimator
     public void PlayIntroAnim()
     {
         Anim.SetState(1, StandReload);
+    }
+
+    /// <summary>
+    /// Which way an impact arrived, expressed in the victim's own frame.
+    /// Front/back is decided first because a shot from behind reading as a
+    /// side hit looks far worse than the reverse.
+    /// </summary>
+    public static PhxImpactDir ImpactDirFrom(Transform victim, Vector3 worldImpactPos)
+    {
+        Vector3 toImpact = worldImpactPos - victim.position;
+        toImpact.y = 0f;
+        if (toImpact.sqrMagnitude < 0.0001f)
+        {
+            return PhxImpactDir.Front;
+        }
+        toImpact.Normalize();
+
+        float fwd = Vector3.Dot(victim.forward, toImpact);
+        float right = Vector3.Dot(victim.right, toImpact);
+
+        if (Mathf.Abs(fwd) >= Mathf.Abs(right))
+        {
+            return fwd >= 0f ? PhxImpactDir.Front : PhxImpactDir.Back;
+        }
+        return right >= 0f ? PhxImpactDir.Right : PhxImpactDir.Left;
+    }
+
+    /// <summary>
+    /// Collapse in the direction of the shot. Clears the upper body layer so a
+    /// half-played reload or shoot animation cannot fight the death pose.
+    /// </summary>
+    public void PlayDeath(PhxImpactDir dir)
+    {
+        if (DeathStates == null) return;
+
+        Anim.SetState(1, CraSettings.STATE_NONE);
+        Anim.SetState(0, DeathStates[(int)dir]);
+    }
+
+    /// <summary>
+    /// Flinch from a non-fatal hit. Deliberately does not touch layer 0, so
+    /// the soldier keeps moving and shooting through it.
+    /// </summary>
+    public void PlayHitReaction(PhxImpactDir dir)
+    {
+        if (HitStates == null) return;
+
+        Anim.SetState(1, HitStates[(int)dir]);
     }
 
     public void SetAnimBank(string bankName)

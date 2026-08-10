@@ -41,7 +41,18 @@ unity_lib_dir="${repopath}/UnityProject/Assets/Lib/"
 # Build LibSWBF2 cpp lib 
 rm -rf ${build_dir}
 
-cmake -S "${src_dir}" -B "${build_dir}" -D CMAKE_BUILD_TYPE=${mode}
+# CMake 4.0 removed compatibility with cmake_minimum_required(VERSION < 3.5).
+# The bundled third-party libs still declare 3.2 (glm) and 3.1 (fmt), so a
+# stock CMake 4.x install fails to configure. Restoring the policy floor is the
+# supported escape hatch; on CMake 3.x it is left off entirely.
+policy_fix=""
+cmake_major="$(cmake --version | head -1 | sed -E 's/.*version ([0-9]+).*/\1/')"
+if [[ "$cmake_major" =~ ^[0-9]+$ ]] && [ "$cmake_major" -ge 4 ]; then
+    echo "Detected CMake ${cmake_major}.x - enabling legacy policy support for glm/fmt."
+    policy_fix="-D CMAKE_POLICY_VERSION_MINIMUM=3.5"
+fi
+
+cmake -S "${src_dir}" -B "${build_dir}" -D CMAKE_BUILD_TYPE=${mode} ${policy_fix}
 cmake --build "${build_dir}" --target all --parallel -- -j $numThreads
 
 

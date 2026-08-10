@@ -10,7 +10,9 @@ public class PhxPlayerController : PhxPawnController
     public bool CancelPressed { get; private set; }
     Vector3? TargetPos;
 
-    float VehicleEnterTimer = 1.0f;
+    // Starts expired so entering works from the first frame of a match.
+    const float VehicleEnterCooldown = 1.0f;
+    float VehicleEnterTimer = 0.0f;
 
 
     public PhxPlayerController()
@@ -108,23 +110,25 @@ public class PhxPlayerController : PhxPawnController
         
         SwitchSeat = Input.GetKeyDown(KeyCode.G);
 
-        if (Input.GetKeyDown(KeyCode.E))
+        // Vehicle enter/exit.
+        //
+        // GetKeyDown is already edge-triggered, so no debounce is needed to stop
+        // repeats; the cooldown exists only to stop you re-entering the vehicle
+        // you just stepped out of. It therefore must start on an ACCEPTED press.
+        // The previous version restarted it on every press - including presses
+        // that found no vehicle - so mashing E next to one (the natural reaction
+        // when nothing happens) held the timer permanently above zero and entry
+        // never fired at all. It also started at 1.0, dead-zoning the first
+        // second of every match.
+        VehicleEnterTimer = Mathf.Max(VehicleEnterTimer - Time.deltaTime, -0.01f);
+
+        // Drop a request nobody consumed, so a stale one can't fire later.
+        Enter = false;
+
+        if (Input.GetKeyDown(KeyCode.E) && VehicleEnterTimer <= 0.0f)
         {
             Enter = true;
+            VehicleEnterTimer = VehicleEnterCooldown;
         }
-
-        if (Enter)
-        {
-            if (VehicleEnterTimer <= 0.0f)
-            {
-                VehicleEnterTimer = 1.0f;
-            }
-            else 
-            {
-                Enter = false;
-            }
-        }
-
-        VehicleEnterTimer = Mathf.Clamp(VehicleEnterTimer - Time.deltaTime, -0.01f, 1.0f);
     }
 }

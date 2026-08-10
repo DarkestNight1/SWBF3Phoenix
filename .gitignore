@@ -1,2 +1,5 @@
 *.DS_Store
 *.log
+# Unity manual activation request (machine-specific, not source)
+*.alf
+*.ulf

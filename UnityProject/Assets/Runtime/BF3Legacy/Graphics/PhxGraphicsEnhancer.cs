@@ -76,13 +76,12 @@ public class PhxGraphicsEnhancer : MonoBehaviour
             mb.maximumVelocity.Override(200f);
         }, "motion blur");
 
-        TryAdd(() =>
-        {
-            DepthOfField dof = PostProfile.Add<DepthOfField>(true);
-            dof.focusMode.Override(DepthOfFieldMode.UsePhysicalCamera);
-            dof.nearFocusStart.Override(0f);
-            dof.nearFocusEnd.Override(0.6f);       // only very close geometry
-        }, "depth of field");
+        // NOTE: no DepthOfField. It was configured with
+        // focusMode = UsePhysicalCamera, but nearFocusStart/nearFocusEnd only
+        // take effect in Manual mode - so those "only very close geometry"
+        // limits did nothing and the physical camera's default aperture blurred
+        // the whole scene at distance, on every map. A third-person shooter
+        // wants the battlefield sharp, so this is dropped rather than retuned.
 
         TryAdd(() =>
         {
@@ -104,16 +103,15 @@ public class PhxGraphicsEnhancer : MonoBehaviour
             fg.intensity.Override(0.12f);
         }, "film grain");
 
-        TryAdd(() =>
-        {
-            // Physically based sky: real Rayleigh/Mie scattering, so horizons
-            // and dusk read correctly on planet maps.
-            PhysicallyBasedSky sky = PostProfile.Add<PhysicallyBasedSky>(true);
-            sky.groundTint.Override(new Color(0.25f, 0.24f, 0.22f));
-
-            VisualEnvironment env = PostProfile.Add<VisualEnvironment>(true);
-            env.skyType.Override((int)SkyType.PhysicallyBased);
-        }, "physically based sky");
+        // NOTE: no PhysicallyBasedSky / VisualEnvironment override here.
+        //
+        // Forcing HDRP's Rayleigh/Mie atmosphere globally replaced whatever sky
+        // each map authored and dumped a huge amount of sky light into every
+        // scene - blowing out bright-albedo maps (Mygeeto's snow) to pure white
+        // while the visible skybox stayed dark. Like the Fog override removed
+        // from PhxModernLighting, a sky is inherently per-map: it is meaningless
+        // on interiors and space maps, and destructive where the level already
+        // ships its own. Maps now keep their imported sky.
 
         PostVolume = gameObject.AddComponent<Volume>();
         PostVolume.isGlobal = true;

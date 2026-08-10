@@ -32,6 +32,10 @@ public static class PhxModManager
         public bool Enabled;
         public bool IsBF3Legacy;
         public long SizeBytes;
+
+        // Set when this folder is a recognized component of the BF3 Legacy
+        // release (see PhxBF3LegacyContent), null for any other mod.
+        public PhxBF3LegacyContent.PhxBF3ModComponent BF3Component;
     }
 
     static readonly List<PhxModInfo> Mods = new List<PhxModInfo>();
@@ -40,8 +44,22 @@ public static class PhxModManager
 
     public static bool IsBF3LegacyInstalled { get; private set; }
 
+    /// <summary>Recognized BF3 Legacy pack components that are installed and enabled.</summary>
+    public static IReadOnlyList<PhxBF3LegacyContent.PhxBF3ModComponent> BF3LegacyComponents => DetectedComponents;
+
+    static readonly List<PhxBF3LegacyContent.PhxBF3ModComponent> DetectedComponents =
+        new List<PhxBF3LegacyContent.PhxBF3ModComponent>();
+
+    /// <summary>
+    /// True when BF3 Legacy add-on components are installed without the main
+    /// mod folder ("BF3") they all build on. Those add-ons reference sides and
+    /// scripts the main mod ships, so their maps load into a broken state.
+    /// </summary>
+    public static bool BF3LegacyMissingBaseMod { get; private set; }
+
     // Folder name fragments identifying the BF3 Legacy mod family and other
-    // recovered-BF3-content releases.
+    // recovered-BF3-content releases. Only a fallback: exact component names
+    // come from PhxBF3LegacyContent.
     static readonly string[] BF3LegacyMarkers = { "bf3", "battlefront3", "battlefront iii", "legacy" };
 
 
@@ -60,7 +78,9 @@ public static class PhxModManager
     public static void Scan()
     {
         Mods.Clear();
+        DetectedComponents.Clear();
         IsBF3LegacyInstalled = false;
+        BF3LegacyMissingBaseMod = false;
 
         PhxGame game = PhxGame.Instance;
         if (game == null || game.AddonPath == null || !game.AddonPath.Exists())
@@ -79,14 +99,17 @@ public static class PhxModManager
             bool scriptOn = File.Exists(System.IO.Path.Combine(dir, "addme.script"));
             bool scriptOff = File.Exists(System.IO.Path.Combine(dir, "addme.script.off"));
 
+            PhxBF3LegacyContent.PhxBF3ModComponent component = PhxBF3LegacyContent.GetComponent(folder);
+
             PhxModInfo mod = new PhxModInfo
             {
                 FolderName = folder,
-                DisplayName = folder,
+                DisplayName = component != null ? component.DisplayName : folder,
                 Path = new PhxPath(dir),
                 HasAddmeScript = scriptOn || scriptOff,
                 Enabled = scriptOn && !disabled.Contains(folder.ToLowerInvariant()),
-                IsBF3Legacy = IsBF3LegacyFolder(folder),
+                IsBF3Legacy = component != null || IsBF3LegacyFolder(folder),
+                BF3Component = component,
                 SizeBytes = 0, // filled lazily; full recursive size is slow on big mods
             };
             Mods.Add(mod);
@@ -95,7 +118,17 @@ public static class PhxModManager
             {
                 IsBF3LegacyInstalled = true;
             }
+            if (component != null && mod.Enabled)
+            {
+                DetectedComponents.Add(component);
+            }
         }
+
+        // Every add-on component (Cato Hunt, Extended Engagements, MoreMaps, ...)
+        // is built on top of the main "BF3" folder's sides and scripts.
+        BF3LegacyMissingBaseMod =
+            DetectedComponents.Count > 0 &&
+            !DetectedComponents.Exists(c => c.FolderName == "BF3");
 
         // sort: explicit order first, then alphabetical
         Mods.Sort((a, b) =>
@@ -110,6 +143,22 @@ public static class PhxModManager
 
         Debug.Log($"[BF3Legacy] Mod scan: {Mods.Count} addon(s) found" +
                   (IsBF3LegacyInstalled ? ", Battlefront III Legacy detected!" : ""));
+
+        if (DetectedComponents.Count > 0)
+        {
+            Debug.Log($"[BF3Legacy] Battlefront III Legacy {PhxBF3LegacyContent.PackVersion} pack: " +
+                      $"{DetectedComponents.Count}/{PhxBF3LegacyContent.Components.Count} components enabled");
+            foreach (PhxBF3LegacyContent.PhxBF3ModComponent c in DetectedComponents)
+            {
+                Debug.Log($"[BF3Legacy]   - {c.DisplayName} ({c.Author})");
+            }
+        }
+        if (BF3LegacyMissingBaseMod)
+        {
+            Debug.LogWarning("[BF3Legacy] BF3 Legacy add-ons are installed without the main 'BF3' " +
+                             "folder they depend on. Their maps will load with missing sides and " +
+                             "scripts - install the full pack into GameData/addon.");
+        }
     }
 
     static bool IsBF3LegacyFolder(string folder)

@@ -35,6 +35,32 @@ public enum PhxNavSize
     Huge,
 }
 
+/// <summary>
+/// What a unit can do on an arc, beyond simply fitting down it.
+/// </summary>
+/// <remarks>
+/// Arcs carry <see cref="EArcAttributeFlags"/> saying that traversing them
+/// requires a jump or a jet-jump, and until now nothing read them: every unit
+/// was routed over every arc its size allowed. A rifleman handed a route
+/// across a jet-jump gap walks to the edge, cannot cross, and stands there -
+/// which reads as broken pathfinding rather than as the unit being unable to
+/// make the jump. Declaring what a unit can do lets those arcs be excluded at
+/// planning time so it gets a route it can actually walk.
+/// </remarks>
+[System.Flags]
+public enum PhxNavCapabilities
+{
+    None = 0,
+    Jump = 1,
+    JetJump = 2,
+
+    /// <summary>Infantry: can hop a low obstacle, cannot jet.</summary>
+    Infantry = Jump,
+
+    /// <summary>Jet troopers and anything that flies over a gap.</summary>
+    JetInfantry = Jump | JetJump,
+}
+
 public class PhxNavGraph
 {
     public class PhxHub
@@ -43,6 +69,9 @@ public class PhxNavGraph
         public Vector3 Position;
         public float Radius;
         public readonly List<int> ArcIndices = new List<int>();
+
+        /// <summary>The authored record this hub projects, kept for weights.</summary>
+        public BFPlanningHubDefinition Source;
     }
 
     public class PhxArc
@@ -54,6 +83,20 @@ public class PhxNavGraph
         public EArcAttributeFlags Attributes;
         public float Length;
         public bool Blocked;          // BlockPlanningGraphArcs
+
+        /// <summary>
+        /// Index of the authored connection this arc came from. One authored
+        /// connection becomes two runtime arcs unless it is OneWay, so this is
+        /// not the arc's own index.
+        /// </summary>
+        public int SourceIndex = -1;
+
+        /// <summary>
+        /// Extra traversal cost from runtime conditions - danger, crowding,
+        /// recent deaths. Always >= 0 and expressed in metres so it composes
+        /// with Length without a separate scale.
+        /// </summary>
+        public float DynamicCost;
     }
 
     class PhxBarrier
@@ -76,7 +119,12 @@ public class PhxNavGraph
 
         public bool Blocks(EArcFilterFlags size)
         {
-            if (Flag == 0) return true;
+            // A barrier with no filter bits carries no information about what
+            // it stops. Treating that as "blocks everything" was the
+            // conservative reading, but conservative in the wrong direction:
+            // the failure mode is an AI that cannot move at all, which is worse
+            // than one that walks somewhere it shouldn't.
+            if (Flag == 0) return false;
             return ((EArcFilterFlags)Flag & size) != 0;
         }
     }
@@ -105,65 +153,71 @@ public class PhxNavGraph
 
     // ------------------------------------------------------------------ load
 
-    /// <summary>Import the planning graph from the world level.</summary>
-    public void LoadPlanning(Level worldLevel)
+    /// <summary>
+    /// Build the runtime graph from the captured planning data.
+    /// </summary>
+    /// <remarks>
+    /// Reads the semantic source database rather than the native wrappers on
+    /// purpose. The database is captured once per load and is the record every
+    /// other consumer (validation, tooling, mod diffing) works from; a second
+    /// independent walk of the wrappers here would be a second place for the
+    /// coordinate conventions and the hub-index base arithmetic to drift.
+    /// </remarks>
+    public void LoadPlanning(BFSourceDatabase source)
     {
-        if (worldLevel == null) return;
+        if (source == null) return;
 
-        PlanSet[] planSets = worldLevel.Get<PlanSet>();
-        if (planSets == null || planSets.Length == 0)
+        IReadOnlyList<BFPlanningHubDefinition> hubs = source.PlanningHubs;
+        if (hubs.Count == 0)
         {
             Debug.Log("[BF3Legacy] No planning graph in this level - AI will fall back to direct steering");
             return;
         }
 
-        foreach (PlanSet set in planSets)
+        foreach (BFPlanningHubDefinition h in hubs)
         {
-            Hub[] hubs = set.GetHubs();
-            Connection[] connections = set.GetConnections();
-            if (hubs == null) continue;
-
-            int hubBase = Hubs.Count;
-
-            foreach (Hub h in hubs)
+            PhxHub hub = new PhxHub
             {
-                // world-space data uses the *FromLibWorld conversions (Z flip),
-                // matching how regions/instances are imported
-                PhxHub hub = new PhxHub
-                {
-                    Name = h.Name,
-                    Position = UnityUtils.Vec3FromLibWorld(h.Position),
-                    Radius = h.Radius,
-                };
-                if (!string.IsNullOrEmpty(hub.Name) && !HubsByName.ContainsKey(hub.Name.ToLowerInvariant()))
-                {
-                    HubsByName.Add(hub.Name.ToLowerInvariant(), Hubs.Count);
-                }
-                Hubs.Add(hub);
+                Name = h.Name,
+                Position = h.Position,
+                Radius = h.Radius,
+                Source = h,
+            };
+            if (!string.IsNullOrEmpty(hub.Name) && !HubsByName.ContainsKey(hub.Name.ToLowerInvariant()))
+            {
+                HubsByName.Add(hub.Name.ToLowerInvariant(), Hubs.Count);
+            }
+            Hubs.Add(hub);
+            source.MarkImported(h.Source);
+        }
+
+        foreach (BFPlanningArcDefinition c in source.PlanningArcs)
+        {
+            if (c.StartHub < 0 || c.StartHub >= Hubs.Count ||
+                c.EndHub < 0 || c.EndHub >= Hubs.Count)
+            {
+                continue;
             }
 
-            if (connections == null) continue;
-            foreach (Connection c in connections)
+            EArcFilterFlags filter = (EArcFilterFlags)c.FilterFlags;
+            EArcAttributeFlags attrs = (EArcAttributeFlags)c.AttributeFlags;
+
+            int sourceIndex = c.Source == null ? -1 : c.Source.Ordinal;
+            AddArc(c.StartHub, c.EndHub, c.Name, filter, attrs, sourceIndex);
+
+            // arcs are bidirectional unless flagged OneWay
+            if ((attrs & EArcAttributeFlags.OneWay) == 0)
             {
-                int from = hubBase + c.Start;
-                int to = hubBase + c.End;
-                if (from < 0 || from >= Hubs.Count || to < 0 || to >= Hubs.Count) continue;
-
-                AddArc(from, to, c.Name, c.FilterFlags, c.AttributeFlags);
-
-                // arcs are bidirectional unless flagged OneWay
-                if ((c.AttributeFlags & EArcAttributeFlags.OneWay) == 0)
-                {
-                    AddArc(to, from, c.Name, c.FilterFlags, c.AttributeFlags);
-                }
+                AddArc(c.EndHub, c.StartHub, c.Name, filter, attrs, sourceIndex);
             }
+            source.MarkImported(c.Source);
         }
 
         AllocateScratch();
         Debug.Log($"[BF3Legacy] Planning graph loaded: {Hubs.Count} hubs, {Arcs.Count} arcs");
     }
 
-    void AddArc(int from, int to, string name, EArcFilterFlags filter, EArcAttributeFlags attrs)
+    void AddArc(int from, int to, string name, EArcFilterFlags filter, EArcAttributeFlags attrs, int sourceIndex)
     {
         PhxArc arc = new PhxArc
         {
@@ -173,41 +227,43 @@ public class PhxNavGraph
             Filter = filter,
             Attributes = attrs,
             Length = Vector3.Distance(Hubs[from].Position, Hubs[to].Position),
+            SourceIndex = sourceIndex,
         };
         Hubs[from].ArcIndices.Add(Arcs.Count);
         Arcs.Add(arc);
     }
 
-    /// <summary>Import AI keep-out barriers from a world layer.</summary>
-    public void LoadBarriers(World world)
+    /// <summary>Import AI keep-out barriers from a captured world layer.</summary>
+    public void LoadBarriers(BFWorldDefinition world)
     {
-        if (world == null) return;
+        // Called once per world layer, and most layers of a map contribute
+        // none - so report only what this layer added, next to the new total.
+        // Logging the running total unconditionally printed the same "328 AI
+        // barriers loaded" line once for every layer.
+        if (world == null || world.Barriers.Count == 0) return;
 
-        Barrier[] barriers = world.GetBarriers();
-        if (barriers == null) return;
-
-        foreach (Barrier b in barriers)
+        foreach (BFBarrierDefinition b in world.Barriers)
         {
-            // Size is a half-extent (same convention as regions). Barriers are
-            // authored as flat footprints, so give Y generous height to catch
-            // ground units regardless of terrain height at that spot.
-            Vector3 size = UnityUtils.Vec3FromLibWorld(b.Size);
+            // Size is a half-extent (same convention as regions).
+            //
+            // The Y extent used to be forced to a minimum of 25m "to catch
+            // ground units regardless of terrain height". That turns every
+            // authored barrier into a 50m-tall slab, and on a map like
+            // Coruscant - 328 barriers over a 155-hub graph - the inflated
+            // volumes swallow the whole planning graph. Use the authored size.
             Barriers.Add(new PhxBarrier
             {
                 Name = b.Name,
-                Position = UnityUtils.Vec3FromLibWorld(b.Position),
-                Rotation = UnityUtils.QuatFromLibWorld(b.Rotation),
-                HalfExtents = new Vector3(Mathf.Abs(size.x),
-                                          Mathf.Max(Mathf.Abs(size.y), 25f),
-                                          Mathf.Abs(size.z)),
-                Flag = b.Flag,
+                Position = b.Position,
+                Rotation = b.Rotation,
+                HalfExtents = b.HalfExtents,
+                Flag = b.Flags,
             });
+            BFSourceDatabase.Active.MarkImported(b.Source);
         }
 
-        if (Barriers.Count > 0)
-        {
-            Debug.Log($"[BF3Legacy] {Barriers.Count} AI barriers loaded");
-        }
+        Debug.Log($"[BF3Legacy] {world.Barriers.Count} AI barriers from layer " +
+                  $"'{world.Name}' ({Barriers.Count} total)");
     }
 
     void AllocateScratch()
@@ -257,6 +313,196 @@ public class PhxNavGraph
         }
     }
 
+    // ----------------------------------------------------- designer weights
+
+    // Reused per A* expansion so a path query allocates nothing.
+    readonly Dictionary<int, float> BranchScratch = new Dictionary<int, float>();
+
+    /// <summary>
+    /// Which of the five authored planning layers a unit size uses.
+    /// </summary>
+    /// <remarks>
+    /// The branch-weight buffer is laid out per planning layer and a hub
+    /// carries exactly five layer counts, while the arc filter has six size
+    /// bits. The mod tools name five AI types (SOLDIER / HOVER / SMALL /
+    /// MEDIUM / HUGE), so the sixth filter bit has no layer of its own; Large
+    /// is folded onto the last layer with Huge. Nothing downstream breaks if
+    /// this mapping is wrong - a mismatched layer yields weights that don't
+    /// decode, and <see cref="FillBranchWeights"/> falls back to unweighted
+    /// routing.
+    /// </remarks>
+    static int LayerOf(PhxNavSize size)
+    {
+        switch (size)
+        {
+            case PhxNavSize.Soldier: return 0;
+            case PhxNavSize.Hover: return 1;
+            case PhxNavSize.Small: return 2;
+            case PhxNavSize.Medium: return 3;
+            default: return 4;                  // Large / Huge
+        }
+    }
+
+    /// <summary>
+    /// Decode the designers' route preferences for leaving <paramref name="hubIdx"/>
+    /// on the way to <paramref name="goalHub"/>, as sourceArcIndex -> weight in [0,1].
+    /// </summary>
+    /// <remarks>
+    /// The quantized buffer is [layer][slot][destination hub]: one byte per
+    /// destination for each of the layer's outgoing slots, packing a 5-bit
+    /// weight above a 2-bit selector into the hub's connection table. Decoded
+    /// the same way the native helper does, but without its per-call name
+    /// search over every hub, so it is affordable inside A*.
+    /// </remarks>
+    void FillBranchWeights(int hubIdx, int layer, int goalHub, Dictionary<int, float> into)
+    {
+        into.Clear();
+
+        BFPlanningHubDefinition src = Hubs[hubIdx].Source;
+        if (src == null || src.SetHubCount <= 0) return;
+
+        IReadOnlyList<byte> weights = src.QuantizedWeights;
+        IReadOnlyList<byte> perLayer = src.ConnectionsPerLayer;
+        IReadOnlyList<byte> conIndices = src.ConnectionIndices;
+        if (weights.Count == 0 || perLayer.Count <= layer || conIndices.Count == 0) return;
+
+        int dest = goalHub - src.SetHubBase;
+        if (dest < 0 || dest >= src.SetHubCount) return;
+
+        int offset = dest;
+        for (int j = 0; j < layer; ++j)
+        {
+            offset += perLayer[j] * src.SetHubCount;
+        }
+
+        int slots = perLayer[layer];
+        for (int s = 0; s < slots; ++s)
+        {
+            int k = offset + s * src.SetHubCount;
+            if (k < 0 || k >= weights.Count) return;
+
+            byte packed = weights[k];
+            int slot = packed & 0x3;
+            if (slot >= conIndices.Count) continue;
+
+            int sourceArc = src.SetArcBase + conIndices[slot];
+            float weight = (packed >> 3) / 31.0f;
+
+            // Several slots can select the same connection; the designers'
+            // strongest preference is the one that should count.
+            if (!into.TryGetValue(sourceArc, out float known) || weight > known)
+            {
+                into[sourceArc] = weight;
+            }
+        }
+    }
+
+    // ------------------------------------------------------- dynamic costs
+
+    /// <summary>
+    /// A transient reason to avoid part of the map: a firefight, a burning
+    /// wreck, the spot four squadmates just died on.
+    /// </summary>
+    struct PhxCostSource
+    {
+        public Vector3 Position;
+        public float Radius;
+        public float Cost;
+        public float ExpiresAt;
+    }
+
+    readonly List<PhxCostSource> CostSources = new List<PhxCostSource>();
+    bool CostsDirty;
+
+    /// <summary>
+    /// Make routes through a volume more expensive without making them
+    /// impossible.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately a cost and not a block. The authored graph is the
+    /// authority on what is reachable - that is the whole reason this project
+    /// imports it - so tactical state may only bias the choice between
+    /// authored routes. Blocking here is how you get AI that refuses to move.
+    ///
+    /// <paramref name="cost"/> is in metres of equivalent detour, so a value
+    /// near the map's typical arc length makes AI take a comparable-length
+    /// alternative and a much larger one makes it take almost any alternative.
+    /// </remarks>
+    public void AddDynamicCost(Vector3 position, float radius, float cost, float duration)
+    {
+        if (radius <= 0f || cost <= 0f) return;
+
+        CostSources.Add(new PhxCostSource
+        {
+            Position = position,
+            Radius = radius,
+            Cost = cost,
+            ExpiresAt = duration > 0f ? Time.time + duration : float.MaxValue,
+        });
+        CostsDirty = true;
+    }
+
+    public void ClearDynamicCosts()
+    {
+        if (CostSources.Count == 0) return;
+        CostSources.Clear();
+        CostsDirty = true;
+    }
+
+    /// <summary>Drop expired cost sources. Cheap enough to call every frame.</summary>
+    public void TickDynamicCosts()
+    {
+        float now = Time.time;
+        for (int i = CostSources.Count - 1; i >= 0; --i)
+        {
+            if (now >= CostSources[i].ExpiresAt)
+            {
+                CostSources.RemoveAt(i);
+                CostsDirty = true;
+            }
+        }
+    }
+
+    void RebuildDynamicCosts()
+    {
+        CostsDirty = false;
+
+        for (int i = 0; i < Arcs.Count; ++i)
+        {
+            Arcs[i].DynamicCost = 0f;
+        }
+        if (CostSources.Count == 0) return;
+
+        for (int i = 0; i < Arcs.Count; ++i)
+        {
+            PhxArc arc = Arcs[i];
+            Vector3 a = Hubs[arc.From].Position;
+            Vector3 b = Hubs[arc.To].Position;
+
+            float total = 0f;
+            for (int s = 0; s < CostSources.Count; ++s)
+            {
+                PhxCostSource cs = CostSources[s];
+                float d = DistanceToSegment(cs.Position, a, b);
+                if (d >= cs.Radius) continue;
+
+                // Linear falloff: full cost at the centre, nothing at the rim.
+                total += cs.Cost * (1f - d / cs.Radius);
+            }
+            arc.DynamicCost = total;
+        }
+    }
+
+    static float DistanceToSegment(Vector3 point, Vector3 a, Vector3 b)
+    {
+        Vector3 ab = b - a;
+        float lenSqr = ab.sqrMagnitude;
+        if (lenSqr < 1e-4f) return Vector3.Distance(point, a);
+
+        float t = Mathf.Clamp01(Vector3.Dot(point - a, ab) / lenSqr);
+        return Vector3.Distance(point, a + ab * t);
+    }
+
     // ------------------------------------------------------------- querying
 
     /// <summary>
@@ -282,7 +528,8 @@ public class PhxNavGraph
         return false;
     }
 
-    public int FindNearestHub(Vector3 position, PhxNavSize size)
+    public int FindNearestHub(Vector3 position, PhxNavSize size,
+                              PhxNavCapabilities capabilities = PhxNavCapabilities.JetInfantry)
     {
         int best = -1;
         float bestDist = float.MaxValue;
@@ -297,7 +544,11 @@ public class PhxNavGraph
             bool usable = false;
             foreach (int a in Hubs[i].ArcIndices)
             {
-                if (!Arcs[a].Blocked && (Arcs[a].Filter & need) != 0) { usable = true; break; }
+                if (Arcs[a].Blocked) continue;
+                if ((Arcs[a].Filter & need) == 0) continue;
+                if (!CanTraverse(Arcs[a], capabilities)) continue;
+                usable = true;
+                break;
             }
             if (!usable) continue;
 
@@ -316,13 +567,14 @@ public class PhxNavGraph
     /// should fall back to direct steering). Path is written as world
     /// positions, excluding the start hub.
     /// </summary>
-    public bool FindPath(Vector3 from, Vector3 to, PhxNavSize size, List<Vector3> outPath)
+    public bool FindPath(Vector3 from, Vector3 to, PhxNavSize size, List<Vector3> outPath,
+                         PhxNavCapabilities capabilities = PhxNavCapabilities.JetInfantry)
     {
         outPath.Clear();
         if (!IsLoaded) return false;
 
-        int start = FindNearestHub(from, size);
-        int goal = FindNearestHub(to, size);
+        int start = FindNearestHub(from, size, capabilities);
+        int goal = FindNearestHub(to, size, capabilities);
         if (start < 0 || goal < 0) return false;
         if (start == goal)
         {
@@ -331,6 +583,8 @@ public class PhxNavGraph
         }
 
         EArcFilterFlags need = ToFilter(size);
+        int layer = LayerOf(size);
+        if (CostsDirty) RebuildDynamicCosts();
 
         for (int i = 0; i < Hubs.Count; ++i)
         {
@@ -362,19 +616,55 @@ public class PhxNavGraph
 
             Closed[current] = true;
 
+            // The designers' own route preferences out of this hub toward the
+            // goal. Decoded per expansion rather than precomputed: the table
+            // is keyed by destination, so there is nothing to precompute that
+            // isn't a full hubs-by-hubs matrix.
+            FillBranchWeights(current, layer, goal, BranchScratch);
+
             foreach (int arcIdx in Hubs[current].ArcIndices)
             {
                 PhxArc arc = Arcs[arcIdx];
                 if (arc.Blocked) continue;
                 if ((arc.Filter & need) == 0) continue;      // wrong unit size
+                if (!CanTraverse(arc, capabilities)) continue;   // can't make the jump
 
                 int next = arc.To;
                 if (Closed[next]) continue;
 
-                // avoid routing through keep-out volumes that block this size
-                if (IsBlockedByBarrier(Hubs[next].Position, size)) continue;
+                // NOTE: barriers deliberately do NOT veto graph traversal.
+                //
+                // They used to, and it made pathfinding fail completely -
+                // measured at 0 of 4157 requests routed on Coruscant. The data
+                // says why: of that map's 328 barriers, 321 carry flag 3
+                // (Soldier|Small), so nearly every one of them "blocks"
+                // soldiers, and with a 155-hub graph the volumes cover it
+                // wholesale. Every neighbour was rejected and A* could never
+                // expand.
+                //
+                // The authored graph is the authority: if a level designer
+                // connected two hubs with a soldier-traversable arc, soldiers
+                // may use it - which is exactly how the original game behaves
+                // with this same graph and these same barriers. Barriers are
+                // keep-out volumes for free movement and for Lua to toggle,
+                // and are applied in steering rather than here.
 
-                float tentative = GScore[current] + arc.Length;
+                // Cost = authored length, biased by how strongly the designers
+                // weighted this branch toward the goal, plus whatever the
+                // current fight has made this stretch worth avoiding.
+                //
+                // The bias multiplier stays >= 1 (an unweighted or unknown arc
+                // costs exactly its length, the least-preferred arc costs
+                // double) and the dynamic term is non-negative, so the
+                // straight-line heuristic remains admissible and A* still
+                // returns an optimal route under these costs.
+                float bias = 1f;
+                if (arc.SourceIndex >= 0 && BranchScratch.TryGetValue(arc.SourceIndex, out float weight))
+                {
+                    bias = 2f - Mathf.Clamp01(weight);
+                }
+
+                float tentative = GScore[current] + arc.Length * bias + arc.DynamicCost;
                 if (tentative < GScore[next])
                 {
                     CameFrom[next] = current;
@@ -402,6 +692,32 @@ public class PhxNavGraph
     float Heuristic(int a, int b)
     {
         return Vector3.Distance(Hubs[a].Position, Hubs[b].Position);
+    }
+
+    /// <summary>
+    /// Whether a unit with these capabilities can get down this arc.
+    /// </summary>
+    /// <remarks>
+    /// The two attribute bits are requirements, not hints: an arc flagged
+    /// JetJump is a gap that must be jetted across. Vehicles are given the
+    /// full capability set by their callers rather than being special-cased
+    /// here - a hover crossing a "jump" arc is a designer's shorthand for a
+    /// drop the vehicle can take, and refusing it would strand ground vehicles
+    /// on maps that use those arcs on ordinary routes.
+    /// </remarks>
+    static bool CanTraverse(PhxArc arc, PhxNavCapabilities capabilities)
+    {
+        if ((arc.Attributes & EArcAttributeFlags.JetJump) != 0 &&
+            (capabilities & PhxNavCapabilities.JetJump) == 0)
+        {
+            return false;
+        }
+        if ((arc.Attributes & EArcAttributeFlags.Jump) != 0 &&
+            (capabilities & PhxNavCapabilities.Jump) == 0)
+        {
+            return false;
+        }
+        return true;
     }
 
     public static EArcFilterFlags ToFilter(PhxNavSize size)

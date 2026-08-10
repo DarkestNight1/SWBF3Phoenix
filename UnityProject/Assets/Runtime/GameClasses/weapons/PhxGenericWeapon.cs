@@ -310,6 +310,18 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
                 }
             }
 
+            // Gunfire is the loudest thing on a battlefield, and until now the
+            // AI was completely deaf to it - you could shoot at a squad from
+            // behind cover and none of them would react until one happened to
+            // get line of sight. Reported once per salvo rather than per
+            // projectile so a shotgun isn't eight times louder than a rifle.
+            if (OwnerController != null)
+            {
+                PhxAIPerception.Report(FirePoint != null ? FirePoint.position : transform.position,
+                                       OwnerController.Team,
+                                       PhxAIPerception.GunshotLoudness);
+            }
+
             if (++SalvoIndex >= C.SalvoCount || C.TriggerSingle.Get())
             {
                 SalvoIndex = 0;

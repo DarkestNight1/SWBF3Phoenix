@@ -5,7 +5,7 @@ It does so by loading all assets and scripts from the original game files at run
 <br/>
 This project aims for full compatibility with the vanilla game files, and as best as possible with custom maps.<br/>
 <br/>
-On top of that, this fork adds the **BF3 Legacy** feature set — recreating Free Radical's cancelled Battlefront III / Elite Squadron on the Phoenix runtime: capital ship destruction, ground-to-space "Vertical Battlefront" layers, lightsaber dismemberment, modernized squad AI with difficulty tiers, modern HDRP lighting + 4K graphics, extended mod support (including detection of the community [Battlefront III Legacy mod](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy)), and data-driven greybox recreations of documented BF3 maps (Coruscant, Cato Neimoidia, Dantooine, Bespin, Desolation Station, Tatooine). See [docs/BF3Legacy.md](docs/BF3Legacy.md).<br/>
+On top of that, this fork adds the **BF3 Legacy** feature set — recreating Free Radical's cancelled Battlefront III / Elite Squadron on the Phoenix runtime: capital ship destruction, ground-to-space "Vertical Battlefront" layers, lightsaber dismemberment, modernized squad AI with difficulty tiers, modern HDRP lighting + 4K graphics, extended mod support — including first-class support for the community [Battlefront III Legacy mod](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy), whose current 3.1 all-in-one pack loads and plays here without the 1.3 patch or UI Remaster it normally requires, and data-driven greybox recreations of documented BF3 maps (Coruscant, Cato Neimoidia, Dantooine, Bespin, Desolation Station, Tatooine). See [docs/BF3Legacy.md](docs/BF3Legacy.md).<br/>
 <br/>
 *Click image to view Video*<br/>
 [![Star Wars Battlefront II (2005) Unity Runtime - Update - Tech Demo](https://img.youtube.com/vi/hjSlM5hEfGk/0.jpg)](https://www.youtube.com/watch?v=hjSlM5hEfGk)
@@ -43,17 +43,33 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
     * `LibSWBF2.dll`
     * `LibSWBF2.NET.dll`
     * `lua50-swbf2-x64.dll`
-7. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
-8. Open the package manager in *Windows -> Package Manager* and select the "High Definition RP" package. On the right side, expand "Samples" and import "Particle System Shader Samples"
-9. Navigate to `Runtime/Scenes` and open PhxMainScene
-10. In the hierarchy, select *Game* and set in the inspector:
-    * `Mission List Path` to empty!
-    * `Game Path String` is **optional** in this fork — the game auto-detects
-      Battlefront II in the usual Steam/GOG/retail locations, and shows an
-      in-game setup panel if it can't. Set it only to override that. E.g.:
-      `C:\Program Files (x86)\Steam\steamapps\common\Star Wars Battlefront II`
-11. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Windows` as Target Platform and `x86_64` as Architecture.
-12. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
+7. Double-click `InstallMod.bat`. It finds your Battlefront II install, installs
+   any mod download it finds (or drag the mod folder onto it), and points the
+   Unity project at the game. See [INSTALL.md](INSTALL.md).
+8. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
+9. Navigate to `Runtime/Scenes` and open PhxMainScene, and press Play.
+
+   In this fork steps 7–9 are all there is: the HDRP *Particle System Shader
+   Samples* import and the *Game* object's inspector fields are handled for
+   you (`PhxFirstTimeEditorSetup` imports the sample on first load;
+   `Game Path String` and `Mission List Path` stay empty and the game
+   auto-detects). The Console prints the resolved game path on load. To
+   override detection anyway, set `Game Path String` on the *Game* object.
+10. To ship it, double-click `BuildPhoenix.bat` (or use *Phoenix > Build
+    Self-Contained Player...* in the editor). That builds a standalone player
+    **into your Battlefront II folder** as a self-contained install:
+
+    ```
+    Star Wars - Battlefront 2/
+        BattlefrontII.exe                <- the original game, untouched
+        GameData/                        <- shared data, and addon/ mods
+        Phoenix/Phoenix.exe              <- Phoenix + BF3 Legacy
+        Play Phoenix (BF3 Legacy).lnk    <- shortcut to it
+    ```
+
+    The player finds `GameData` by walking up from its own folder, so it needs
+    no configuration and writes nothing outside `Phoenix/`. Delete that folder
+    to uninstall. See [INSTALL.md](INSTALL.md).
 
 ## Linux
 ### Installation Requirements
@@ -74,16 +90,17 @@ On top of that, this fork adds the **BF3 Legacy** feature set — recreating Fre
     * `libSWBF2.so`
     * `LibSWBF2.NET.dll`
     * `liblua50-swbf2-x64.so`
-8. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
-9. Open the package manager in *Windows -> Package Manager* and select the "High Definition RP" package. On the right side, expand "Samples" and import "Particle System Shader Samples"
-10. Navigate to `Runtime/Scenes` and open PhxMainScene
-11. In the hierarchy, select *Game* and set in the inspector:
-    * `Mission List Path` to empty!
-    * `Game Path String` is **optional** in this fork — the game auto-detects
-      Battlefront II in the usual Steam/GOG locations, and shows an in-game
-      setup panel if it can't. Set it only to override that.
-12. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Linux` as Target Platform and `x86_64` as Architecture.
-13. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
+8. Point the project at your Battlefront II install (and optionally install a
+   mod at the same time): `./Tools/install_mod.sh --setup` — or
+   `./Tools/install_mod.sh <mod folder or archive>`. See [INSTALL.md](INSTALL.md).
+9. Add the `UnityProject` directory to UnityHub and open it. This might take a while.
+10. Navigate to `Runtime/Scenes` and open PhxMainScene, and press Play.
+
+    As on Windows, the HDRP *Particle System Shader Samples* import and the
+    *Game* object's inspector fields are handled for you; the Console prints
+    the resolved game path on load.
+11. Go to *File -> Build Settings*, select *PC, Max & Linux Standalone* and choose `Linux` as Target Platform and `x86_64` as Architecture.
+12. Click *Build and Run* and choose the `BUILD` directory, residing in the root of this repository
 
 
 ## Known problems

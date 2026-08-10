@@ -49,6 +49,7 @@ public class PhxBF3AIController : PhxAIController
     float StrafeDir = 1f;
     float StrafeTimer;
     float RetargetTimer;
+    float DistractionTimer;
     float GrenadeTimer = 5f;
     float GrenadePulse;
 
@@ -93,9 +94,30 @@ public class PhxBF3AIController : PhxAIController
         }
     }
 
+    /// <summary>
+    /// What this unit may do to cross an arc.
+    /// </summary>
+    /// <remarks>
+    /// Jump only, for infantry: nothing here has a working jetpack, so routing
+    /// a soldier over a JETJUMP arc gives them a route whose next leg they can
+    /// never complete - they walk to the lip of the gap and stop. Excluding
+    /// those arcs makes them take the long way round, which is a route they
+    /// can finish. Restore JetJump here the moment jet troopers can actually
+    /// jet, and the arcs the designers authored for them start being used.
+    /// </remarks>
+    PhxNavCapabilities NavCapabilities => PhxNavCapabilities.Infantry;
+
     // Tactical hint node we've claimed (cover / snipe position)
     PhxHintNode ClaimedHint;
     float HintScanTimer;
+
+    // Below this the goal is close enough to walk at directly; above it, route
+    // through the planning graph. Small on purpose - see MoveTowards.
+    const float NavGraphMinDistance = 4f;
+
+    // How long we tolerate making no progress before assuming the current route
+    // is blocked and asking for a new one.
+    const float NavRepathStuckTime = 0.6f;
 
     // stuck recovery
     Vector3 LastPosition;
@@ -103,7 +125,12 @@ public class PhxBF3AIController : PhxAIController
     float UnstickTimer;
     Vector3 UnstickDir;
 
-    static readonly Collider[] OverlapCache = new Collider[128];
+    // Target scans write here. Sized for a 64v64 scrum: OverlapSphereNonAlloc
+    // silently stops at the array bound, so an undersized buffer means AI stop
+    // seeing enemies exactly when the fight is thickest. The query is masked to
+    // soldiers (below), which is what makes a buffer this size sufficient -
+    // unmasked it filled with scenery long before it found people.
+    static readonly Collider[] OverlapCache = new Collider[512];
 
     // Director: don't reassign units that are mid-boarding-run
     public bool IsBusyBoarding => State == PhxAIState.Board || State == PhxAIState.Sabotage;
@@ -112,25 +139,96 @@ public class PhxBF3AIController : PhxAIController
     public PhxBF3AIController()
     {
         Skill = PhxAIDirector.GetSkillProfile();
+        Aim = new BFAimState(BFAimProfile.ForDifficulty(PhxBF3.Config.AIDifficulty).WithJitter());
         PhxAIDirector.Register(this);
     }
 
+    /// <summary>
+    /// Clear per-life state before this controller possesses a fresh pawn.
+    /// Controllers are reused across respawns (see PhxMatch.RespawnAI) so the
+    /// scoreboard survives, but the dead soldier's combat/goal memory must not.
+    /// </summary>
+    public void ResetForRespawn()
+    {
+        // Re-read the skill profile: this controller was constructed before its
+        // team was known (and possibly before the mission called
+        // SetAIDifficulty at all), so its first profile could not account for
+        // either. Respawn is when the team is settled.
+        Skill = PhxAIDirector.GetSkillProfile(Team);
+        Aim = new BFAimState(BFAimProfile.ForDifficulty(PhxAIDirectives.GetDifficulty(Team)).WithJitter());
+
+        State = PhxAIState.SeekObjective;
+        TargetPawn = null;
+        TargetSubsystem = null;
+        SeekPost = null;
+        ReleaseHint();   // frees the node's occupancy slot, not just our ref
+        ReleasePatrol();
+        ReleaseMineNode();
+        MinesLaid = 0;
+        ManningStation = null;
+        BoardTarget = null;
+        VehicleOp = null;
+        NavPath.Clear();
+        NavGoal = Vector3.positiveInfinity;
+        NavIndex = 0;
+        NavRepathTimer = 0f;
+        StuckTimer = 0f;
+        UnstickTimer = 0f;
+        ReactionTimer = 0f;
+        MoveDirection = Vector2.zero;
+        Jump = false;
+        Crouch = false;
+        ShootPrimary = false;
+        ShootSecondary = false;
+
+        // The previous life's sightings die with it - a fresh body should not
+        // come back already knowing where its killer was standing.
+        HasContact = false;
+        LastContactTime = float.NegativeInfinity;
+
+        // Fresh body, full health: nothing to retreat from.
+        Retreating = false;
+        WeaponSwitchTimer = 0f;
+    }
+
+    /// <summary>
+    /// Where this soldier is actually pointing.
+    /// </summary>
+    /// <remarks>
+    /// Goes through <see cref="BFAimState"/> rather than applying a flat error
+    /// cone. The difference is that error here has causes with memory: it is
+    /// large the instant a target is acquired and settles, grows with how fast
+    /// the target is crossing the view, grows with range beyond the soldier's
+    /// competence, and walks upward through a burst before resetting. A single
+    /// cone cannot produce any of those, and they are what separate an
+    /// opponent from a turret.
+    /// </remarks>
     public override Vector3 GetAimPosition()
     {
         if (TargetSubsystem != null)
         {
             return TargetSubsystem.transform.position;
         }
-        if (TargetPawn != null && TargetPawn.GetInstance() != null)
+
+        PhxInstance target = TargetPawn?.GetInstance();
+        if (target != null)
         {
-            // center-mass aim with skill-based error cone
-            Vector3 targetPos = TargetPawn.GetInstance().transform.position + Vector3.up * 1.2f;
-            Vector3 dir = (targetPos - PawnPosition()).normalized;
-            dir = ApplyAimError(dir, Skill.AimErrorDegrees);
-            return PawnPosition() + dir * Vector3.Distance(PawnPosition(), targetPos);
+            Vector3 eye = PawnPosition() + Vector3.up * 1.6f;
+            Vector3 targetPos = target.transform.position + Vector3.up * 1.2f;
+
+            // Velocity for leading. Read off the body where there is one; a
+            // target with no rigidbody is treated as stationary, which is the
+            // conservative reading.
+            Rigidbody body = target.GetComponent<Rigidbody>();
+            Vector3 velocity = body != null && !body.isKinematic ? body.velocity : Vector3.zero;
+
+            return Aim.Aim(eye, TargetPawn, targetPos, velocity, Time.deltaTime);
         }
         return PawnPosition() + ViewDirection * 1000f;
     }
+
+    /// <summary>This soldier's shooting, as a competence rather than a constant.</summary>
+    public BFAimState Aim { get; private set; }
 
     public override void Tick(float deltaTime)
     {
@@ -149,6 +247,22 @@ public class PhxBF3AIController : PhxAIController
         Reload = false;
         ShootSecondary = false;
         Jump = false;
+
+        // Weapon-change requests are ONE-SHOT inputs: PhxSoldier acts on them
+        // every tick they are set and never clears them itself (see
+        // PhxPlayerController, which clears them explicitly for the same
+        // reason). Leaving them latched made the soldier call NextWeapon every
+        // single tick - the weapon was deactivated and reactivated
+        // continuously, so it was almost never past its reload progress check
+        // and the fire branch became unreachable. That is why AI stopped
+        // shooting entirely.
+        NextPrimaryWeapon = false;
+        NextSecondaryWeapon = false;
+        // Per-frame default: states that want a crouch (combat cover, hint
+        // nodes) re-assert it every Tick. Without this an AI that fought once
+        // crawled to every later objective, and a crouched pawn can't perform
+        // the unstick jump (Jump only stands it up).
+        Crouch = false;
 
         GrenadeTimer -= deltaTime;
 
@@ -212,7 +326,84 @@ public class PhxBF3AIController : PhxAIController
             case PhxAIState.ManTurret: TickManTurret(deltaTime); break;
         }
 
+        // Guard BEFORE stuck detection: a guard veto zeroes MoveDirection, and
+        // stuck detection must see that as "doesn't want to move". The other
+        // order judged every vetoed frame as "stuck" and produced a perpetual
+        // ~2.5s plant-and-jump loop at the first ledge/slope.
+        ApplyLedgeGuard();
         TickStuckRecovery(deltaTime);
+    }
+
+    // Maximum drop an AI will willingly walk into. Anything deeper is treated
+    // as a pit rather than a step.
+    const float MaxSafeDrop = 4f;
+
+    // How far ahead to test. Roughly one stride, so the veto lands before the
+    // pawn's centre crosses the edge.
+    const float LedgeProbeAhead = 1.2f;
+
+    /// <summary>
+    /// Refuse a movement command that would step off a ledge.
+    ///
+    /// The navigation data is a graph of hubs and connections; it says where
+    /// the AI may path, but nothing in it describes the drop between two
+    /// levels of a multi-storey interior. On maps built from stacked platforms
+    /// (Death Star II above all) the AI would happily walk straight off an edge
+    /// toward a goal below and die, bleeding reinforcements all round.
+    ///
+    /// This is deliberately a veto on the final movement rather than a change
+    /// to pathing: it cannot make the AI smarter about routes, it only stops
+    /// them walking into a fall no player would take.
+    /// </summary>
+    void ApplyLedgeGuard()
+    {
+        if (MoveDirection.sqrMagnitude < 0.0001f) return;
+
+        Transform pawnTf = PawnTransform();
+        if (pawnTf == null) return;
+
+        // MoveDirection is (strafe, forward) relative to the yaw of
+        // ViewDirection - that is how PhxSoldier interprets it - NOT the pawn
+        // transform, whose facing can be up to 180 degrees off while strafing.
+        Vector3 flatView = ViewDirection;
+        flatView.y = 0f;
+        if (flatView.sqrMagnitude < 1e-4f) return;
+        Quaternion look = Quaternion.LookRotation(flatView.normalized);
+        Vector3 world = look * new Vector3(MoveDirection.x, 0f, MoveDirection.y);
+        if (world.sqrMagnitude < 0.0001f) return;
+        world.Normalize();
+
+        // A wall directly ahead means there is no ledge to walk off - let the
+        // steering whiskers and stuck recovery deal with it. Without this the
+        // drop probe starts inside the wall's mesh and reports a phantom pit.
+        Vector3 chest = PawnPosition() + Vector3.up * 1.0f;
+        if (Physics.Raycast(chest, world, out RaycastHit wallHit, LedgeProbeAhead,
+                            ~0, QueryTriggerInteraction.Ignore) &&
+            wallHit.collider.GetComponentInParent<PhxSoldier>() == null)
+        {
+            return;
+        }
+
+        // Drop probe from above head height: starting only 0.5m up put the
+        // origin underneath single-sided terrain on any slope over ~23 degrees,
+        // where a downward ray exits through backfaces without a hit and the
+        // guard froze the AI on every hill. A spherecast also tolerates thin
+        // triangulation gaps a ray would slip through.
+        Vector3 probe = PawnPosition() + world * LedgeProbeAhead + Vector3.up * 1.8f;
+        if (Physics.SphereCast(probe, 0.3f, Vector3.down, out _,
+                               1.8f + MaxSafeDrop, ~0, QueryTriggerInteraction.Ignore))
+        {
+            return;     // there is ground to land on
+        }
+
+        // Nothing underfoot ahead. Stop rather than reverse: reversing fights
+        // the stuck-recovery logic, and a halted AI still turns and shoots.
+        MoveDirection = Vector2.zero;
+    }
+
+    Transform PawnTransform()
+    {
+        return Pawn?.GetInstance() != null ? Pawn.GetInstance().transform : null;
     }
 
     // ---------------------------------------------------------------- states
@@ -221,9 +412,25 @@ public class PhxBF3AIController : PhxAIController
     {
         ShootPrimary = false;
 
-        if (TargetPawn != null)
+        // ObjectiveFocus decides whether a visible enemy derails the march to
+        // the objective. Close threats always win - nobody strolls past a
+        // blaster at 15m. The roll happens in AcquireTarget (0.4s cadence).
+        if (TargetPawn != null && TargetPawn.GetInstance() != null)
         {
-            ReactionTimer = Skill.ReactionTime;
+            float threatDist = Vector3.Distance(PawnPosition(), TargetPawn.GetInstance().transform.position);
+            if (EngageCommitted || threatDist < 15f)
+            {
+                ReactionTimer = Skill.ReactionTime;
+                State = PhxAIState.Engage;
+                return;
+            }
+        }
+        else if (HasFreshContact && EngageCommitted)
+        {
+            // Nothing in sight, but we saw or heard something recently. Go and
+            // look. Engage handles the no-target case by moving to the last
+            // known position and dropping the contact once it arrives, so this
+            // terminates instead of looping.
             State = PhxAIState.Engage;
             return;
         }
@@ -250,16 +457,25 @@ public class PhxBF3AIController : PhxAIController
             goal += FlankOffset;
         }
 
-        if (dist < 8f)
+        // Switch to Capture only when the CP's trigger region has actually
+        // registered us (it owns CapturePost), or we are practically on top of
+        // it. Stopping at a fixed 8m parked squads just outside small capture
+        // regions forever - capture progress is driven purely by the trigger.
+        if (CapturePost == cp || dist < 2f)
         {
-            CapturePost = cp;
+            SeekPost = cp;
             State = PhxAIState.Capture;
-            MoveDirection = Vector2.zero;
             return;
         }
+        SeekPost = cp;
 
         MoveTowards(goal);
     }
+
+    // The post this AI is trying to take. Distinct from CapturePost, which is
+    // owned by the command post's trigger region (set on enter, cleared on
+    // exit) and must not be written by the state machine.
+    PhxCommandpost SeekPost;
 
     void TickDefend(float deltaTime)
     {
@@ -268,6 +484,8 @@ public class PhxBF3AIController : PhxAIController
         if (TargetPawn != null)
         {
             ReactionTimer = Skill.ReactionTime * 0.7f;   // defenders are ready
+            ReleasePatrol();
+            ReleaseMineNode();
             State = PhxAIState.Engage;
             return;
         }
@@ -277,45 +495,393 @@ public class PhxBF3AIController : PhxAIController
             // lost the post (or it got taken) - retake it
             AssignedObjective = DefendObjective;
             DefendObjective = null;
+            ReleasePatrol();
             State = PhxAIState.SeekObjective;
             return;
         }
 
-        // patrol a loose ring around the post
         Vector3 anchor = DefendObjective.transform.position;
         float dist = Vector3.Distance(PawnPosition(), anchor);
         if (dist > 25f)
         {
             MoveTowards(anchor);
+            return;
+        }
+
+        // An engineer holding a position mines the approaches first. MINE
+        // nodes are where the designers wanted a minefield, so this is a
+        // defence the level was built to have and previously never got.
+        if (TickMineLaying(deltaTime, anchor)) return;
+
+        // Walk the designers' patrol route where there is one. PATROL nodes
+        // are the authored answer to "where should someone holding this
+        // position walk", and they are placed along the approaches that
+        // actually matter - which is the difference between a garrison that
+        // looks posted and one that mills around the flag.
+        if (TickPatrol(deltaTime, anchor)) return;
+
+        StrafeTimer -= deltaTime;
+        if (StrafeTimer <= 0f)
+        {
+            StrafeTimer = Random.Range(2f, 4f);
+            StrafeDir = Random.value < 0.5f ? -1f : 1f;
+            // face a random outward direction to watch approaches
+            Vector3 outward = (PawnPosition() - anchor).normalized;
+            ViewDirection = (outward + new Vector3(Random.Range(-0.6f, 0.6f), 0f, Random.Range(-0.6f, 0.6f))).normalized;
+        }
+        MoveDirection = dist < 10f ? new Vector2(StrafeDir * 0.4f, 0f) : Vector2.zero;
+    }
+
+    // --- PATROL hint nodes ---
+
+    /// <summary>How far from the defended post patrol nodes are considered.</summary>
+    const float PatrolSearchRadius = 60f;
+
+    /// <summary>Seconds spent watching at a patrol node before moving on.</summary>
+    const float PatrolDwellSeconds = 4f;
+
+    PhxHintNode PatrolNode;
+    float PatrolDwellTimer;
+
+    /// <summary>
+    /// Move between authored patrol positions around <paramref name="anchor"/>.
+    /// Returns false when the map has none nearby, so the caller falls back to
+    /// its own loitering.
+    /// </summary>
+    bool TickPatrol(float deltaTime, Vector3 anchor)
+    {
+        if (PatrolNode == null)
+        {
+            PatrolNode = PhxHintNodes.NextPatrolNode(null, anchor, PatrolSearchRadius);
+            if (PatrolNode == null) return false;
+
+            // Claimed for as long as the walk plus the dwell could take, so two
+            // defenders don't converge on the same corner.
+            if (!PhxHintNodes.TryOccupy(PatrolNode, this, 30f))
+            {
+                PatrolNode = null;
+                return false;
+            }
+            PatrolDwellTimer = 0f;
+        }
+
+        float toNode = Vector3.Distance(PawnPosition(), PatrolNode.Position);
+        if (toNode > 2.5f)
+        {
+            MoveTowards(PatrolNode.Position, sprint: false);
+            return true;
+        }
+
+        // Arrived: face the way the designer pointed the node and hold.
+        MoveDirection = Vector2.zero;
+        ViewDirection = PatrolNode.Facing;
+        Crouch = PhxHintNodes.StanceIsLow(PatrolNode.PrimaryStance);
+
+        PatrolDwellTimer += deltaTime;
+        if (PatrolDwellTimer < PatrolDwellSeconds) return true;
+
+        PhxHintNode next = PhxHintNodes.NextPatrolNode(PatrolNode, anchor, PatrolSearchRadius);
+        PhxHintNodes.Release(PatrolNode, this);
+        PatrolNode = null;
+
+        if (next != null && PhxHintNodes.TryOccupy(next, this, 30f))
+        {
+            PatrolNode = next;
+            PatrolDwellTimer = 0f;
+        }
+        return true;
+    }
+
+    void ReleasePatrol()
+    {
+        if (PatrolNode == null) return;
+
+        PhxHintNodes.Release(PatrolNode, this);
+        PatrolNode = null;
+        PatrolDwellTimer = 0f;
+    }
+
+    // --- MINE hint nodes ---
+
+    /// <summary>How far from the defended post an engineer will go to mine.</summary>
+    const float MineSearchRadius = 50f;
+
+    /// <summary>Seconds spent planting once at the node.</summary>
+    const float MinePlantSeconds = 2f;
+
+    /// <summary>Most mines one AI lays per life, so a post isn't carpeted.</summary>
+    const int MaxMinesPerLife = 3;
+
+    PhxHintNode MineNode;
+    float MinePlantTimer;
+    int MinesLaid;
+
+    /// <summary>
+    /// Lay mines at authored MINE positions while defending. Returns false
+    /// when this unit carries no mine, has laid its quota, or the area has no
+    /// MINE nodes - which is every unit on most maps.
+    /// </summary>
+    bool TickMineLaying(float deltaTime, Vector3 anchor)
+    {
+        if (MinesLaid >= MaxMinesPerLife) return false;
+
+        PhxSoldier soldier = Pawn as PhxSoldier;
+        PhxClass mineClass = soldier?.GetDeployable("mine");
+        if (mineClass == null) return false;
+
+        if (MineNode == null)
+        {
+            MineNode = PhxHintNodes.FindNearest(PawnPosition(), PhxHintType.Mine, MineSearchRadius);
+            if (MineNode == null) return false;
+
+            // Held for the walk plus the plant. A node stays claimed after the
+            // mine goes down so a second engineer stacks their mine somewhere
+            // else instead of on top of it.
+            if (!PhxHintNodes.TryOccupy(MineNode, this, 120f))
+            {
+                MineNode = null;
+                return false;
+            }
+            MinePlantTimer = 0f;
+        }
+
+        float toNode = Vector3.Distance(PawnPosition(), MineNode.Position);
+        if (toNode > 2f)
+        {
+            MoveTowards(MineNode.Position, sprint: false);
+            return true;
+        }
+
+        MoveDirection = Vector2.zero;
+        Crouch = true;
+        ViewDirection = MineNode.Facing;
+
+        MinePlantTimer += deltaTime;
+        if (MinePlantTimer < MinePlantSeconds) return true;
+
+        PlaceMine(mineClass, MineNode);
+
+        // The node keeps its claim (see above); we simply stop holding a
+        // reference to it and look for another next time round.
+        MineNode = null;
+        MinePlantTimer = 0f;
+        return true;
+    }
+
+    void PlaceMine(PhxClass mineClass, PhxHintNode node)
+    {
+        PhxScene scene = PhxGame.GetScene();
+        if (scene == null) return;
+
+        PhxInstance placed = scene.CreateInstance(
+            mineClass, $"{mineClass.Name}_{node.Name}_{MinesLaid}",
+            node.Position, node.Rotation);
+
+        if (placed == null) return;
+
+        placed.Team.Set(Team);
+        if (placed is PhxMine mine)
+        {
+            mine.Owner = this;
+        }
+        ++MinesLaid;
+    }
+
+    void ReleaseMineNode()
+    {
+        if (MineNode == null) return;
+
+        PhxHintNodes.Release(MineNode, this);
+        MineNode = null;
+        MinePlantTimer = 0f;
+    }
+
+    // --- Self-preservation (AI Stage 5) ---
+
+    // Where we're falling back to while hurt, so the destination doesn't
+    // re-roll every frame and leave the soldier jittering between two posts.
+    Vector3 RetreatGoal;
+    bool Retreating;
+
+    /// <summary>Health fraction below which this AI breaks off to recover.</summary>
+    const float RetreatHealthFraction = 0.25f;
+
+    /// <summary>And the fraction at which it is willing to fight again.</summary>
+    const float RecoveredHealthFraction = 0.6f;
+
+    /// <summary>
+    /// Break off and recover when badly hurt, heading for a resupply droid or
+    /// a friendly post.
+    /// </summary>
+    /// <remarks>
+    /// Returns true when it has taken control of this tick. Soldiers that fight
+    /// to the death at 5 health read as mindless; more importantly, the
+    /// resupply droids exist and nothing ever used them.
+    /// </remarks>
+    bool TickSelfPreservation()
+    {
+        PhxSoldier soldier = Pawn as PhxSoldier;
+        if (soldier == null || !soldier.IsInit) return false;
+
+        float health = soldier.HealthFraction;
+
+        if (Retreating)
+        {
+            // Patched up (or picked up by a droid): back to the fight.
+            if (health >= RecoveredHealthFraction)
+            {
+                Retreating = false;
+                return false;
+            }
         }
         else
         {
-            StrafeTimer -= deltaTime;
-            if (StrafeTimer <= 0f)
-            {
-                StrafeTimer = Random.Range(2f, 4f);
-                StrafeDir = Random.value < 0.5f ? -1f : 1f;
-                // face a random outward direction to watch approaches
-                Vector3 outward = (PawnPosition() - anchor).normalized;
-                ViewDirection = (outward + new Vector3(Random.Range(-0.6f, 0.6f), 0f, Random.Range(-0.6f, 0.6f))).normalized;
-            }
-            MoveDirection = dist < 10f ? new Vector2(StrafeDir * 0.4f, 0f) : Vector2.zero;
+            if (health > RetreatHealthFraction) return false;
+
+            Retreating = true;
+            RetreatGoal = FindRecoveryPoint();
         }
+
+        // Nowhere to go - better to keep fighting than stand still.
+        if (RetreatGoal == Vector3.positiveInfinity)
+        {
+            Retreating = false;
+            return false;
+        }
+
+        // Keep facing the threat while withdrawing, and keep shooting if we
+        // can still see them - a retreat is not a surrender.
+        if (TargetPawn != null && TargetPawn.GetInstance() != null)
+        {
+            ViewDirection = (TargetPawn.GetInstance().transform.position + Vector3.up * 1.2f
+                             - PawnPosition()).normalized;
+        }
+
+        MoveTowards(RetreatGoal);
+        return true;
+    }
+
+    // Resupply droids don't move and don't get built mid-round, so find them
+    // once per map instead of per retreat. Scanning every scene instance (which
+    // is thousands of objects) for each hurt soldier was fine at 16 units and a
+    // frame-time cliff at 128.
+    static readonly List<PhxPowerupstation> ResupplyStations = new List<PhxPowerupstation>();
+    static PhxScene ResupplyStationsScene;
+
+    static List<PhxPowerupstation> GetResupplyStations(PhxScene scene)
+    {
+        if (scene == null) return ResupplyStations;
+
+        // Rebuild when the map changed; reference compare is enough because
+        // PhxEnvironment creates exactly one PhxScene per load.
+        if (!ReferenceEquals(scene, ResupplyStationsScene))
+        {
+            ResupplyStationsScene = scene;
+            ResupplyStations.Clear();
+
+            int count = scene.GetInstanceCount();
+            for (int i = 0; i < count; ++i)
+            {
+                if (scene.GetInstance(i) is PhxPowerupstation station)
+                {
+                    ResupplyStations.Add(station);
+                }
+            }
+        }
+        return ResupplyStations;
+    }
+
+    /// <summary>
+    /// Nearest resupply droid, or failing that a friendly command post.
+    /// </summary>
+    Vector3 FindRecoveryPoint()
+    {
+        Vector3 self = PawnPosition();
+        Vector3 best = Vector3.positiveInfinity;
+        float bestDist = float.MaxValue;
+        PhxScene scene = PhxGame.GetScene();
+
+        // Resupply droids first: they actually restore health.
+        foreach (PhxPowerupstation station in GetResupplyStations(scene))
+        {
+            if (station == null) continue;
+
+            float d = Vector3.SqrMagnitude(station.transform.position - self);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = station.transform.position;
+            }
+        }
+
+        if (best != Vector3.positiveInfinity) return best;
+
+        // Otherwise fall back on ground we hold.
+        PhxCommandpost[] posts = scene?.GetCommandPosts();
+        if (posts == null) return Vector3.positiveInfinity;
+
+        for (int i = 0; i < posts.Length; ++i)
+        {
+            if (posts[i] == null || posts[i].Team != Team) continue;
+
+            float d = Vector3.SqrMagnitude(posts[i].transform.position - self);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = posts[i].transform.position;
+            }
+        }
+
+        return best;
     }
 
     void TickEngage(float deltaTime)
     {
+        // Badly hurt soldiers disengage before anything else in this state.
+        if (TickSelfPreservation()) return;
+
         if (TargetPawn == null || TargetPawn.GetInstance() == null ||
             (TargetPawn is PhxSoldier deadCheck && deadCheck.IsDead))
         {
+            bool wasKilled = TargetPawn is PhxSoldier killed && killed.IsDead;
             TargetPawn = null;
             ShootPrimary = false;
+
+            // A dead enemy is resolved; a vanished one is not. If we still hold
+            // a fresh contact - last seen behind that corner, or heard firing -
+            // press to it instead of shrugging and walking back to the
+            // objective the instant line of sight breaks.
+            if (!wasKilled && HasFreshContact)
+            {
+                float toContact = Vector3.Distance(PawnPosition(), LastKnownEnemyPosition);
+
+                // Face where they were, and keep the position under fire while
+                // closing. Suppression is most of what makes a firefight feel
+                // like one: an enemy who stops shooting the instant you duck
+                // behind cover reads as a target dummy, not an opponent.
+                ViewDirection = (LastKnownEnemyPosition + Vector3.up * 1.2f - PawnPosition()).normalized;
+                ShootPrimary = toContact < Skill.DetectionRange &&
+                               Random.value < Skill.StrafeAggression;
+
+                MoveTowards(LastKnownEnemyPosition, false);
+
+                // Arrived and still nothing: the trail is cold, stop chasing.
+                if (toContact < 3f)
+                {
+                    HasContact = false;
+                    ShootPrimary = false;
+                }
+                return;
+            }
+
+            HasContact = false;
             ReleaseHint();          // don't camp a cover node with no enemy
             State = ReturnState();
             return;
         }
 
         Vector3 targetPos = TargetPawn.GetInstance().transform.position;
+        RememberContact(targetPos);
         ViewDirection = (targetPos + Vector3.up * 1.2f - PawnPosition()).normalized;
 
         // reaction delay before opening fire
@@ -326,6 +892,21 @@ public class PhxBF3AIController : PhxAIController
             return;
         }
 
+        // Target-switch distraction: a soldier under fire from two directions
+        // does not calmly finish the target it started on. Human attention is
+        // not exclusive, and never modelling that is one of the things that
+        // makes AI read as scripted. Rolled once a second so it does not scale
+        // with framerate.
+        DistractionTimer -= deltaTime;
+        if (DistractionTimer <= 0f)
+        {
+            DistractionTimer = 1f;
+            if (Random.value < Aim.Profile.TargetSwitchChancePerSecond)
+            {
+                RetargetTimer = 0f;      // forces reacquisition next scan
+            }
+        }
+
         float dist = Vector3.Distance(PawnPosition(), targetPos);
 
         // grenade / secondary weapon: mid-range targets, on cooldown, skill-gated
@@ -334,12 +915,26 @@ public class PhxBF3AIController : PhxAIController
             GrenadePulse -= deltaTime;
             ShootSecondary = true;
         }
-        else if (GrenadeTimer <= 0f && dist > 8f && dist < 32f &&
-                 Random.value < Skill.StrafeAggression * 0.5f * deltaTime * 10f)
+        else if (GrenadeTimer <= 0f && dist > 8f && dist < 32f)
         {
-            GrenadeTimer = Random.Range(8f, 16f);
-            GrenadePulse = 0.15f;
+            // Decide once a second, not per frame - the old per-frame roll
+            // scaled with framerate.
+            GrenadeDecisionTimer -= deltaTime;
+            if (GrenadeDecisionTimer <= 0f)
+            {
+                GrenadeDecisionTimer = 1f;
+                if (Random.value < Skill.StrafeAggression * 0.5f)
+                {
+                    GrenadeTimer = Random.Range(8f, 16f);
+                    GrenadePulse = 0.15f;
+                }
+            }
         }
+
+        // Swap off a weapon we can't fire before worrying about burst discipline
+        // - an AI standing in the open dry-firing an empty rifle it will never
+        // reload is worse than one that simply pulls its sidearm.
+        TickWeaponSelection(dist);
 
         // burst fire discipline
         if (BurstPauseTimer > 0f)
@@ -391,57 +986,90 @@ public class PhxBF3AIController : PhxAIController
             float toHint = Vector3.Distance(PawnPosition(), ClaimedHint.Position);
             if (toHint > 2.5f)
             {
-                // move into the authored position, still facing the enemy
-                SteerDirect(ClaimedHint.Position, sprint: toHint > 15f);
+                // Move into the authored position, still facing the enemy.
+                // Through the graph, not straight at it: a cover node is very
+                // often on the far side of the wall it provides cover from.
+                MoveTowards(ClaimedHint.Position, sprint: toHint > 15f);
                 Crouch = false;
                 return;
             }
 
-            // in position: hold it and adopt the designer's posture
+            // In position: hold it and adopt the stance the level designer
+            // authored on the node. This used to read a "Posture" string that
+            // does not exist in the data, so it always fell back to "crouch at
+            // any cover node" - now the node's own PrimaryStance decides.
             MoveDirection = Vector2.zero;
-            Crouch = ClaimedHint.Type == PhxHintType.Cover ||
-                     (ClaimedHint.Posture != null &&
-                      ClaimedHint.Posture.ToLowerInvariant().Contains("crouch"));
+            Crouch = PhxHintNodes.StanceIsLow(ClaimedHint.PrimaryStance) ||
+                     ClaimedHint.Type == PhxHintType.Cover;
             return;
         }
 
-        // combat movement: strafe and use cover based on skill
+        // combat movement: strafe and use cover based on skill. All decisions
+        // roll on the strafe timer, never per frame - a per-frame roll made
+        // high-skill AI flicker between "strafe" and "stand" many times a
+        // second, snapping the body 180 degrees on each toggle.
         StrafeTimer -= deltaTime;
         if (StrafeTimer <= 0f)
         {
             StrafeTimer = Random.Range(0.8f, 1.8f);
             StrafeDir = Random.value < 0.5f ? -1f : 1f;
-            Crouch = Random.value < Skill.CoverUsage;
+            StrafeActive = Random.value < Skill.StrafeAggression;
+            CombatCrouch = Random.value < Skill.CoverUsage;
         }
+        Crouch = CombatCrouch;
 
         Vector2 move = Vector2.zero;
-        if (Random.value < Skill.StrafeAggression)
+        if (StrafeActive)
         {
             move.x = StrafeDir;
+            // keep a touch of forward intent so the soldier's strafe-invert
+            // branch (which flips the body's facing) never engages mid-fight
+            move.y = 0.1f;
         }
         if (dist > 25f) move.y = 1f;        // close in
         else if (dist < 8f) move.y = -0.7f; // back off
         MoveDirection = move;
     }
 
+    bool StrafeActive;
+    bool CombatCrouch;
+    float GrenadeDecisionTimer;
+
     void TickCapture(float deltaTime)
     {
         ShootPrimary = false;
-        MoveDirection = Vector2.zero;
 
-        if (TargetPawn != null)
+        // Capturing is the point: only break off for threats that are actually
+        // on top of the post, not any enemy in detection range.
+        if (TargetPawn != null && TargetPawn.GetInstance() != null &&
+            Vector3.Distance(PawnPosition(), TargetPawn.GetInstance().transform.position) < 25f)
         {
             State = PhxAIState.Engage;
             return;
         }
 
-        PhxCommandpost cp = CapturePost;
+        PhxCommandpost cp = SeekPost;
         if (cp == null || cp.Team == Team)
         {
             // captured (or lost the reference) - find the next objective
-            CapturePost = null;
+            SeekPost = null;
             AssignedObjective = null;
             State = PhxAIState.SeekObjective;
+            return;
+        }
+
+        // Hold still only while the CP's trigger region actually has us; until
+        // then (or if we got knocked out of it) keep walking onto the post.
+        if (CapturePost == cp)
+        {
+            MoveDirection = Vector2.zero;
+        }
+        else
+        {
+            // Through the graph. Interior posts are routinely reached by a
+            // corridor rather than a straight line, and steering directly at
+            // one put the whole squad against the outside of the building.
+            MoveTowards(cp.transform.position, sprint: false);
         }
     }
 
@@ -463,28 +1091,134 @@ public class PhxBF3AIController : PhxAIController
             return;
         }
 
-        // Muster, then ride the (simulated) boarding transport to the hangar.
-        // TODO: replace the teleport with actual AI-piloted transports once
-        // flyer AI can land in hangars.
-        BoardMusterTimer -= deltaTime;
-        MoveDirection = Vector2.zero;
-        if (BoardMusterTimer <= 0f && BoardTarget.HangarEntrance != null)
+        if (BoardTarget.HangarEntrance == null)
         {
-            Vector3 dropPoint = BoardTarget.HangarEntrance.position;
-
-            // move the rigidbody, not just the transform - a direct transform
-            // write on a physics body desyncs it and can tunnel through the hull
-            Rigidbody body = Pawn.GetInstance().GetComponent<Rigidbody>();
-            if (body != null)
-            {
-                body.velocity = Vector3.zero;
-                body.angularVelocity = Vector3.zero;
-                body.position = dropPoint;
-            }
-            Pawn.GetInstance().transform.position = dropPoint;
-            Debug.Log($"[BF3Legacy] AI boarding party inserted into {BoardTarget.ShipName}");
-            State = PhxAIState.Sabotage;
+            // Nowhere authored to land. Boarding is not possible on this ship,
+            // and pretending otherwise is what the teleport used to do.
+            BoardTarget = null;
+            State = PhxAIState.SeekObjective;
+            return;
         }
+
+        if (!(Pawn is PhxSoldier soldier))
+        {
+            State = PhxAIState.SeekObjective;
+            return;
+        }
+
+        Vector3 hangar = BoardTarget.HangarEntrance.position;
+
+        // Inside, on foot: the run is over.
+        if (!soldier.IsInVehicle &&
+            Vector3.Distance(PawnPosition(), hangar) < HangarArrivalRadius)
+        {
+            ReleaseVehicle();
+            Debug.Log($"[BF3Legacy] AI boarding party reached {BoardTarget.ShipName}");
+            State = PhxAIState.Sabotage;
+            return;
+        }
+
+        if (soldier.IsInVehicle)
+        {
+            TickBoardingFlight(deltaTime, soldier, hangar);
+            return;
+        }
+
+        TickBoardingEmbark(deltaTime, hangar);
+    }
+
+    /// <summary>Radius of the hangar mouth that counts as "aboard".</summary>
+    const float HangarArrivalRadius = 12f;
+
+    /// <summary>How close the transport gets before the squad steps off.</summary>
+    const float DisembarkRadius = 18f;
+
+    /// <summary>How far a boarding party will walk to find a ride.</summary>
+    const float TransportSearchRadius = 120f;
+
+    /// <summary>
+    /// Aboard a transport, flying to the target ship's hangar.
+    /// </summary>
+    /// <remarks>
+    /// The pilot flies to the authored LAND position nearest the hangar rather
+    /// than the hangar mouth itself - that is exactly what LAND hint nodes are
+    /// for, and a hangar entrance transform is a doorway, not a place to put a
+    /// gunship down. Passengers ride; only the pilot steers.
+    /// </remarks>
+    void TickBoardingFlight(float deltaTime, PhxSoldier soldier, Vector3 hangar)
+    {
+        PhxSeat seat = soldier.GetCurrentSeat();
+        PhxVehicle vehicle = seat?.Owner as PhxVehicle;
+
+        if (seat == null || vehicle == null || vehicle.IsDestroyed)
+        {
+            // Shot down or thrown out mid-run. Continue on foot rather than
+            // giving up: the party may already be close.
+            ReleaseVehicle();
+            return;
+        }
+
+        if (VehicleOp == null || VehicleOp.Seat != seat)
+        {
+            VehicleOp = new PhxAIVehicleOperator(this, vehicle, seat);
+        }
+
+        Vector3 landingSpot = VehicleOp.ResolveLandingSpot(hangar);
+        float toHangar = Vector3.Distance(vehicle.transform.position, hangar);
+
+        if (toHangar < DisembarkRadius)
+        {
+            // Close enough: everyone off. The pilot leaves too - the objective
+            // is inside the ship, not in the seat.
+            ReleaseVehicle();
+            MoveDirection = Vector2.zero;
+            Enter = true;                 // the seat handles the dismount
+            return;
+        }
+
+        VehicleOp.Tick(deltaTime, landingSpot, Team, Skill);
+    }
+
+    /// <summary>
+    /// On foot, looking for a ride to the enemy ship.
+    /// </summary>
+    /// <remarks>
+    /// A boarding party with no transport waits at the muster point instead of
+    /// walking into space. That is a real outcome - a team with no flyers left
+    /// cannot board - and it is the outcome the teleport hid.
+    /// </remarks>
+    void TickBoardingEmbark(float deltaTime, Vector3 hangar)
+    {
+        PhxVehicle transport = FindNearbyFreeVehicle(TransportSearchRadius, flyersOnly: true);
+        if (transport != null)
+        {
+            float toTransport = Vector3.Distance(PawnPosition(), transport.transform.position);
+            if (toTransport > 4f)
+            {
+                MoveTowards(transport.transform.position);
+            }
+            else
+            {
+                MoveDirection = Vector2.zero;
+                Enter = true;             // PhxSoldier takes the nearest free seat
+            }
+            return;
+        }
+
+        BoardMusterTimer -= deltaTime;
+        if (BoardMusterTimer > 0f)
+        {
+            MoveDirection = Vector2.zero;
+            ViewDirection = (hangar - PawnPosition()).normalized;
+            return;
+        }
+
+        // Waited out the muster with nothing to fly. Go do something useful and
+        // let the director hand out the boarding job again when a transport
+        // exists.
+        BoardMusterTimer = 15f;
+        BoardTarget = null;
+        State = PhxAIState.SeekObjective;
     }
 
     void TickSabotage(float deltaTime)
@@ -719,7 +1453,7 @@ public class PhxBF3AIController : PhxAIController
         return false;
     }
 
-    PhxVehicle FindNearbyFreeVehicle(float radius)
+    PhxVehicle FindNearbyFreeVehicle(float radius, bool flyersOnly = false)
     {
         int count = Physics.OverlapSphereNonAlloc(PawnPosition(), radius, OverlapCache);
         PhxVehicle best = null;
@@ -728,6 +1462,7 @@ public class PhxBF3AIController : PhxAIController
         {
             PhxVehicle v = OverlapCache[i].GetComponentInParent<PhxVehicle>();
             if (v == null || !v.HasAvailableSeat()) continue;
+            if (flyersOnly && !(v is PhxFlyer)) continue;
             int vTeam = v.Team;
             if (vTeam != 0 && vTeam != Team) continue;
 
@@ -748,6 +1483,16 @@ public class PhxBF3AIController : PhxAIController
         if (!(Pawn is PhxSoldier soldier) || soldier.IsInVehicle)
         {
             StuckTimer = 0f;
+            return;
+        }
+
+        // Landing/turn recovery suppresses movement on the soldier side while
+        // we keep commanding it; counting those frozen frames as "stuck" made
+        // every unstick jump feed the next one.
+        if (soldier.IsMovementLocked)
+        {
+            StuckTimer = 0f;
+            LastPosition = PawnPosition();
             return;
         }
 
@@ -810,7 +1555,8 @@ public class PhxBF3AIController : PhxAIController
         return PhxAIState.SeekObjective;
     }
 
-    Vector3 PawnPosition()
+    // Public so squadmates can measure radio range to each other.
+    public Vector3 PawnPosition()
     {
         return Pawn.GetInstance().transform.position;
     }
@@ -824,18 +1570,36 @@ public class PhxBF3AIController : PhxAIController
     {
         float goalDist = Vector3.Distance(PawnPosition(), goal);
 
-        // Short hops don't need pathfinding; long ones do.
-        if (PhxNavGraph.Instance.IsLoaded && goalDist > 15f)
+        // Use the authored graph for anything but the last few metres.
+        //
+        // This used to require a 15m goal, which meant every approach inside
+        // that radius reverted to straight-line steering - and 15m is exactly
+        // the range at which a soldier is threading doorways, corners and
+        // props rather than crossing open ground. That is where AI looked like
+        // they didn't understand the map: they pathed beautifully across it,
+        // then walked into the last wall between them and the objective. The
+        // graph is loaded and cheap to query; use it until we are genuinely
+        // on top of the goal.
+        if (PhxNavGraph.Instance.IsLoaded && goalDist > NavGraphMinDistance)
         {
             NavRepathTimer -= Time.deltaTime;
             bool goalMoved = (goal - NavGoal).sqrMagnitude > 25f;
 
-            if (goalMoved || (NavPath.Count == 0 && NavRepathTimer <= 0f))
+            // Re-path when we are demonstrably not getting anywhere, not only
+            // when the goal moves. Stuck recovery nudges the body free, but
+            // without this the AI resumed following the same blocked route
+            // straight back into whatever stopped it.
+            bool blocked = StuckTimer > NavRepathStuckTime;
+
+            if (goalMoved || blocked || (NavPath.Count == 0 && NavRepathTimer <= 0f))
             {
                 NavRepathTimer = 2f;   // don't re-path every frame on failure
                 NavGoal = goal;
                 NavIndex = 0;
-                PhxNavGraph.Instance.FindPath(PawnPosition(), goal, NavSize, NavPath);
+
+                bool routed = PhxNavGraph.Instance.FindPath(PawnPosition(), goal, NavSize, NavPath,
+                                                            NavCapabilities);
+                ReportNavAttempt(routed);
             }
 
             if (NavIndex < NavPath.Count)
@@ -850,6 +1614,11 @@ public class PhxBF3AIController : PhxAIController
                     if (++NavIndex >= NavPath.Count)
                     {
                         NavPath.Clear();
+                        // force an immediate repath next call - otherwise the
+                        // stale NavGoal suppresses it for up to 2s and the AI
+                        // direct-steers blindly in the meantime
+                        NavGoal = Vector3.positiveInfinity;
+                        NavRepathTimer = 0f;
                     }
                 }
                 else
@@ -861,6 +1630,37 @@ public class PhxBF3AIController : PhxAIController
         }
 
         SteerDirect(goal, sprint);
+    }
+
+    // How often the planning graph actually produces a route.
+    //
+    // "AI walk into walls" has two completely different causes that look
+    // identical from the outside: the graph isn't returning routes (so
+    // everyone direct-steers), or it is and the routes are bad. Guessing
+    // between them has cost several rounds, so measure it: one line every 15s
+    // with the success rate, rather than a per-call log that would flood at
+    // 128 units.
+    static int NavAttempts;
+    static int NavSuccesses;
+    static float NavReportTime;
+
+    static void ReportNavAttempt(bool routed)
+    {
+        NavAttempts++;
+        if (routed) NavSuccesses++;
+
+        if (Time.time < NavReportTime) return;
+        NavReportTime = Time.time + 15f;
+
+        if (NavAttempts == 0) return;
+        Debug.Log($"[AI nav] {NavSuccesses}/{NavAttempts} path requests routed " +
+                  $"({(100f * NavSuccesses / NavAttempts):F0}%). " +
+                  $"Graph loaded: {PhxNavGraph.Instance.IsLoaded}. " +
+                  "A low rate means AI are direct-steering because the planning " +
+                  "graph gave them nothing, not because the routes are poor.");
+
+        NavAttempts = 0;
+        NavSuccesses = 0;
     }
 
     /// <summary>Direct steering with obstacle whiskers (fallback / final approach).</summary>
@@ -877,32 +1677,162 @@ public class PhxBF3AIController : PhxAIController
         Vector3 dir = toGoal.normalized;
 
         // whisker steering: probe ahead, deflect around obstacles instead of
-        // walking into them (cheap alternative to full navmesh pathing)
+        // walking into them (cheap alternative to full navmesh pathing).
+        // Other soldiers count as obstacles too - skipping them entirely (as
+        // this used to) jammed whole squads into each other at spawn and
+        // chokepoints until stuck recovery had everyone jumping in unison.
+        // They only get a short whisker so distant friendlies don't deflect us.
+        // Whiskers must test what a SOLDIER can actually walk into. Unmasked,
+        // these used Unity's default raycast layers, which include the
+        // ordnance-only and vehicle-only collision meshes BF2 ships (see
+        // PhxLayers.SoldierGround) - surfaces a soldier passes straight
+        // through. So AI swerved around phantom walls and, worse, both side
+        // whiskers frequently reported "blocked" on geometry that wasn't
+        // there, dropping them into the push-and-hope branch below right next
+        // to a real wall.
+        //
+        // SoldierGround excludes the soldier layer itself, so friendlies get
+        // their own short-range test rather than being conflated with terrain.
+        int obstacleMask = PhxLayers.SoldierGround | PhxLayers.Soldier;
+
         Vector3 eye = PawnPosition() + Vector3.up * 1.0f;
-        if (Physics.Raycast(eye, dir, out RaycastHit hit, 4f) &&
-            hit.collider.GetComponentInParent<PhxSoldier>() == null)
+        if (Physics.Raycast(eye, dir, out RaycastHit hit, 4f, obstacleMask, QueryTriggerInteraction.Ignore))
         {
-            Vector3 left = Quaternion.Euler(0f, -40f, 0f) * dir;
-            Vector3 right = Quaternion.Euler(0f, 40f, 0f) * dir;
-            bool leftClear = !Physics.Raycast(eye, left, 4f);
-            bool rightClear = !Physics.Raycast(eye, right, 4f);
-            if (leftClear && !rightClear) dir = left;
-            else if (rightClear && !leftClear) dir = right;
-            else if (leftClear && rightClear) dir = Random.value < 0.5f ? left : right;
-            // neither clear: keep pushing, stuck recovery will kick in
+            bool blockerIsSoldier = hit.collider.GetComponentInParent<PhxSoldier>() != null;
+            if (!blockerIsSoldier || hit.distance < 2f)
+            {
+                Vector3 left = Quaternion.Euler(0f, -40f, 0f) * dir;
+                Vector3 right = Quaternion.Euler(0f, 40f, 0f) * dir;
+                bool leftClear = !Physics.Raycast(eye, left, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
+                bool rightClear = !Physics.Raycast(eye, right, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
+
+                // Wider probes for when both 40-degree whiskers are blocked -
+                // a wall met at a shallow angle blocks both, and the old code
+                // then just kept walking into it.
+                if (!leftClear && !rightClear)
+                {
+                    Vector3 hardLeft = Quaternion.Euler(0f, -80f, 0f) * dir;
+                    Vector3 hardRight = Quaternion.Euler(0f, 80f, 0f) * dir;
+                    bool hardLeftClear = !Physics.Raycast(eye, hardLeft, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
+                    bool hardRightClear = !Physics.Raycast(eye, hardRight, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
+
+                    if (hardLeftClear || hardRightClear)
+                    {
+                        // Slide along the wall rather than grinding into it.
+                        left = hardLeft;
+                        right = hardRight;
+                        leftClear = hardLeftClear;
+                        rightClear = hardRightClear;
+                    }
+                }
+
+                if (leftClear && !rightClear) dir = left;
+                else if (rightClear && !leftClear) dir = right;
+                else if (leftClear && rightClear)
+                {
+                    if (blockerIsSoldier)
+                    {
+                        // step around the blocker, away from its side of us
+                        Vector3 toBlocker = hit.point - PawnPosition();
+                        float side = Vector3.Dot(toBlocker, Vector3.Cross(Vector3.up, dir));
+                        dir = side > 0f ? left : right;
+                    }
+                    else
+                    {
+                        dir = Random.value < 0.5f ? left : right;
+                    }
+                }
+                // neither clear: keep pushing, stuck recovery will kick in
+            }
         }
 
         ViewDirection = dir;
         MoveDirection = new Vector2(0f, 1f);
-        Sprint = sprint && toGoal.magnitude > 40f;
+
+        // Stop asking once winded. The soldier would refuse anyway, but holding
+        // the request down means the decision gets made in two places and the
+        // AI spends its whole approach fighting its own stamina bar.
+        bool winded = Pawn is PhxSoldier s && s.IsInit && s.IsWinded;
+        Sprint = sprint && !winded && toGoal.magnitude > 40f;
+    }
+
+    // --- Perception memory (AI Stage 1) ---
+    //
+    // Where we last actually perceived an enemy, and when. Without this,
+    // AcquireTarget's opening "TargetPawn = null" meant one frame of broken
+    // line of sight erased the enemy completely: step behind a crate and the
+    // whole squad forgets you exist and walks back to its objective. Keeping a
+    // decaying memory is what makes them push to where you *were*, which reads
+    // as intelligence far more than any amount of aim tuning.
+    public Vector3 LastKnownEnemyPosition { get; private set; }
+    float LastContactTime = float.NegativeInfinity;
+    bool HasContact;
+
+    /// <summary>Seconds a lost contact stays worth chasing.</summary>
+    float ContactMemoryDuration => Mathf.Max(3f, Skill.ReactionTime * 8f + 4f);
+
+    /// <summary>A remembered contact we can still act on.</summary>
+    public bool HasFreshContact => HasContact && Time.time - LastContactTime <= ContactMemoryDuration;
+
+    void RememberContact(Vector3 position)
+    {
+        LastKnownEnemyPosition = position;
+        LastContactTime = Time.time;
+        HasContact = true;
+    }
+
+    /// <summary>
+    /// Accept a contact called in by a squadmate.
+    /// </summary>
+    /// <remarks>
+    /// Stage 2. Without this each soldier has to rediscover the enemy
+    /// personally, so a squad walks past its own dying members one at a time.
+    /// A radioed contact is deliberately weaker than a first-hand one: it does
+    /// not overwrite a fresher sighting of our own.
+    /// </remarks>
+    public void ReceiveContactReport(Vector3 position, float reportedAt)
+    {
+        if (HasContact && LastContactTime >= reportedAt) return;
+
+        LastKnownEnemyPosition = position;
+        LastContactTime = reportedAt;
+        HasContact = true;
+    }
+
+    /// <summary>Squadmates, assigned by the director. Never null.</summary>
+    public readonly List<PhxBF3AIController> Squad = new List<PhxBF3AIController>();
+
+    /// <summary>How far a contact call carries.</summary>
+    const float RadioRange = 70f;
+
+    void BroadcastContact(Vector3 position)
+    {
+        float now = Time.time;
+        for (int i = 0; i < Squad.Count; ++i)
+        {
+            PhxBF3AIController mate = Squad[i];
+            if (mate == null || ReferenceEquals(mate, this)) continue;
+            if (mate.Pawn == null || mate.Pawn.GetInstance() == null) continue;
+
+            if (Vector3.Distance(PawnPosition(), mate.PawnPosition()) <= RadioRange)
+            {
+                mate.ReceiveContactReport(position, now);
+            }
+        }
     }
 
     void AcquireTarget()
     {
+        IPhxControlableInstance previous = TargetPawn;
         TargetPawn = null;
 
-        int count = Physics.OverlapSphereNonAlloc(PawnPosition(), Skill.DetectionRange, OverlapCache);
-        float bestDist = float.MaxValue;
+        // Masked to the soldier layer: unmasked this returned every collider in
+        // range - terrain chunks, props, ordnance - and filled the buffer with
+        // scenery before it reached the people we were looking for.
+        int count = Physics.OverlapSphereNonAlloc(PawnPosition(), Skill.DetectionRange,
+                                                  OverlapCache, PhxLayers.Soldier,
+                                                  QueryTriggerInteraction.Ignore);
+        float bestScore = float.MinValue;
 
         for (int i = 0; i < count; ++i)
         {
@@ -911,21 +1841,160 @@ public class PhxBF3AIController : PhxAIController
             if (soldier.Team == Team || soldier.Team == 0) continue;
             if (ReferenceEquals(soldier, Pawn)) continue;
 
-            float d = Vector3.Distance(PawnPosition(), soldier.transform.position);
-            if (d >= bestDist) continue;
+            if (!HasLineOfSight(soldier.transform.position + Vector3.up * 1.2f)) continue;
 
-            if (HasLineOfSight(soldier.transform.position + Vector3.up * 1.2f))
+            float score = ScoreThreat(soldier);
+            if (score > bestScore)
             {
-                bestDist = d;
+                bestScore = score;
                 TargetPawn = soldier;
             }
         }
 
-        if (TargetPawn != null && State == PhxAIState.SeekObjective)
+        if (TargetPawn != null)
         {
-            ReactionTimer = Skill.ReactionTime;
+            Vector3 seenAt = TargetPawn.GetInstance().transform.position;
+            RememberContact(seenAt);
+
+            // Call it in. One squadmate seeing you should bring the squad, not
+            // just the one who happened to have line of sight.
+            BroadcastContact(seenAt);
+
+            if (State == PhxAIState.SeekObjective)
+            {
+                ReactionTimer = Skill.ReactionTime;
+            }
+
+            // One roll per NEW target: does this AI let the sighting distract
+            // it from the objective? Skill.ObjectiveFocus was authored per
+            // difficulty tier but never consulted before. Re-rolling while
+            // already fighting the same enemy made them flip-flop mid-fight.
+            if (!ReferenceEquals(previous, TargetPawn))
+            {
+                EngageCommitted = Random.value > Skill.ObjectiveFocus;
+            }
+            return;
+        }
+
+        // Nothing visible. Before falling back to the objective, listen: a
+        // shot from behind cover is a contact even with no line of sight.
+        if (PhxAIPerception.TryGetLoudest(PawnPosition(), Team, out PhxAIPerception.Noise noise))
+        {
+            RememberContact(noise.Position);
         }
     }
+
+    // Cycling a weapon takes one tick (the pawn consumes the request), so rate
+    // limit it - otherwise a soldier with two empty guns flips between them
+    // every frame instead of shooting.
+    float WeaponSwitchTimer;
+
+    /// <summary>
+    /// Keep a usable weapon in hand.
+    /// </summary>
+    /// <remarks>
+    /// The AI previously only ever fired whatever weapon happened to be
+    /// selected at spawn, so a class whose first slot ran dry stopped being a
+    /// threat for the rest of its life. Cycling the primary channel when the
+    /// current weapon is empty is what "use any weapons they have" actually
+    /// requires - the soldier already owns the slots, nothing was choosing
+    /// between them.
+    /// </remarks>
+    void TickWeaponSelection(float distanceToTarget)
+    {
+        WeaponSwitchTimer -= Time.deltaTime;
+        if (WeaponSwitchTimer > 0f) return;
+
+        IPhxWeapon primary = Pawn.GetPrimaryWeapon();
+
+        // Current weapon has nothing left anywhere: try the next.
+        bool unusable = primary == null ||
+                        (primary.GetTotalAmmo() <= 0 && primary.GetMagazineAmmo() <= 0);
+        if (!unusable) return;
+
+        // Cycling only helps if some OTHER slot holds a weapon we could fire.
+        // Several stock classes reference award/dispenser weapons that aren't in
+        // the loaded side lvls, leaving null slots - without this check such a
+        // soldier requests a weapon change forever and never does anything else.
+        if (!(Pawn is PhxSoldier soldier) || !HasAnotherUsableWeapon(soldier))
+        {
+            ReportWeaponless();
+            WeaponSwitchTimer = 5f;   // stop asking; nothing is going to change
+            return;
+        }
+
+        NextPrimaryWeapon = true;
+        WeaponSwitchTimer = 0.5f;
+    }
+
+    static bool HasAnotherUsableWeapon(PhxSoldier soldier)
+    {
+        int equipped = soldier.GetEquippedWeaponIdx(0);
+        int count = soldier.GetWeaponCount(0);
+
+        for (int i = 0; i < count; ++i)
+        {
+            if (i == equipped) continue;
+
+            IPhxWeapon w = soldier.GetWeapon(0, i);
+            if (w != null && (w.GetTotalAmmo() > 0 || w.GetMagazineAmmo() > 0))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Once per class, not per soldier - a whole team of the same broken class
+    // would otherwise bury the console.
+    static readonly HashSet<string> ReportedWeaponless = new HashSet<string>();
+
+    void ReportWeaponless()
+    {
+        PhxInstance inst = Pawn?.GetInstance();
+        PhxClass cl = inst != null ? inst.GetClassRef() : null;
+        string className = cl != null ? cl.Name : (inst != null ? inst.name : "<unknown>");
+
+        if (!ReportedWeaponless.Add(className)) return;
+
+        Debug.LogWarning($"[AI] Class '{className}' has no usable weapon in any primary slot - " +
+                         "these units cannot fight. Usually the weapon odfs live in a side lvl " +
+                         "sub-file that never got mounted (see the 'Cannot find weapon class' warnings).");
+    }
+
+    /// <summary>
+    /// How dangerous a candidate is to us right now. Higher wins.
+    /// </summary>
+    /// <remarks>
+    /// Previously this was simply "nearest visible", which makes AI walk past
+    /// the soldier actively shooting them to engage someone marginally closer.
+    /// Proximity still dominates - it is the best single predictor of threat -
+    /// but someone firing at us outranks a slightly nearer bystander.
+    /// </remarks>
+    float ScoreThreat(PhxSoldier candidate)
+    {
+        Vector3 toUs = PawnPosition() - candidate.transform.position;
+        float dist = toUs.magnitude;
+
+        // Falls off with distance rather than a hard nearest-wins comparison.
+        float score = Skill.DetectionRange - dist;
+
+        PhxPawnController controller = candidate.GetController();
+        if (controller != null && controller.ShootPrimary)
+        {
+            score += 15f;
+
+            // Actually pointed at us, not just firing somewhere.
+            if (dist > 0.01f && Vector3.Dot(controller.ViewDirection.normalized, toUs.normalized) > 0.9f)
+            {
+                score += 25f;
+            }
+        }
+
+        return score;
+    }
+
+    bool EngageCommitted;
 
     bool HasLineOfSight(Vector3 targetPoint)
     {

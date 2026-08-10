@@ -75,6 +75,19 @@ public class PhxTextureUpscaler : MonoBehaviour
         if (scene == ActiveScene) return;
         ActiveScene = scene;
 
+        // New map: the old map's source textures are gone, so the cache keys
+        // are dead and their RenderTextures pure VRAM waste. Not releasing
+        // them also left BudgetUsedBytes accumulated across loads, which
+        // silently exhausted the budget after a map change or two.
+        StopAllCoroutines();
+        foreach (RenderTexture rt in Cache.Values)
+        {
+            if (rt != null) rt.Release();
+        }
+        Cache.Clear();
+        Rejected.Clear();
+        BudgetUsedBytes = 0;
+
         if (scene != null && PhxBF3.Config.UpscaleTextures)
         {
             StartCoroutine(UpscaleSceneTextures());

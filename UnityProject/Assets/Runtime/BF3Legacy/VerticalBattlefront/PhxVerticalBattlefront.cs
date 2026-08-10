@@ -112,13 +112,28 @@ public class PhxVerticalBattlefront : MonoBehaviour
         // BF3 greybox maps handle their own ships via PhxBF3MapBuilder
         if (mapScript.StartsWith("bf3_")) return PhxSpaceLayerKind.None;
 
+        // The BF3 Legacy pack's own maps, before the stock prefixes: several of
+        // them are ship and station interiors (Venator, Lucrehulk, Death Star
+        // II) where the fallback below would wrongly hang capital ships in the
+        // sky, and its space battle needs orbit rather than atmosphere.
+        PhxBF3LegacyContent.PhxBF3MapInfo bf3 = PhxBF3LegacyContent.GetMapInfo(mapScript);
+        if (bf3 != null)
+        {
+            switch (bf3.Layer)
+            {
+                case PhxBF3LegacyContent.PhxBF3Layer.Interior: return PhxSpaceLayerKind.None;
+                case PhxBF3LegacyContent.PhxBF3Layer.Space:    return PhxSpaceLayerKind.Orbit;
+                default:                                       return PhxSpaceLayerKind.Atmosphere;
+            }
+        }
+
         foreach (KeyValuePair<string, PhxSpaceLayerKind> kv in StockMapKinds)
         {
             if (mapScript.StartsWith(kv.Key)) return kv.Value;
         }
 
-        // Unknown map (addon/mod content, incl. BF3 Legacy): if it looks like
-        // a space map put ships in orbit, otherwise assume a planet surface.
+        // Unknown map (addon/mod content): if it looks like a space map put
+        // ships in orbit, otherwise assume a planet surface.
         if (mapScript.Contains("space") || mapScript.Contains("spa"))
         {
             return PhxSpaceLayerKind.Orbit;

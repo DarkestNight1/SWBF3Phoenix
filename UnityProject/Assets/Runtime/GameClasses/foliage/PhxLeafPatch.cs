@@ -103,19 +103,34 @@ public class PhxLeafPatch : PhxInstance<PhxLeafPatchClass>
         int NumParticles = Leaves.GetParticles(LeafParticles);
         for (int i = 0; i < NumParticles; i++)
         {
+            // A leaf patch is a canopy: a horizontal disc of leaves Radius
+            // across and Height tall. This previously randomised X and Y and
+            // pinned Z to 0, which is a flat VERTICAL rectangle of billboards -
+            // on Coruscant that showed up as a tall green wall standing in the
+            // middle of the plaza. Radius belongs to the two horizontal axes,
+            // Height to the vertical one.
+            //
+            // Sampling the disc via sqrt() keeps the leaves evenly spread;
+            // using the radius directly would bunch them toward the trunk.
+            float angle = UnityEngine.Random.Range(0f, Mathf.PI * 2f);
+            float dist = C.Radius * Mathf.Sqrt(UnityEngine.Random.value);
+
             LeafParticles[i].position = new Vector3(
-                UnityEngine.Random.Range(-C.Radius, C.Radius), 
-                UnityEngine.Random.Range(-C.Height, C.Height), 
-                0f
+                Mathf.Cos(angle) * dist,
+                UnityEngine.Random.Range(0f, C.Height),
+                Mathf.Sin(angle) * dist
             );
 
             //byte ByteDarkness = (byte) (255f * UnityEngine.Random.Range(C.DarknessMin, C.DarknessMax));
             //LeafParticles[i].startColor = new Color32(ByteDarkness, ByteDarkness, ByteDarkness, ByteAlpha);
         }
 
-        Leaves.SetParticles(LeafParticles);  
+        Leaves.SetParticles(LeafParticles);
 
-        Leaves.Emit(C.NumParticles);
+        // NOTE: no second Emit here. The loop above already emitted
+        // NumParticles and then placed each one; emitting another full batch
+        // added the same number again at the emitter origin, where nothing ever
+        // repositioned them - a solid clump of leaves at the patch's centre.
 
         Leaves.Pause();
     }

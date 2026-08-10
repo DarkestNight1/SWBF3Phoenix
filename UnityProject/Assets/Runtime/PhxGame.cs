@@ -78,6 +78,15 @@ public class PhxGame : MonoBehaviour
     // Maps addons to their root folders
     Dictionary<string, PhxPath> AddonRoots = new Dictionary<string, PhxPath>();
 
+    // Maps each registered mission script to the addon folder that owns it.
+    //
+    // AddonRoots alone is not enough: several BF3 Legacy components call
+    // AddDownloadableContent with the SAME addon name but ship different
+    // scripts under it (both BF3 and BF3Cato-Hunt register "CN3"), so keying
+    // the folder by addon name lets the last addme.script win and sends map
+    // loads to a folder that does not contain their script.
+    Dictionary<string, PhxPath> ScriptRoots = new Dictionary<string, PhxPath>();
+
     bool bInitMainMenu;
     string UnitySceneName = null;
 
@@ -176,6 +185,7 @@ public class PhxGame : MonoBehaviour
         {
             // CurrentAddonFolder is set in OnMainMenuExecution
             AddonRoots[addonName] = CurrentAddonFolder;
+            ScriptRoots[scriptName.ToLower()] = CurrentAddonFolder;
             RegisteredAddons.Add(scriptName.ToLower(), addonName);
         }
     }
@@ -207,6 +217,8 @@ public class PhxGame : MonoBehaviour
         }
 
         RegisteredAddons.Clear();
+        ScriptRoots.Clear();
+        AddonRoots.Clear();
         ExploreAddons();
 
         Env.OnExecuteMain += OnMainMenuExecution;
@@ -223,9 +235,46 @@ public class PhxGame : MonoBehaviour
         RemoveMenu(false);
 
         PhxPath addonPath = null;
-        if (RegisteredAddons.TryGetValue(mapScript.ToLower(), out string addonName))
+        // Resolve through the per-script map, not the addon name: components
+        // share addon names (BF3 and BF3Cato-Hunt both register "CN3"), so
+        // keying by name mounts whichever folder registered last and the
+        // script is then missing from it.
+        //
+        // Exact match only. An earlier version normalized the era letter
+        // ("dea1c_con" -> registered "dea1x_con") on the theory that addons
+        // register template eras while their shells launch concrete ones -
+        // but that's wrong: era-x/y/g addon content is a DIFFERENT map that
+        // merely shares a name prefix with the stock era-c/g map ("dea1x_con"
+        // exists only in BF3Era's mission.lvl; "dea1c_con" exists only in
+        // stock mission.lvl). Normalizing sent stock map selections to the
+        // wrong addon's data path, and ScheduleRelFallback mounts addon data
+        // INSTEAD OF stock, so the stock script the player actually picked
+        // was never loaded: "Couldn't find script 'dea1c_con'!". Addon maps
+        // never needed this - each addon registers its own exact script name
+        // via AddDownloadableContent and its shell requests that same name,
+        // so the plain lookup below already succeeds for them.
+        string scriptKey = mapScript.ToLower();
+        if (ScriptRoots.TryGetValue(scriptKey, out PhxPath scriptRoot))
         {
-            addonPath = AddonPath / AddonRoots[addonName] / "data/_lvl_pc";
+            RegisteredAddons.TryGetValue(scriptKey, out string addonName);
+            addonPath = AddonPath / scriptRoot / "data/_lvl_pc";
+
+            // A wrong path here silently degrades to stock-only data, which
+            // surfaces much later as "Couldn't find script '<map>'".
+            if (!addonPath.Exists())
+            {
+                Debug.LogError($"[BF3Legacy] Addon data path for '{mapScript}' does not exist: " +
+                               $"'{addonPath}' (addon '{addonName}', root '{scriptRoot}')");
+            }
+        }
+        else
+        {
+            // Not an addon script, so only stock data gets mounted. That is the
+            // correct and expected path for every stock map, so this is
+            // information rather than a problem - if the script genuinely is
+            // missing, PhxEnvironment.Execute reports it as an error.
+            Debug.Log($"[BF3Legacy] '{mapScript}' is not an addon script; mounting stock game data " +
+                      $"({RegisteredAddons.Count} addon script(s) registered).");
         }
 
         // Unload previous Unity Scene (if any)
@@ -237,6 +286,11 @@ public class PhxGame : MonoBehaviour
 
         Env?.Destroy();
         Env = PhxEnvironment.Create(StdLVLPC, addonPath);
+
+        // Each environment gets a fresh Lua state, so the mod compatibility
+        // helpers have to be reinstalled for mission scripts that use them.
+        PhxBF3LegacyCompat.Install(Env.GetLuaRuntime());
+
         Env.ScheduleRel("load/common.lvl");
         Env.OnLoadscreenLoaded += OnLoadscreenTextureLoaded;
         Env.OnPostLoad += OnEnvLoaded;
@@ -433,6 +487,12 @@ public class PhxGame : MonoBehaviour
         {
             CurrentLS.SetLoadImage(TextureLoader.Instance.ImportUITexture("gal_con"));
         }
+
+        // Addons built against the SWBF2 UI Remaster (the whole BF3 Legacy pack)
+        // call helpers the stock shell doesn't have. Define them before any
+        // addme.script runs, or those scripts abort and their maps never
+        // reach the mission list.
+        PhxBF3LegacyCompat.Install(Env.GetLuaRuntime());
 
         foreach (var lvl in Env.Loaded)
         {

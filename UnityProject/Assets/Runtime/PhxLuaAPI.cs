@@ -68,6 +68,63 @@ public static class PhxLuaAPI
 		return 0;
 	}
 
+	// ===============================================================================================================
+	// Per-mode limits requested by the stock objective scripts.
+	//
+	// Discovered by dumping the constant tables of BF2's own compiled scripts
+	// (Tools/ScriptDump) rather than guessed: objectiveassault asks for the
+	// assault score limit, objectivetdm for the hunt limits, and so on. These
+	// mirror the CON/CTF pattern already above - a value of 0 means "no limit",
+	// which is what the scripts treat as unset.
+	//
+	// They matter out of proportion to their size: an unimplemented Lua global
+	// raises an error that abandons the rest of the calling script, so a single
+	// missing limit disabled a whole mode during setup.
+	// ===============================================================================================================
+
+	public static int ScriptCB_GetAssaultScoreLimit()
+	{
+		return 0;
+	}
+
+	public static int ScriptCB_GetASSNumBots()
+	{
+		return 0;
+	}
+
+	public static float ScriptCB_GetHuntMaxTimeLimit()
+	{
+		return 0.0f;
+	}
+
+	public static int ScriptCB_GetHuntScoreLimit()
+	{
+		return 0;
+	}
+
+	public static bool ScriptCB_ShowHuntScoreLimit()
+	{
+		return false;
+	}
+
+	public static int ScriptCB_GetUberScoreLimit()
+	{
+		return UberScoreLimit;
+	}
+
+	public static void ScriptCB_SetUberScoreLimit(int limit)
+	{
+		UberScoreLimit = limit;
+	}
+
+	static int UberScoreLimit = 0;
+
+	/// <summary>Seconds since the match began.</summary>
+	public static float ScriptCB_GetMissionTime()
+	{
+		return MT != null ? MT.GetMatchTime() : 0f;
+	}
+
 	public static bool ScriptCB_IsMissionSetupSaved()
 	{
 		// I think this is the "galactic conquest" special items setup (e.g. sabotage, extra health, ...)
@@ -353,9 +410,12 @@ public static class PhxLuaAPI
 		
 	}
 
+	/// <summary>
+	/// How hard a team presses. 1 is normal; lower holds ground, higher pushes.
+	/// </summary>
 	public static void SetTeamAggressiveness(int teamIdx, float aggr)
 	{
-		
+		PhxAIDirectives.SetAggressiveness(teamIdx, aggr);
 	}
 
 	public static void SetMemoryPoolSize(string poolName, int size)
@@ -397,21 +457,25 @@ public static class PhxLuaAPI
 		PhxAIGoals.ClearTeam(teamIdx);
     }
 
+	/// <summary>How far a vehicle's arrival is noticed by AI on foot.</summary>
 	public static void SetAIVehicleNotifyRadius(float radius)
     {
-
+		PhxAIDirectives.SetVehicleNotifyRadius(radius);
     }
 
+	/// <summary>
+	/// Mission-set AI skill for a team ("medium" / "hard"). Never lowers the
+	/// player's chosen difficulty - see PhxAIDirectives.SetDifficulty.
+	/// </summary>
 	public static void SetAIDifficulty(int teamIdx, int unkwn1, string difficulty)
     {
-		// values for the difficulty string:
-		// - "medium"
-		// - "hard"
+		PhxAIDirectives.SetDifficulty(teamIdx, difficulty);
 	}
 
+	/// <summary>Whether a team may put new AI into the world at all.</summary>
 	public static void AllowAISpawn(int teamIdx, bool allow)
     {
-
+		PhxAIDirectives.SetSpawnAllowed(teamIdx, allow);
     }
 
 	public static void SetSpawnDelay(float unkwn1, float unkwn2)
@@ -424,9 +488,13 @@ public static class PhxLuaAPI
 		MT.SetHeroClass(teamIdx, className);
 	}
 
+	/// <summary>
+	/// Campaign hero availability: the mission decides when its hero exists,
+	/// not the scoreboard. Pairs with SetHeroClass, which names the odf.
+	/// </summary>
 	public static void EnableSPScriptedHeroes()
     {
-
+		PhxHeroRules.EnableScriptedHeroes();
     }
 
     public static void EnableAIAutoBalance()
@@ -434,11 +502,17 @@ public static class PhxLuaAPI
 
     }
 
+	/// <summary>
+	/// Turn one of the map's authored flyer routes on or off, so a mission can
+	/// stop transports running a pickup or capture leg during a phase where
+	/// they shouldn't.
+	/// </summary>
 	public static void EnableFlyerPath(string pathName, bool enable)
     {
 		// Examples:
 		//   EnableFlyerPath('pickup', 0)
 		//   EnableFlyerPath('capture', 0)
+		PhxAIDirectives.SetFlyerPathEnabled(pathName, enable);
 	}
 
 	public static void SetTeamAsEnemy(int teamIdx1, int teamIdx2)
@@ -473,32 +547,41 @@ public static class PhxLuaAPI
 
 	public static void SetDenseEnvironment(string isDense)
 	{
-		// seems to be always called with string "false"
+		// Passed as a string rather than a bool by the scripts; "false" is by
+		// far the common case, so anything that isn't recognisably true is
+		// treated as false rather than as an error.
+		PhxAIDirectives.SetDenseEnvironment(
+			string.Equals(isDense, "true", System.StringComparison.OrdinalIgnoreCase) ||
+			isDense == "1");
 	}
 
 	public static void SetMinFlyHeight(float height)
 	{
-		
+		PhxAIDirectives.SetFlyHeights(height, PhxAIDirectives.MaxFlyHeight);
 	}
 
 	public static void SetMaxFlyHeight(float height)
 	{
-		
+		PhxAIDirectives.SetFlyHeights(PhxAIDirectives.MinFlyHeight, height);
 	}
 
 	public static void SetMinPlayerFlyHeight(float height)
     {
-
+		PhxAIDirectives.SetPlayerFlyHeights(height, PhxAIDirectives.MaxPlayerFlyHeight);
     }
 
 	public static void SetMaxPlayerFlyHeight(float height)
 	{
-		
+		PhxAIDirectives.SetPlayerFlyHeights(PhxAIDirectives.MinPlayerFlyHeight, height);
 	}
 
+	/// <summary>
+	/// Which team the mission considers the attacker. Shapes whether AI pushes
+	/// objectives or holds them.
+	/// </summary>
 	public static void SetAttackingTeam(int teamIdx)
 	{
-		
+		PhxAIDirectives.SetAttackingTeam(teamIdx);
 	}
 
 	public static void AddCameraShot(float quatW, float quatX, float quatY, float quatZ, float posX, float posY, float posZ)
@@ -519,10 +602,20 @@ public static class PhxLuaAPI
 		MT.SetTeamIcon(teamIdx, iconName);
 	}
 
+	/// <summary>Reinforcement losses per second (e.g. 0.33).</summary>
 	public static void SetBleedRate(int teamIdx, float rate)
 	{
-		// a.k.a. reinforcement losses per second (e.g. 0.33)
+		MT.SetBleedRate(teamIdx, rate);
 	}
+
+	// AddCommandPost and AddBleedThreshold are deliberately NOT defined here.
+	// The ModTools sources show both are methods on the objective class, not
+	// engine API:
+	//     function ObjectiveConquest:AddCommandPost(cp)
+	//     function ObjectiveConquest:AddBleedThreshold(team, threshold, rate)
+	// The latter only fills self.bleedRates; the engine side of conquest bleed
+	// is GetCommandPostBleedValue and SetBleedRate, both already implemented.
+	// Defining globals with those names would be dead code.
 
 	public static int GetReinforcementCount(int teamIdx)
 	{
@@ -539,60 +632,65 @@ public static class PhxLuaAPI
 		MT.AddReinforcements(teamIdx, count);
 	}
 
+	// The handle is opaque to scripts - they only ever hand it back to
+	// AudioStreamAppendSegments - so an incrementing id is enough.
 	public static int OpenAudioStream(string lvlPath, string streamName)
 	{
-		// TODO: what exactly does this function return? An audio stream object?
-		return 0;
+		return PhxMusicManager.Instance?.OpenStream(lvlPath, streamName) ?? 0;
 	}
 
 	public static void AudioStreamAppendSegments(string lvlPath, string voiceOverName, int audioStream)
 	{
-		
+		PhxMusicManager.Instance?.AppendSegment(audioStream, voiceOverName);
 	}
 
+	// The two team indices are "who hears it" and "who it is about" - a team
+	// gets a different line for its own bleeding than for the enemy's.
 	public static void SetBleedingVoiceOver(int teamIdx1, int teamIdx2, string voiceOverName, int unkwn1)
 	{
-		
+		PhxMusicManager.Instance?.SetBleedingVoiceOver(teamIdx1, teamIdx2, voiceOverName);
 	}
 
 	public static void SetLowReinforcementsVoiceOver(int teamIdx1, int teamIdx2, string voiceOverName, float unkwn1, int unkwn2)
 	{
-		
+		PhxMusicManager.Instance?.SetLowReinforcementsVoiceOver(teamIdx1, teamIdx2, voiceOverName);
 	}
 
 	public static void SetOutOfBoundsVoiceOver(int teamIdx, string soundName)
 	{
-		
+		// Recorded only: there is no out-of-bounds state to trigger it from
+		// yet (AddDeathRegion is itself unimplemented).
+		PhxMusicManager.Instance?.SetSoundEffect($"outofbounds{teamIdx}", soundName);
 	}
 
 	public static void BroadcastVoiceOver(string voName, int teamIdx)
     {
-
+		PhxMusicManager.Instance?.BroadcastVoiceOver(voName, teamIdx);
     }
 
 	public static void SetAmbientMusic(int teamIdx, float unkwn1, string musicName, int unkwn2, int unkwn3)
 	{
-		
+		PhxMusicManager.Instance?.SetAmbientMusic(teamIdx, musicName);
 	}
 
 	public static void SetVictoryMusic(int teamIdx, string soundName)
 	{
-		
+		PhxMusicManager.Instance?.SetVictoryMusic(teamIdx, soundName);
 	}
 
 	public static void SetDefeatMusic(int teamIdx, string soundName)
 	{
-		
+		PhxMusicManager.Instance?.SetDefeatMusic(teamIdx, soundName);
 	}
 
 	public static void SetSoundEffect(string eventName, string soundName)
 	{
-		
+		PhxMusicManager.Instance?.SetSoundEffect(eventName, soundName);
 	}
 
 	public static void ScaleSoundParameter(string soundName, string paramName, float scale)
     {
-
+		// Runtime DSP parameter scaling; nothing consumes it yet.
     }
 
 	public static void SetMapNorthAngle(int unkwn1)
@@ -617,9 +715,13 @@ public static class PhxLuaAPI
 
 	}
 
+	/// <summary>
+	/// Score-driven hero availability: a team earns its hero, one player has
+	/// them at a time, and losing them costs the slot until it is earned again.
+	/// </summary>
 	public static void EnableSPHeroRules()
 	{
-		
+		PhxHeroRules.EnableHeroRules();
 	}
 
 	public static void AddDeathRegion(string regionName)
@@ -735,9 +837,15 @@ public static class PhxLuaAPI
 		return 0;
     }
 
+	/// <summary>
+	/// How much this command post contributes to <paramref name="teamIdx"/>'s
+	/// bleed position: 1 while they hold it, 0 otherwise. Scripts sum this
+	/// across posts to decide who is behind.
+	/// </summary>
 	public static float GetCommandPostBleedValue(string cpName, int teamIdx)
 	{
-		return 0.0f;
+		PhxCommandpost cp = RTS?.GetInstance<PhxCommandpost>(cpName);
+		return cp != null && cp.Team == teamIdx ? 1.0f : 0.0f;
 	}
 
 	public static void AICanCaptureCP(string cpName, int teamIdx, bool canCapture)
@@ -755,10 +863,101 @@ public static class PhxLuaAPI
 
 	}
 
+	// ===============================================================================================================
+	// CTF / 1-flag. Entirely additive: PhxFlag only exists on objects a mission
+	// script registers through AddFlag, so conquest and the other modes behave
+	// exactly as before on maps that never call these.
+	// ===============================================================================================================
+
+	static PhxFlag.PhxFlagMode FlagMode = PhxFlag.PhxFlagMode.Ctf;
+
 	public static void SetFlagGameplayType(string typeName)
     {
+		// "1flag" is the neutral single-flag variant; anything else is CTF.
+		FlagMode = !string.IsNullOrEmpty(typeName) && typeName.ToLower().Contains("1flag")
+			? PhxFlag.PhxFlagMode.OneFlag
+			: PhxFlag.PhxFlagMode.Ctf;
+	}
 
-    }
+	static PhxFlag ResolveFlag(int? flagPtr)
+	{
+		if (!flagPtr.HasValue || RTS == null) return null;
+
+		PhxInstance inst = RTS.GetInstance<PhxInstance>(flagPtr.Value);
+		if (inst == null) return null;
+
+		PhxFlag flag = inst.gameObject.GetComponent<PhxFlag>();
+		return flag != null ? flag : inst.gameObject.AddComponent<PhxFlag>();
+	}
+
+	public static void AddFlag(int? flagPtr)
+	{
+		PhxFlag flag = ResolveFlag(flagPtr);
+		if (flag == null)
+		{
+			Debug.LogWarning("AddFlag called with an instance that could not be resolved.");
+			return;
+		}
+
+		flag.Mode = FlagMode;
+
+		// In CTF the flag belongs to whichever team's object it is; the neutral
+		// 1-flag has no owner.
+		PhxInstance inst = flag.GetComponent<PhxInstance>();
+		flag.HomeTeam = FlagMode == PhxFlag.PhxFlagMode.OneFlag || inst == null ? 0 : inst.Team;
+	}
+
+	public static void AddFlagHomeRegion(int? flagPtr, string regionName)
+	{
+		PhxFlag flag = ResolveFlag(flagPtr);
+		if (flag == null || RTS == null) return;
+
+		flag.HomeRegion = RTS.GetRegion(regionName);
+		if (flag.HomeRegion == null)
+		{
+			Debug.LogWarning($"AddFlagHomeRegion: region '{regionName}' not found; " +
+			                 "the flag will score at its home position instead.");
+		}
+	}
+
+	public static void AddFlagCapturePoints(int? flagPtr, int points)
+	{
+		PhxFlag flag = ResolveFlag(flagPtr);
+		if (flag != null)
+		{
+			flag.CapturePoints = points;
+		}
+	}
+
+	public static void SetFlagIcon(int? flagPtr, string iconName)
+	{
+		// Minimap iconography; the map UI does not draw flags yet.
+	}
+
+	public static void OnFlagPickUp(PhxLuaRuntime.LFunction callback)
+	{
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnFlagPickUp, callback);
+	}
+
+	public static void OnFlagPickUpTeam(PhxLuaRuntime.LFunction callback, int teamIdx)
+	{
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnFlagPickUpTeam, callback, teamIdx);
+	}
+
+	public static void OnFlagDrop(PhxLuaRuntime.LFunction callback)
+	{
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnFlagDrop, callback);
+	}
+
+	public static void OnFlagDropTeam(PhxLuaRuntime.LFunction callback, int teamIdx)
+	{
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnFlagDropTeam, callback, teamIdx);
+	}
+
+	public static void OnFlagReset(PhxLuaRuntime.LFunction callback)
+	{
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnFlagReset, callback);
+	}
 
 	public static void SetAIViewMultiplier(float multiplier)
     {
@@ -788,7 +987,16 @@ public static class PhxLuaAPI
 	public static void MissionVictory(object teams)
     {
 		// teams can either be one int (1), or a table of ints {1,2}
-		Debug.Log($"Team '{teams}' wins!");
+		int[] teamIndices = ToTeamArray(teams);
+		if (teamIndices == null || teamIndices.Length == 0)
+		{
+			Debug.LogWarning($"MissionVictory called with unusable teams argument '{teams}'");
+			return;
+		}
+
+		// A table means a shared victory; the first entry is the one the round
+		// is reported under, which is how BF2 presents co-op sides.
+		MT.EndMatch(teamIndices[0]);
 	}
 
 	public static int? CreateTimer(string timerName)
@@ -823,6 +1031,19 @@ public static class PhxLuaAPI
 	public static void SetTimerValue(int? timer, float value)
     {
 		TDB.SetTimerValue(timer, value);
+	}
+
+	/// <summary>Current value of a timer, in seconds.</summary>
+	/// <remarks>
+	/// The setter existed without a getter, and mission scripts poll this from
+	/// their timer callbacks. Because a missing Lua global raises a runtime
+	/// error rather than returning nil, its absence aborted whatever script was
+	/// running - which is what filled the log with
+	/// "attempt to call global `GetTimerValue' (a nil value)".
+	/// </remarks>
+	public static float GetTimerValue(int? timer)
+	{
+		return TDB.GetTimerValue(timer);
 	}
 
 	public static void ReleaseTimerElapse(int? timerCallback)
@@ -907,9 +1128,13 @@ public static class PhxLuaAPI
 
 	}
 
+	/// <summary>
+	/// Whether jet troopers may take a JETJUMP hint node without a confirmed
+	/// landing on the far side.
+	/// </summary>
 	public static void SetAllowBlindJetJumps(int num)
 	{
-
+		PhxAIDirectives.SetAllowBlindJetJumps(num != 0);
 	}
 
 	public static void SetAIDamageThreshold(string objName, float threshold)
@@ -932,14 +1157,20 @@ public static class PhxLuaAPI
 
 	}
 
+	/// <summary>
+	/// Opaque handle for a region, which scripts pass back into region calls -
+	/// e.g. MapRemoveRegionMarker(GetRegion(flag.captureRegion)) in
+	/// ObjectiveCTF.lua. Returning a constant 0, as this did, made every region
+	/// alias to the same one.
+	/// </summary>
 	public static int GetRegion(string regionName)
     {
-		return 0;
+		return RTS != null ? RTS.GetRegionHandle(regionName) : -1;
     }
 
 	public static string GetRegionName(int region)
 	{
-		return "";
+		return RTS != null ? RTS.GetRegionName(region) : "";
 	}
 
 	public static void ActivateRegion(string regionName)
@@ -956,6 +1187,223 @@ public static class PhxLuaAPI
     {
 
     }
+
+	// ===============================================================================================================
+	// Scoreboard. Conquest ends on reinforcements, but CTF/assault/hunt score
+	// through team points, so the stock objective scripts drive both. These were
+	// present in the BF2 script API (verified against the shipped mission.lvl
+	// and common.lvl string tables) but unimplemented here, so any mode that
+	// scored by points could never reach its win condition.
+	// ===============================================================================================================
+
+	// ===============================================================================================================
+	// Character queries.
+	//
+	// Mission scripts pass instance indices around as "character" handles and
+	// query them constantly - GetCharacterTeam alone is referenced by six of
+	// the eight stock objective scripts (see Tools/ScriptDump). Because an
+	// unimplemented Lua global raises an error and abandons the rest of the
+	// script, each of these missing was enough to disable a whole mode.
+	// ===============================================================================================================
+
+	// ===============================================================================================================
+	// Objective presentation: on-screen text and map markers.
+	//
+	// The state these write to lives on PhxMatch; drawing it is part of the
+	// shell UI work. Implemented now regardless, because the calls themselves
+	// are what abort objectivectf, objectivegoto and objectiveoneflagctf when
+	// missing.
+	// ===============================================================================================================
+
+	/// <summary>Objective line shown on screen. teamIdx 0 addresses everyone.</summary>
+	public static void ShowMessageText(string localizeKey, int teamIdx = 0)
+	{
+		MT?.PostObjectiveMessage(localizeKey, teamIdx);
+	}
+
+	/// <summary>Larger objective popup - same feed, scripts treat it as emphasis.</summary>
+	public static void ShowObjectiveTextPopup(string localizeKey, int teamIdx = 0)
+	{
+		MT?.PostObjectiveMessage(localizeKey, teamIdx);
+	}
+
+	// Signatures taken from the ModTools sources rather than guessed. e.g.
+	// ObjectiveGoto.lua:
+	//     MapAddRegionMarker(self.regionName, self.mapIcon, 2.5, self.teamATT, "YELLOW", true)
+	// and ObjectiveCTF.lua, which passes a handle instead of a name:
+	//     MapAddRegionMarker(GetRegion(flag.captureRegion), flag.capRegionMarker, 4.0, ...)
+	// My first attempt had three parameters in the wrong order, so these calls
+	// could never have bound.
+
+	public static void MapAddRegionMarker(string regionName, string iconName, float scale,
+	                                      int teamIdx, string colour, bool visible)
+	{
+		MT?.AddMapMarker("region", regionName, teamIdx, iconName);
+	}
+
+	public static void MapAddRegionMarker(int region, string iconName, float scale,
+	                                      int teamIdx, string colour, bool visible)
+	{
+		MapAddRegionMarker(GetRegionName(region), iconName, scale, teamIdx, colour, visible);
+	}
+
+	public static void MapAddClassMarker(string className, string iconName, float scale,
+	                                     int teamIdx, string colour, bool visible)
+	{
+		MT?.AddMapMarker("class", className, teamIdx, iconName);
+	}
+
+	public static void MapRemoveClassMarker(string className)
+	{
+		MT?.RemoveMapMarkers("class", className);
+	}
+
+	// MapRemoveRegionMarker lives with the other pre-existing marker stubs
+	// further down this file - adding a second one here was what produced
+	// "CS0111: already defines a member called 'MapRemoveRegionMarker'".
+
+	/// <summary>Restrict kill scoring to human players (hero/deathmatch rules).</summary>
+	public static void OnlyCountHumanKills(bool onlyHumans)
+	{
+		if (MT != null) MT.OnlyCountHumanKills = onlyHumans;
+	}
+
+	public static void OnlyCountHumanDeaths(bool onlyHumans)
+	{
+		if (MT != null) MT.OnlyCountHumanDeaths = onlyHumans;
+	}
+
+	/// <summary>World file this mission is running, without extension.</summary>
+	public static string GetWorldFilename()
+	{
+		return ENV != null ? ENV.GetWorldName() : "";
+	}
+
+	/// <summary>Galactic Conquest / campaign rather than instant action.</summary>
+	public static bool IsCampaign()
+	{
+		return false;
+	}
+
+	/// <summary>Team of a character, or 0 (neutral) if the handle is stale.</summary>
+	public static int GetCharacterTeam(int charIdx)
+	{
+		PhxInstance inst = RTS?.GetInstance(charIdx);
+		return inst != null ? inst.Team.Get() : 0;
+	}
+
+	/// <summary>Whether this character is the local player rather than AI.</summary>
+	public static bool IsCharacterHuman(int charIdx)
+	{
+		PhxInstance inst = RTS?.GetInstance(charIdx);
+		if (inst == null) return false;
+
+		IPhxControlableInstance playerPawn = MT?.Player?.Pawn;
+		return playerPawn != null && ReferenceEquals(playerPawn.GetInstance(), inst);
+	}
+
+	/// <summary>Whether a character currently stands inside a named region.</summary>
+	public static bool IsCharacterInRegion(int charIdx, string regionName)
+	{
+		PhxInstance inst = RTS?.GetInstance(charIdx);
+		if (inst == null || string.IsNullOrEmpty(regionName)) return false;
+
+		PhxRegion region = RTS.GetRegion(regionName);
+		if (region == null || region.Collider == null) return false;
+
+		// Bounds test rather than trigger bookkeeping: scripts ask this at
+		// arbitrary moments, not only on the frame a trigger fired.
+		return region.Collider.bounds.Contains(inst.transform.position);
+	}
+
+	// GetGameTimeLimit is likewise a script method, not engine API:
+	//     function ObjectiveConquest:GetGameTimeLimit()
+	//         return ScriptCB_GetCONMaxTimeLimit()
+	// and that ScriptCB_ is already implemented above.
+
+	public static int GetTeamPoints(int teamIdx)
+	{
+		return MT.GetTeamPoints(teamIdx);
+	}
+
+	public static void SetTeamPoints(int teamIdx, int points)
+	{
+		MT.SetTeamPoints(teamIdx, points);
+	}
+
+	public static void AddTeamPoints(int teamIdx, int points)
+	{
+		MT.AddTeamPoints(teamIdx, points);
+	}
+
+	/// <summary>Units a team has in the world right now, player included.</summary>
+	public static int GetTeamSize(int teamIdx)
+	{
+		return MT.GetTeamSize(teamIdx);
+	}
+
+	public static int GetNumTeamMembersAlive(int teamIdx)
+	{
+		return MT.GetTeamSize(teamIdx);
+	}
+
+	public static int GetOpposingTeam(int teamIdx)
+	{
+		return MT.GetOpposingTeam(teamIdx);
+	}
+
+	// BF2's own scripts use both spellings interchangeably.
+	public static int GetOppositeTeam(int teamIdx)
+	{
+		return MT.GetOpposingTeam(teamIdx);
+	}
+
+	/// <summary>
+	/// Team arguments in the BF2 script API are either a single number or a
+	/// Lua table of them ({1,2}), so every entry point taking "teams" has to
+	/// accept both.
+	/// </summary>
+	static int[] ToTeamArray(object teams)
+	{
+		if (teams == null) return null;
+
+		if (teams is PhxLuaRuntime.Table table)
+		{
+			List<int> result = new List<int>();
+			foreach (KeyValuePair<object, object> entry in table)
+			{
+				try { result.Add(Convert.ToInt32(entry.Value)); }
+				catch { /* non-numeric entry, skip */ }
+			}
+			return result.Count > 0 ? result.ToArray() : null;
+		}
+
+		try { return new int[] { Convert.ToInt32(teams) }; }
+		catch { return null; }
+	}
+
+	/// <summary>
+	/// Counterpart to MissionVictory - the losing side's scripts call this.
+	/// Without it a mode that only ever calls MissionDefeat (hunt, assault
+	/// defence) could never end.
+	/// </summary>
+	public static void MissionDefeat(object teams)
+	{
+		int[] teamIndices = ToTeamArray(teams);
+		if (teamIndices == null) return;
+
+		// A defeat for one side is a victory for whoever opposes it, which is
+		// how BF2 resolves a two-sided match from a single call.
+		for (int i = 0; i < teamIndices.Length; ++i)
+		{
+			int winner = MT.GetOpposingTeam(teamIndices[i]);
+			if (winner > 0)
+			{
+				MissionVictory(winner);
+				return;
+			}
+		}
+	}
 
 	public static void ShowTeamPoints(int teamIdx, bool show)
     {
@@ -998,12 +1446,14 @@ public static class PhxLuaAPI
 
 	public static void MapRemoveRegionMarker(int region)
 	{
-
+		// Scripts also address regions by index. We key markers by name, so
+		// resolve through the scene's region list first.
+		MT?.RemoveMapMarkers("region", RTS?.GetRegionName(region));
 	}
 
 	public static void MapRemoveRegionMarker(string regionName)
     {
-
+		MT?.RemoveMapMarkers("region", regionName);
     }
 
 	public static int GetFlagCarrier(string flagName)
@@ -1051,6 +1501,110 @@ public static class PhxLuaAPI
     {
 
     }
+
+	// ================= Space assault / mission plumbing =====================
+	//
+	// Every function below is called by the stock SPACE mission and objective
+	// scripts and did not exist. In Lua 5.0 calling a nil global raises an
+	// error that aborts the whole chunk at that point - so the FIRST of these
+	// killed the script, and everything after it (objectives, team setup, AI
+	// goals) never ran. That is why space maps spawned a unit into a match with
+	// no gameplay in it.
+	//
+	// Where the behaviour isn't modelled yet the function is a deliberate no-op
+	// that returns a sane value: an honest stub keeps the script running, which
+	// is the entire problem being solved here. Each logs once so the remaining
+	// gaps stay visible instead of silently pretending to work.
+
+	static readonly HashSet<string> ReportedLuaStubs = new HashSet<string>();
+
+	static void ReportStub(string fn)
+	{
+		if (!ReportedLuaStubs.Add(fn)) return;
+		Debug.Log($"[Lua] '{fn}' is a stub - call accepted so the script continues, " +
+		          "but the behaviour is not modelled yet.");
+	}
+
+	/// <summary>Lua: SpaceAssaultGetScoreLimit - called by objectivespaceassault.</summary>
+	public static float SpaceAssaultGetScoreLimit()
+	{
+		// The objective script divides by this and compares against it, so a
+		// zero would be worse than a guess. Matches the stock space score cap.
+		return 100f;
+	}
+
+	/// <summary>Lua: OnCharacterSpawn - fires whenever any character spawns.</summary>
+	public static void OnCharacterSpawn(PhxLuaRuntime.LFunction callback)
+	{
+		// callback parameters:
+		// - characterId
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnCharacterSpawn, callback);
+	}
+
+	/// <summary>
+	/// Lua: ReleaseCharacterSpawn / ReleaseObjectKill - drop a registration.
+	/// </summary>
+	/// <remarks>
+	/// No-ops, matching the existing ReleaseTimerElapse/ReleaseEnterRegion
+	/// above: callbacks live for the map and are cleared on teardown, so
+	/// nothing leaks across a round. What matters is that these EXIST - a
+	/// missing global aborts the calling chunk, which is what broke the space
+	/// scripts.
+	/// </remarks>
+	public static void ReleaseCharacterSpawn(object handle)
+	{
+	}
+
+	public static void ReleaseObjectKill(object handle)
+	{
+	}
+
+	/// <summary>
+	/// Lua: ReleaseTeamPointsChange. OnTeamPointsChange was implemented but its
+	/// release counterpart was not, and objectivespaceassault calls it - so the
+	/// objective script died on cleanup even once the rest ran.
+	/// </summary>
+	public static void ReleaseTeamPointsChange(object handle)
+	{
+	}
+
+	/// <summary>Lua: EnableLockOn - missile lock against a named object.</summary>
+	public static void EnableLockOn(object obj, bool enable)
+	{
+		ReportStub(nameof(EnableLockOn));
+	}
+
+	/// <summary>Lua: PlayVO - mission voice-over.</summary>
+	public static void PlayVO(params object[] args)
+	{
+		if (args == null || args.Length == 0) return;
+
+		string sound = args[0] as string;
+		if (string.IsNullOrEmpty(sound)) return;
+
+		// Team 0 = heard by everyone, which is the right default for a mission
+		// VO that didn't name an audience.
+		int team = 0;
+		for (int i = 1; i < args.Length; ++i)
+		{
+			if (args[i] is double d) { team = (int)d; break; }
+			if (args[i] is int t) { team = t; break; }
+		}
+
+		PhxMusicManager.Instance?.BroadcastVoiceOver(sound, team);
+	}
+
+	/// <summary>Lua: PlayMovieWithTransition.</summary>
+	public static void PlayMovieWithTransition(params object[] args)
+	{
+		ReportStub(nameof(PlayMovieWithTransition));
+	}
+
+	/// <summary>Lua: SetMissionEndMovie.</summary>
+	public static void SetMissionEndMovie(params object[] args)
+	{
+		ReportStub(nameof(SetMissionEndMovie));
+	}
 
 	public static void DisableSmallMapMiniMap()
     {
@@ -1103,6 +1657,15 @@ public static class PhxLuaAPI
 		GAME.RegisterAddonScript(scriptName, threeLetterName);
 	}
 
+	// Called by the addon Lua compatibility shim (PhxBF3LegacyCompat) whenever a
+	// mod declares a game mode or era the stock shell doesn't ship with, e.g.
+	// BF3 Legacy's "Orbital Assault" and its two BF3-specific eras. Empty
+	// strings mean "the mod didn't say", and keep whatever default we have.
+	public static void PhxBF3RegisterGameMode(string key, string displayName, string about, string icon)
+	{
+		PhxBF3LegacyContent.RegisterModeInfo(key, displayName, about, icon);
+	}
+
 
 
 
@@ -1112,15 +1675,23 @@ public static class PhxLuaAPI
 
 	public static void OnCharacterDeath(PhxLuaRuntime.LFunction callback)
     {
-		
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnCharacterDeath, callback);
+		// callback parameters:
+		// - killedCharacterIdx
+		// - killerCharacterIdx (nil when nobody gets the credit)
     }
 	public static void OnCharacterDeathTeam(PhxLuaRuntime.LFunction callback, int teamIdx)
 	{
-		
+		// Keyed by the team the killed character belonged to.
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnCharacterDeathTeam, callback, teamIdx);
 	}
 	public static void OnTicketCountChange(PhxLuaRuntime.LFunction callback)
 	{
 		// TicketCount seems to be the reinforcement count, see Objective.lua:192
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnTicketCountChange, callback);
+		// callback parameters:
+		// - teamIdx
+		// - ticketCount
 	}
 	public static void OnTimerElapse(PhxLuaRuntime.LFunction callback, int timer)
 	{
@@ -1182,11 +1753,11 @@ public static class PhxLuaAPI
 	}
 	public static void OnObjectKillTeam(PhxLuaRuntime.LFunction callback, int teamIdx)
 	{
-		
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnObjectKillTeam, callback, teamIdx);
 	}
 	public static void OnObjectKillClass(PhxLuaRuntime.LFunction callback, string className)
 	{
-		
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnObjectKillClass, callback, className.ToLower());
 	}
 	public static void OnObjectRespawnName(PhxLuaRuntime.LFunction callback, string objName)
 	{
@@ -1202,17 +1773,23 @@ public static class PhxLuaAPI
 
 	public static void OnObjectDamageName(PhxLuaRuntime.LFunction callback, string objName)
     {
-
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnObjectDamageName, callback, objName.ToLower());
+		// callback parameters:
+		// - objIdx
+		// - attackerIdx (nil when the damage has no owner)
     }
 
 	public static void OnTeamPointsChange(PhxLuaRuntime.LFunction callback)
     {
-
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnTeamPointsChange, callback);
+		// callback parameters:
+		// - teamIdx
+		// - points
     }
 
 	public static void OnTeamPointsChangeTeam(PhxLuaRuntime.LFunction callback, int teamIdx)
 	{
-
+		PhxLuaEvents.Register(PhxLuaEvents.Event.OnTeamPointsChangeTeam, callback, teamIdx);
 	}
 }
 
@@ -1234,6 +1811,20 @@ public static class PhxLuaEvents
 		OnFinishNeutralize,
 		OnObjectKillName,
 		OnObjectRespawnName,
+		OnFlagPickUp,
+		OnFlagPickUpTeam,
+		OnFlagDrop,
+		OnFlagDropTeam,
+		OnFlagReset,
+		OnCharacterDeath,
+		OnCharacterDeathTeam,
+		OnTicketCountChange,
+		OnObjectKillTeam,
+		OnObjectKillClass,
+		OnObjectDamageName,
+		OnTeamPointsChange,
+		OnTeamPointsChangeTeam,
+		OnCharacterSpawn,
 	}
 
 	/// <summary>
@@ -1318,17 +1909,15 @@ public static class PhxLuaEvents
 	// To be called by environment
 	public static void Invoke(Event ev, params object[] eventArgs)
 	{
+		// No logging here on purpose. Death/points/ticket events fire many
+		// times a second in a live match; logging every invocation (and every
+		// event nobody registered for) buried the console.
 		if (Callbacks.TryGetValue(ev, out List<PhxLuaRuntime.LFunction> callbacks))
 		{
 			for (int i = 0; i < callbacks.Count; ++i)
 			{
 				callbacks[i].Invoke(eventArgs);
-				Debug.Log($"Invoked Lua callback for '{ev}'");
 			}
-		}
-		else 
-		{
-			Debug.Log($"Failed to find callback for '{ev}'");
 		}
 	}
 

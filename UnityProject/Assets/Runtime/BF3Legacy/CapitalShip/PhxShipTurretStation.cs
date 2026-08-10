@@ -162,7 +162,9 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
             PhxSoldier soldier = hit.collider.GetComponentInParent<PhxSoldier>();
             if (soldier != null)
             {
-                soldier.AddDamageFrom(GunShotDamage, hit.point, isSaber: false);
+                // credit whoever is manning the turret
+                soldier.AddDamageFrom(GunShotDamage, hit.point, isSaber: false,
+                                      instigator: Operator?.GetController());
             }
             else
             {
@@ -267,7 +269,8 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
         float dmg = GunDamagePerSecond * Time.deltaTime;
         if (Target is PhxSoldier soldier)
         {
-            soldier.AddDamageFrom(dmg, ExternalGun.transform.position, isSaber: false);
+            soldier.AddDamageFrom(dmg, ExternalGun.transform.position, isSaber: false,
+                                  instigator: Operator?.GetController());
         }
         else if (Target is IPhxDamageableInstance dmgable)
         {

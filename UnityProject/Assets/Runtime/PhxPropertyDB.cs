@@ -29,13 +29,20 @@ public sealed class PhxPropertyDB
         Properties[propName.ToLowerInvariant()] = variable;
     }
 
-    public void SetProperty(string propName, object propValue)
+    public bool TrySetProperty(string propName, object propValue)
     {
         if (Properties.TryGetValue(propName.ToLowerInvariant(), out IPhxPropRef variable))
         {
             variable.Set(propValue);
-            return;
+            return true;
         }
+        return false;
+    }
+
+    public void SetProperty(string propName, object propValue)
+    {
+        if (TrySetProperty(propName, propValue)) return;
+
         Debug.LogWarningFormat("Could not find property '{0}'!", propName);
     }
 
@@ -93,7 +100,8 @@ public sealed class PhxPropertyDB
         }
         else if (destType == typeof(SWBFPath))
         {
-            outVal = Convert.ChangeType(RTS.GetPath(value), destType, CultureInfo.InvariantCulture);
+            SWBFPath resolvedPath = RTS.GetPath(value);
+            outVal = Convert.ChangeType(resolvedPath, destType, CultureInfo.InvariantCulture);
         }
         else if (destType == typeof(Vector4))
         {

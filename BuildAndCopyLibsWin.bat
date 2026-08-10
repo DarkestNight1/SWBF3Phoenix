@@ -70,7 +70,20 @@ if '%choice%'=='' (
 
 :Start
 
-cmake -S "./LibSWBF2/LibSWBF2" -B "./LibSWBF2/LibSWBF2/build" -G "Visual Studio 17 2022" -A x64
+rem CMake 4.0 removed compatibility with cmake_minimum_required(VERSION < 3.5).
+rem The bundled third-party libs still declare 3.2 (glm) and 3.1 (fmt), so a
+rem stock CMake 4.x install fails to configure. Restoring the policy floor is
+rem the supported escape hatch; on CMake 3.x it is left off entirely.
+set POLICY_FIX=
+set CMAKE_MAJOR=
+for /f "tokens=3" %%v in ('cmake --version ^| findstr /i /c:"cmake version"') do set CMAKE_VER=%%v
+for /f "delims=. tokens=1" %%v in ("%CMAKE_VER%") do set CMAKE_MAJOR=%%v
+if not "%CMAKE_MAJOR%"=="" if %CMAKE_MAJOR% GEQ 4 (
+    echo Detected CMake %CMAKE_VER% - enabling legacy policy support for glm/fmt.
+    set POLICY_FIX=-DCMAKE_POLICY_VERSION_MINIMUM=3.5
+)
+
+cmake -S "./LibSWBF2/LibSWBF2" -B "./LibSWBF2/LibSWBF2/build" -G "Visual Studio 17 2022" -A x64 %POLICY_FIX%
 cmake --build "./LibSWBF2/LibSWBF2/build" --target ALL_BUILD --parallel --clean-first --config %mode% -- -verbosity:minimal -maxcpucount:%numThreads%
 
 rem restore .NET nuget packages (.NET standard 2.0)

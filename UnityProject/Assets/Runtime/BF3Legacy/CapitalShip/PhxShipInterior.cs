@@ -291,6 +291,19 @@ public static class PhxShipInterior
         gun.Ship = ship;
     }
 
+    static void DroidStation(Transform parent, string name, Vector3 pos, Color color)
+    {
+        GameObject go = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        go.name = name;
+        go.transform.SetParent(parent, false);
+        go.transform.localPosition = pos + Vector3.up * 1f;
+        go.transform.localScale = Vector3.one * 1.2f;
+        PhxRuntimeAssets.Tint(go, color);
+
+        PhxDroidStation droid = go.AddComponent<PhxDroidStation>();
+        droid.IsHealthDroid = name.Contains("health");
+    }
+
     static void SpawnPad(PhxCapitalShip ship, Transform parent, Vector3 pos)
     {
         GameObject go = new GameObject("DefenderSpawn");

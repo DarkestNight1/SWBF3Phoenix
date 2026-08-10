@@ -45,6 +45,21 @@ public static class PhxBF3
         // found, instead of failing to a black screen.
         Host.AddComponent<PhxFirstRunSetup>();
 
+        // Base-game parity rather than a BF3 extra, so it is not behind a
+        // feature toggle: BF2 always had a scoreboard on Tab.
+        Host.AddComponent<PhxScoreboard>();
+
+        // Also parity, not an enhancement: every stock map authors its own
+        // fog/sun in the .sky config, which the importer now surfaces.
+        Host.AddComponent<PhxMapAtmosphere>();
+
+        // Hand the importer the smoothness scale before anything loads. The
+        // importer can't reach into BF3Legacy config itself (it's a separate,
+        // engine-agnostic assembly), so the runtime pushes the value in.
+        MaterialLoader.SmoothnessScale = Config.SmoothnessScale;
+        MaterialLoader.NormalMapStrength = Config.NormalMapStrength;
+        TextureLoader.CompressWorldTextures = Config.CompressTextures;
+
         if (Config.EnhancedAI)
         {
             Host.AddComponent<PhxAIDirector>();
@@ -88,11 +103,64 @@ public static class PhxBF3
                   $"CapitalShips: {Config.CapitalShipDestruction})");
     }
 
+    const string ConfigFileName = "bf3legacy.json";
+
     /// <summary>
-    /// Config lives next to the save games so users can edit it without
-    /// touching game files: %AppData%/../LocalLow/.../bf3legacy.json
+    /// Where the config lives.
+    ///
+    /// A self-contained install (the build dropped inside the Battlefront II
+    /// folder) keeps its config next to the executable, so the whole thing can
+    /// be copied, moved or deleted as one folder and leaves nothing behind.
+    /// Otherwise it falls back to Unity's persistent data path, next to the
+    /// player log - which is also what the editor uses.
     /// </summary>
-    public static string ConfigPath => Path.Combine(Application.persistentDataPath, "bf3legacy.json");
+    public static string ConfigPath
+    {
+        get
+        {
+            string portable = PortableConfigPath;
+            if (portable != null && (File.Exists(portable) || IsWritableDir(Path.GetDirectoryName(portable))))
+            {
+                return portable;
+            }
+            return Path.Combine(Application.persistentDataPath, ConfigFileName);
+        }
+    }
+
+    /// <summary>Config path for a self-contained install, or null in the editor.</summary>
+    static string PortableConfigPath
+    {
+        get
+        {
+            // The editor's "install root" is the Unity project folder; writing
+            // config into the repo would be wrong, so portable mode is
+            // player-only.
+            if (Application.isEditor) return null;
+
+            string root = PhxGamePathDetector.GetInstallRoot();
+            return string.IsNullOrEmpty(root) ? null : Path.Combine(root, ConfigFileName);
+        }
+    }
+
+    /// <summary>
+    /// A build under Program Files can't write next to itself. Probe rather
+    /// than guess, so the fallback to persistentDataPath is automatic.
+    /// </summary>
+    static bool IsWritableDir(string dir)
+    {
+        if (string.IsNullOrEmpty(dir) || !Directory.Exists(dir)) return false;
+        string probe = Path.Combine(dir, ".phx_write_test");
+        try
+        {
+            File.WriteAllText(probe, "");
+            File.Delete(probe);
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
+    }
 
     public static void LoadConfig()
     {
@@ -140,12 +208,58 @@ public class PhxBF3Config
     public bool Dismemberment = true;
     public bool EnhancedAI = true;
     public bool ModernLighting = true;
+
+    /// <summary>
+    /// Exposure bias in EV applied on top of auto-exposure, for maps the
+    /// metering reads badly. Positive brightens, negative darkens; high-albedo
+    /// levels (Mygeeto's snow, Polis Massa's white interiors) are the ones that
+    /// clip, so start around -1.5 and work down. 0 leaves auto-exposure alone.
+    /// </summary>
+    public float ExposureCompensation = 0f;
+
+    /// <summary>Bloom strength. The 2005 renderer over-bloomed; 0 disables.</summary>
+    public float BloomIntensity = 0.15f;
+
+    /// <summary>
+    /// Multiplies every soldier's ODF JumpHeight. Apex scales linearly with
+    /// this (launch velocity by its square root), so 1.25 is about a quarter
+    /// higher, not a quarter faster. 1.0 is stock BF2.
+    /// </summary>
+    public float JumpHeightScale = 1.25f;
     public bool HighResolutionMode = true;
     public bool VerticalBattlefront = true;   // seamless ground <-> space transitions
     public bool DynamicWeather = true;        // per-map precipitation, storms, day/night
     public bool ProceduralAnimation = true;   // modern lean/recoil layered on stock anims
 
-    // AI difficulty: 0 = Classic (vanilla-ish), 1 = Veteran, 2 = Elite, 3 = Legendary
+    /// <summary>
+    /// Units per team, player included, overriding whatever the mission script
+    /// asked for. BF2's stock scripts field roughly 8-16 a side; 32 gives the
+    /// 32v32 battles the engine can now afford. 0 keeps each map's own value.
+    /// </summary>
+    public int TeamSize = 32;
+
+    /// <summary>
+    /// Reinforcements per team, overriding the mission script's own count.
+    /// Stock scripts ask for ~150, which was tuned for BF2's much smaller
+    /// squads: at the 32v32 of <see cref="TeamSize"/> every death still costs
+    /// one ticket, so the same 150 drains several times faster and rounds end
+    /// almost immediately. 0 keeps each map's own value.
+    /// </summary>
+    public int Reinforcements = 400;
+
+    /// <summary>
+    /// AI difficulty: 0 Recruit, 1 Normal, 2 Hard, 3 Elite.
+    /// </summary>
+    /// <remarks>
+    /// Difficulty changes decision quality, not just accuracy - reaction time,
+    /// positioning, target selection, objective prioritisation and how wide a
+    /// band of "good enough" choices a soldier draws from (see
+    /// <see cref="BFAIDecision"/> and <see cref="BFAimProfile"/>). No tier has
+    /// perfect aim, including this one.
+    ///
+    /// Defaults to Hard until there is a difficulty selector on the map/mode
+    /// screen to set it from.
+    /// </remarks>
     public int AIDifficulty = 2;
 
     // Gore: 0 = off, 1 = sparks only (cauterized, no detach), 2 = full dismemberment
@@ -162,9 +276,34 @@ public class PhxBF3Config
     // GPU instancing, mip bias
     public bool GraphicsEnhancements = true;
 
+    /// <summary>
+    /// Scales the smoothness imported from each material's authored specular
+    /// exponent. 1 uses the converted value as-is; lower it if surfaces read
+    /// too glossy, 0 restores the old fully-matte look.
+    /// </summary>
+    public float SmoothnessScale = 1.0f;
+
+    /// <summary>
+    /// Strength of the bump maps BF2 authored (the BumpMap material flag and
+    /// second texture slot). 0 disables them.
+    /// </summary>
+    public float NormalMapStrength = 1.0f;
+
+    /// <summary>
+    /// Re-compress imported world textures to DXT on upload. The source is
+    /// already DXT in the .lvl but arrives uncompressed, so this reclaims
+    /// several times their VRAM. Turn off to compare quality.
+    /// </summary>
+    public bool CompressTextures = true;
+
     // Runtime texture upscaling of the original game's textures
     public bool UpscaleTextures = true;
     public int UpscaleFactor = 2;             // 2 or 4
     public float UpscaleSharpness = 0.5f;     // 0..1
     public int UpscaleBudgetMB = 1536;        // cap on added VRAM
+
+    // Music and voice-over from the mission scripts' audio API
+    public bool MusicEnabled = true;
+    public float MusicVolume = 0.6f;
+    public float VOVolume = 1.0f;
 }

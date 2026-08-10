@@ -9,7 +9,7 @@ using UnityEngine;
 /// Place these on child objects of a PhxCapitalShip with a Collider so
 /// projectiles can hit them.
 /// </summary>
-public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance
+public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance, IPhxDestructible
 {
     public enum PhxSubsystemType
     {
@@ -48,7 +48,26 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance
     void Awake()
     {
         CurHealth = MaxHealth;
+        PhxDestructionRegistry.Register(this);
     }
+
+    void OnDestroy()
+    {
+        PhxDestructionRegistry.Unregister(this);
+    }
+
+    // ------------------------------------------------------ IPhxDestructible
+    // The BF3 capital-ship layer was built alongside the base vehicle damage
+    // model rather than on top of it, so nothing outside this folder could ask
+    // a subsystem how damaged it was without knowing this exact type. Same
+    // face as vehicles and buildings now present.
+    public PhxDestructibleKind DestructibleKind => PhxDestructibleKind.ShipSubsystem;
+    public GameObject GetGameObject() => gameObject;
+    public string GetDestructibleName() => name;
+    public int GetTeam() => Ship == null ? 0 : Ship.Team;
+    public float GetHealth() => CurHealth;
+    public float GetMaxHealth() => MaxHealth;
+    public bool IsDestroyed => !IsAlive;
 
     public void SetInvulnerable(bool value)
     {
@@ -85,6 +104,7 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance
         }
 
         OnDestroyed?.Invoke(this);
+        PhxDestructionRegistry.NotifyDestroyed(this);
         Ship.NotifySubsystemDestroyed(this);
     }
 }

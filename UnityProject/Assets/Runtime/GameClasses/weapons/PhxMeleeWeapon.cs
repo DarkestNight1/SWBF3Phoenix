@@ -3,10 +3,17 @@ using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
-/// SWBF2 "melee" weapon class (lightsabers, wrist blades, staffs). The stock
-/// game left this ODF class unimplemented in Phoenix; this implementation
-/// performs an arc sweep in front of the wielder on each swing and applies
-/// damage directly (no ordnance).
+/// SWBF2 "melee" weapon class (lightsabers, wrist blades, staffs).
+///
+/// Where the odf names a <c>ComboAnimationBank</c> and that combo exists in
+/// the mounted data, swings run through the authored move set
+/// (<see cref="PhxComboRunner"/>): each move commits the wielder for its
+/// duration, damage lands only inside the authored window with that window's
+/// own reach and push, and a further press only chains if it arrives while a
+/// transition is open.
+///
+/// Everything else - and any hero whose combo file is missing - keeps the
+/// single arc sweep with a cooldown, which is what all melee did before.
 ///
 /// Lethal saber hits route through PhxSoldier.AddDamageFrom with the saber
 /// flag, which triggers BF3 Legacy dismemberment on kill.
@@ -72,6 +79,14 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
     float SwingTimer;
     bool bIsSaber;
 
+    PhxComboRunner Combo;
+
+    // Direction the current combo attack sweeps. Captured when the swing is
+    // requested rather than when the window fires, because the wielder keeps
+    // turning during a committed move and the swing should land where it was
+    // aimed.
+    Vector3 SwingDirection = Vector3.forward;
+
     static readonly Collider[] OverlapCache = new Collider[32];
 
 
@@ -98,39 +113,80 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
         bIsSaber = C.IsLightSaber ||
                    (C.Name != null && C.Name.ToLowerInvariant().Contains("saber")) ||
                    name.ToLowerInvariant().Contains("saber");
+
+        PhxComboDefinition combo = PhxComboLoader.Load(C.ComboAnimationBank.Get());
+        if (combo != null)
+        {
+            Combo = new PhxComboRunner(combo);
+            Combo.OnAttackWindow += ApplyComboAttack;
+        }
     }
 
     public override void Destroy() { }
 
     public bool Fire(PhxPawnController owner, Vector3 targetPos)
     {
+        OwnerController = owner ?? OwnerController;
+
+        Vector3 origin = FirePoint.position;
+        Vector3 forward = targetPos - origin;
+        forward.y = 0f;
+        forward = forward.sqrMagnitude > 0.001f ? forward.normalized : FirePoint.forward;
+
+        if (Combo != null)
+        {
+            // The combo owns the timing; a press either starts a move, chains
+            // into one, or is buffered, and only the first two are a swing.
+            SwingDirection = forward;
+            if (!Combo.Press(PhxComboInput.Attack)) return false;
+
+            PlaySwingFeedback();
+            return true;
+        }
+
         if (SwingTimer > 0f)
         {
             return false;
         }
         SwingTimer = C.ShotDelay;
-        OwnerController = owner ?? OwnerController;
+        PlaySwingFeedback();
 
+        Sweep(origin, forward, C.LightSaberLength, C.DamageArc, C.MaxDamage, 0f);
+        return true;
+    }
+
+    void PlaySwingFeedback()
+    {
         if (Audio != null)
         {
             Audio.PlayOneShot(Audio.clip, 1.0f);
         }
         ShotCallback?.Invoke();
+    }
 
-        // arc sweep in front of the wielder
-        Vector3 origin = FirePoint.position;
-        Vector3 forward = (targetPos - origin);
-        forward.y = 0f;
-        forward = forward.sqrMagnitude > 0.001f ? forward.normalized : FirePoint.forward;
+    /// <summary>One authored attack window landing, with its own parameters.</summary>
+    void ApplyComboAttack(PhxComboAttack attack)
+    {
+        Sweep(FirePoint.position, SwingDirection, attack.Reach, attack.Arc,
+              attack.Damage, attack.Push);
+    }
+
+    /// <summary>
+    /// Damage everything hostile within reach and inside the arc, once each.
+    /// </summary>
+    void Sweep(Vector3 origin, Vector3 forward, float reach, float arc, float damage, float push)
+    {
+        if (reach <= 0f) return;
 
         int ownerTeam = OwnerController != null ? OwnerController.Team : 0;
-        float halfArc = C.DamageArc * 0.5f;
+        float halfArc = arc * 0.5f;
 
-        int count = Physics.OverlapSphereNonAlloc(origin, C.LightSaberLength, OverlapCache);
+        int count = Physics.OverlapSphereNonAlloc(origin, reach, OverlapCache);
         var alreadyHit = new HashSet<PhxInstance>();
         for (int i = 0; i < count; ++i)
         {
             Collider coll = OverlapCache[i];
+            if (coll == null) continue;
             if (IgnoredColliders != null && IgnoredColliders.Contains(coll)) continue;
 
             PhxInstance instance = coll.GetComponentInParent<PhxInstance>();
@@ -143,13 +199,22 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
 
             alreadyHit.Add(instance);
 
-            Vector3 hitPos = coll.ClosestPoint(origin + forward * C.LightSaberLength * 0.5f);
+            Vector3 hitPos = coll.ClosestPoint(origin + forward * reach * 0.5f);
 
             // scaled by the target's HealthType, like all other damage
-            PhxDamage.ApplyToCollider(coll, C.MaxDamage, C.GetDamageScales(),
-                                      hitPos, isSaber: bIsSaber);
+            PhxDamage.ApplyToCollider(coll, damage, C.GetDamageScales(),
+                                      hitPos, isSaber: bIsSaber,
+                                      instigator: OwnerController);
+
+            if (push <= 0f) continue;
+
+            Rigidbody body = coll.attachedRigidbody;
+            if (body != null && !body.isKinematic)
+            {
+                body.AddForce((to.normalized + Vector3.up * 0.2f).normalized * push,
+                              ForceMode.VelocityChange);
+            }
         }
-        return true;
     }
 
     public void Tick(float deltaTime)
@@ -158,6 +223,7 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
         {
             SwingTimer -= deltaTime;
         }
+        Combo?.Tick(deltaTime);
     }
 
     // ---- IPhxWeapon boilerplate ----
@@ -180,7 +246,13 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
     public List<Collider> GetIgnoredColliders() => IgnoredColliders ?? new List<Collider>();
 
     public PhxPawnController GetOwnerController() => OwnerController;
-    public bool IsFiring() => SwingTimer > 0f;
+    public bool IsFiring() => SwingTimer > 0f || (Combo != null && Combo.IsBusy);
+
+    /// <summary>The move currently being performed, or null. For animation.</summary>
+    public PhxComboMove GetCurrentComboMove() => Combo?.CurrentMove;
+
+    /// <summary>Break out of a combo - death, being knocked down, dropping the weapon.</summary>
+    public void InterruptCombo() => Combo?.Interrupt();
 
     // melee weapons never run dry
     public int GetMagazineSize() => 1;

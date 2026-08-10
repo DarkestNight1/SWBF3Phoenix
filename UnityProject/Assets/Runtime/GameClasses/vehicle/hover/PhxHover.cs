@@ -194,7 +194,15 @@ public class PhxHover : PhxVehicle
         */
 
         Body = gameObject.AddComponent<Rigidbody>();
-        Body.mass = H.GravityScale * 10f;
+
+        // Mass governs ONLY collision response here: every spring/damping call
+        // below uses ForceMode.Acceleration and UpdatePhysics assigns
+        // Body.velocity directly, both of which ignore mass. The old 10x factor
+        // left a default vehicle (GravityScale .5) at ~5kg, so a soldier - who
+        // is also a Rigidbody with a CapsuleCollider - could shove tanks around
+        // by walking into them. Scaling up keeps the per-vehicle ratios that
+        // GravityScale expresses while making vehicles immovable on foot.
+        Body.mass = Mathf.Max(1000f, H.GravityScale * 2000f);
         Body.useGravity = true;
         Body.drag = 0.2f;
         Body.angularDrag = 10f;

@@ -24,6 +24,7 @@ All new code lives in `UnityProject/Assets/Runtime/BF3Legacy/`.
 | Modern lighting (ACES, SSAO, SSR, volumetrics) | Implemented | `Graphics/PhxModernLighting.cs` |
 | 4K graphics mode | Implemented | `Graphics/PhxResolutionManager.cs` |
 | Mod support (load order, toggling, detection) | Implemented | `Mods/PhxModManager.cs` |
+| BF3 Legacy 3.1 pack support (components, modes, eras, maps) | Implemented | `Mods/PhxBF3LegacyContent.cs`, `Mods/PhxBF3LegacyCompat.cs` |
 | BF2 install auto-detection + mod installer scripts | Implemented | `Mods/PhxGamePathDetector.cs`, `Tools/` |
 | AI boarding parties, defense, vehicles, grenades, stuck recovery | Implemented | `AI/` |
 | Vehicle AI: ground driving, flyer combat, capital ship attack runs | Implemented | `AI/PhxAIVehicleOperator.cs` |
@@ -309,42 +310,147 @@ per swing and damages everything in reach. Soldier damage flow is now real:
 - Known conversions are detected; when the community
   [Star Wars Battlefront III Legacy mod](https://www.moddb.com/mods/star-wars-battlefront-iii-legacy)
   (recovered Free Radical BF3 assets packaged as SWBF2 addon content) is
-  installed, `PhxModManager.IsBF3LegacyInstalled` is set and BF3 features can
+  installed, `PhxModManager.IsBF3LegacyInstalled` is set and BF3 features
   light up on its maps. This is the preferred way to get *real* BF3 assets —
-  the runtime loads them through the standard lvl pipeline.
+  the runtime loads them through the standard lvl pipeline. See
+  [Running the BF3 Legacy 3.1 pack](#running-the-bf3-legacy-31-pack) for what
+  that takes.
 
-## Installing the BF3 Legacy mod (3.1) — yes, it's just an addon folder
+## Running the BF3 Legacy 3.1 pack
 
 The current all-in-one release,
 [Battlefront 3 Legacy Mod (3.1)](https://www.moddb.com/addons/battlefront-3-legacy-mod-31),
 ships as **standard SWBF2 addon content** — the original 2005 game is
 required, which is exactly the setup Phoenix expects (the user supplies their
-own BF2 install):
+own BF2 install).
 
-1. Extract the release into your BF2 install's `GameData/addon/` folder, so
-   each mod folder contains its own `addme.script`
-   (`GameData/addon/<FOLDER>/addme.script`). The 3.1 pack bundles the
-   Pre-Demo 3.0 content, Era Mod 1.4, Death Star II, the GCW space demo, map
-   fixes and the MoreMaps patch.
-2. Launch Phoenix with `Game Path String` pointing at that BF2 install.
-   `PhxGame` discovers every addon via its `addme.script`;
-   `PhxModManager` lists them, applies `modorder.txt` ordering, and flags
-   `IsBF3LegacyInstalled`.
-3. The mod's maps then load through the normal lvl pipeline like any other
-   SWBF2 map, and the vertical battlefront layer activates over them.
+### Installing
 
-Caveats: the release notes assume the *retail* game patched with the
-community 1.3 patch and recommend an HD HUD mod — those target the original
-executable's quirks. Phoenix reimplements the engine, so HUD patching is
-irrelevant here, but any 1.3-era Lua APIs the mod's mission scripts call must
-exist in `PhxLuaAPI`; missing-function log warnings on map load are the mod
-compatibility TODO list.
+One command does the install *and* the editor setup:
+
+```bash
+.\Tools\install_mod.ps1 -ModPath "<extracted pack folder>"     # add -Link to avoid a 19 GB copy
+./Tools/install_mod.sh  "<extracted pack folder>"              # or --link
+```
+
+It locates the BF2 install, copies (or links) all seven component folders into
+`GameData/addon/`, names the components it recognized, and writes
+`GamePathOverride` into `bf3legacy.json` — which is where the runtime looks
+when the scene's `Game Path String` is empty. `.\Tools\install_mod.ps1 -Verify`
+prints the whole picture: game path, required lvl files, installed components,
+editor config.
+
+From there `PhxGame` discovers every addon via its `addme.script`,
+`PhxModManager` applies `modorder.txt` ordering, and the pack's maps load
+through the normal lvl pipeline with the vertical battlefront layer over them.
+
+You do **not** need the 1.3 patch or [GT]Anakin's UI Remaster that the pack's
+readme asks for. Both exist to work around the retail executable — the 1.3
+patch to make mod-defined modes selectable at all, the Remaster to fix the
+doubled HUD and to supply the shell helpers described below. Phoenix
+reimplements the engine and provides those helpers itself.
+
+### What the pack is made of
+
+It is not one mod but seven addon folders that cross-register content into
+each other's maps — MoreMaps, for instance, adds Hero Deathmatch to the main
+mod's Coruscant. `PhxBF3LegacyContent` knows all seven, so the log names them
+instead of guessing from folder names:
+
+| Folder | Component | Maps |
+|---|---|---|
+| `BF3` | Pre-Demo 3.0 (El_Fabricio) | Coruscant, Cato Neimoidia, Bespin |
+| `BF3Era` | Era Mod 1.4 (iamashaymin) | BF3 eras/sides on the stock SWBF2 maps |
+| `BF3MoreMaps` | MoreMaps Patch 1.9 | Dantooine, Death Star II, `MP*` ports, extra modes |
+| `BF3GCWSpaceDemo` | GCW Space Demo | `SP3` space battle |
+| `BF3Vjun` | Extended Engagements (bk2-modder) | Vjun, Sulon, Lucrehulk |
+| `BF3Venator` | Venator (bk2-modder) | Venator conquest |
+| `BF3Cato-Hunt` | Cato Neimoidia: Hunt (bk2-modder) | Cato Hunt mode |
+
+Every add-on component depends on the main `BF3` folder for its sides and
+scripts. If the others are present without it, `PhxModManager` logs a warning
+(`BF3LegacyMissingBaseMod`) rather than letting maps load half-missing.
+
+### The shell helpers, and why nothing loaded without them
+
+Each `addme.script` in the pack calls two functions that stock Battlefront II
+does not have:
+
+- `MergeTables(dst, src)` — deep-merges mission list tables so one component
+  can extend a map another component declared.
+- `AddNewGameModes(...)` — declares the name, blurb and icon of modes and eras
+  the shell doesn't ship with.
+
+In the original engine both come from the UI Remaster's patched shell scripts.
+Phoenix reimplements the shell in C#, so the Remaster's version is never loaded
+even if it's installed — and an undefined-function error in `addme.script`
+aborts it, which meant **no BF3 Legacy map reached the mission list at all**.
+
+Verified against a retail GOG `shell.lvl`: it defines `missionlist_ExpandMaplist`
+/ `ExpandModelist` / `ExpandEralist`, the entry fields `mapluafile`, `isModLevel`,
+`showstr`, `subst`, `bIsWildcard`, the eras `era_c` / `era_g` / `era_v` and the
+modes `con`, `tdm`, `ctf`, `1flag`, `hunt`, `eli`, `assault`, `xl` — and
+contains no `AddNewGameModes`, no `MergeTables`, and no `mode_space`,
+`mode_siege` or `mode_uber`. Stock space maps use subst `ass`
+(`spa1g_ass`), so the pack's `mode_space` really is mod-only and does not
+collide with anything.
+
+`PhxBF3LegacyCompat` installs both as a small Lua prelude before any
+`addme.script` runs (and again per map environment, for mission scripts that
+use them). It defines them only if undefined, so a real implementation keeps
+precedence. `AddNewGameModes`' argument shape is undocumented and differs
+between components, so the shim walks whatever it is handed and picks up every
+table keyed `mode_*` or `era_*`, forwarding the descriptors to
+`PhxBF3LegacyContent` via `PhxBF3RegisterGameMode`.
+
+### Modes and eras
+
+A map entry declares its playable combinations as flags —
+`mapluafile = "CO3%s_%s"` with `era_x = 1`, `mode_siege_x = 1` — which the menu
+substitutes into the script name (`CO3x_siege`). Stock `missionlist_ExpandModelist`
+only reports combinations the stock shell recognizes, so the pack's two eras
+(`x` = BF3: Clone Wars, `y` = BF3: Galactic Civil War) and its `siege`
+(Orbital Assault) and `uber` modes were dropped, leaving its maps selectable
+but unplayable.
+
+`PhxMainMenu` now reads the map entry's flags directly and appends anything the
+stock expansion missed, using descriptors from `PhxBF3LegacyContent` — the
+mod's own `AddNewGameModes` data where it provided some, built-in defaults
+otherwise, and a generated name for a mode nobody has ever heard of. That last
+fallback means this works for non-BF3 mods with custom modes too. Mod maps
+without a localized name fall back to the content table's name instead of
+showing a raw key.
+
+### Vertical battlefront on pack maps
+
+`PhxVerticalBattlefront` consults the content table before its stock prefix
+list, because the pack's map ids are unknown to it and the "assume a planet
+surface" fallback is wrong for a third of them:
+
+| Maps | Layer |
+|---|---|
+| `CO3`, `CN3`, `BS3`, `DN3`, `VF3`, `SL3`, `MP*` | Ground — capital ships in atmosphere |
+| `SP3` | Space — ships in orbit |
+| `VEN`, `LUC`, `DS2` | Interior — no space layer (ship/station interiors) |
+
+The Era Mod's entries reuse stock map ids, which the existing prefix table
+already classifies correctly.
+
+### Known limits
+
+Phoenix still needs every 1.3-era Lua API the pack's *mission* scripts call to
+exist in `PhxLuaAPI`; missing-function warnings on map load remain the
+compatibility TODO list. The pack's own readme also notes that crashes are
+frequent on the retail engine and that multiplayer hosting is unsupported —
+neither is something this runtime inherits, but neither is it tested here.
 
 ## Debugging mods and maps
 
-- **In the Unity editor**: open `Runtime/Scenes/PhxMainScene`, set
-  `Game Path String` on the *Game* object, leave `Mission List Path` empty,
-  and press Play. Everything logs to the Console: addon registration
+- **In the Unity editor**: open `Runtime/Scenes/PhxMainScene` and press Play.
+  Both inspector fields on the *Game* object stay empty — `PhxFirstTimeEditorSetup`
+  imports the HDRP particle sample on first load and logs the game path the
+  runtime resolved, and the installer scripts wrote that path into
+  `bf3legacy.json` already. Everything logs to the Console: addon registration
   (`RegisterAddonScript`), lvl load failures, missing ODF classes, Lua
   errors from `PhxLuaRuntime`, and all `[BF3Legacy]` systems.
 - **Mod triage**: use `GameData/addon/modorder.txt` — `!foldername` disables

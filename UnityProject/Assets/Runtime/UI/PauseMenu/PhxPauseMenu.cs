@@ -24,6 +24,7 @@ public class PhxPauseMenu : PhxMenuInterface
     void Start()
     {
         Debug.Assert(BtnContinue       != null);
+        Debug.Assert(BtnRespawn        != null);
         Debug.Assert(BtnFreeCam        != null);
         Debug.Assert(BtnNextMap        != null);
         Debug.Assert(BtnBackToMainMenu != null);
@@ -51,13 +52,15 @@ public class PhxPauseMenu : PhxMenuInterface
 
     void FreeCam()
     {
-        if (MTC.PlayerST == PhxMatch.PhxPlayerState.CharacterSelection)
-        {
-            MTC.SetPlayerState(PhxMatch.PhxPlayerState.FreeCam);
-        }
-        else if (MTC.PlayerST == PhxMatch.PhxPlayerState.FreeCam)
+        if (MTC.PlayerST == PhxMatch.PhxPlayerState.FreeCam)
         {
             MTC.SetPlayerState(PhxMatch.PhxPlayerState.CharacterSelection);
+        }
+        else
+        {
+            // From character selection or while spawned; entering free cam
+            // gives up the current pawn (see PhxMatch.SetPlayerState).
+            MTC.SetPlayerState(PhxMatch.PhxPlayerState.FreeCam);
         }
     }
 

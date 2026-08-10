@@ -117,6 +117,17 @@ public class PhxPowerupstation : PhxInstance<PhxPowerupstation.ClassProperties>,
         EffectRegion.OnValueChanged += (PhxRegion _) => UpdateEffectRegion();
         Radius.OnValueChanged += (float _) => UpdateEffectRegion();
 
+        // Build the trigger now rather than waiting for one of those callbacks.
+        // UpdateEffectRegion is the ONLY thing that creates the sphere trigger
+        // and hooks OnEffectRegionEnter/Leave, and a droid whose instance sets
+        // neither EffectRegion nor Radius never fires either callback - so no
+        // trigger was ever created, no soldier was ever added to the set, and
+        // the healing/ammo loop in Tick iterated an empty collection forever.
+        // That is why ammo and health droids did nothing at all. The
+        // subscriptions above still correctly REBUILD it if the properties
+        // arrive later during InitInstance.
+        UpdateEffectRegion();
+
         // TODO: implement behaviour of remaining value changes
     }
 
@@ -125,26 +136,42 @@ public class PhxPowerupstation : PhxInstance<PhxPowerupstation.ClassProperties>,
         
     }
 
+    // The sphere trigger we built ourselves when no EffectRegion was supplied.
+    // Kept so repeat calls reuse it: this method runs once from Init and again
+    // from every EffectRegion/Radius change, and without this it stacked a new
+    // SphereCollider + PhxRegion on the droid each time.
+    SphereCollider FallbackCollider;
+    PhxRegion FallbackRegion;
+
     void UpdateEffectRegion()
     {
         if (PowerupRegion != null)
         {
             PowerupRegion.OnEnter -= OnEffectRegionEnter;
-        }
-        if (PowerupRegion != null)
-        {
             PowerupRegion.OnLeave -= OnEffectRegionLeave;
         }
-
-        // TODO: remove previous sphere + region component
 
         PowerupRegion = EffectRegion;
         if (PowerupRegion == null)
         {
-            SphereCollider coll = gameObject.AddComponent<SphereCollider>();
-            coll.radius = Radius;
-            coll.isTrigger = true;
-            PowerupRegion = gameObject.AddComponent<PhxRegion>();
+            // No authored region - resupply anyone within Radius instead.
+            if (FallbackRegion == null)
+            {
+                FallbackCollider = gameObject.AddComponent<SphereCollider>();
+                FallbackCollider.isTrigger = true;
+                FallbackRegion = gameObject.AddComponent<PhxRegion>();
+            }
+            FallbackCollider.radius = Radius;
+            PowerupRegion = FallbackRegion;
+        }
+        else if (FallbackRegion != null)
+        {
+            // A real region arrived; retire the stand-in so soldiers aren't
+            // counted by both.
+            Destroy(FallbackRegion);
+            Destroy(FallbackCollider);
+            FallbackRegion = null;
+            FallbackCollider = null;
         }
 
         PowerupRegion.OnEnter += OnEffectRegionEnter;

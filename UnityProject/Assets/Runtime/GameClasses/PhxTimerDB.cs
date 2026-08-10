@@ -77,6 +77,12 @@ public class PhxTimerDB
 		Timers[idx].Time = value;
 	}
 
+	public float GetTimerValue(int? timer)
+	{
+		if (!CheckTimerIdx(timer)) return 0f;
+		return Timers[(int)timer].Time;
+	}
+
 	public int? FindTimer(string name)
     {
 		if (NameMap.TryGetValue(name, out int idx))
