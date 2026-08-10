@@ -181,6 +181,16 @@ public static class PhxRuntimeAssets
             hd.SetIntensity(intensity, unit);
             hd.EnableShadows(castShadows);
             hd.affectsVolumetric = true;
+
+            // Punctual lights get a fade distance. HDRP's default leaves one
+            // fully evaluated from anywhere on the map, so a ship interior's
+            // ten room lights are lit and shaded from the far side of the
+            // level. Directional lights are the sun and must not fade.
+            if (unit != LightUnit.Lux)
+            {
+                hd.fadeDistance = BFLocalLightPolicy.FadeDistance * 2f;
+                hd.shadowFadeDistance = BFLocalLightPolicy.ShadowFadeDistance * 2f;
+            }
         }
         catch (System.Exception e)
         {

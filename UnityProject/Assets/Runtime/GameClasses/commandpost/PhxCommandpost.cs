@@ -78,7 +78,15 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
             HoloWidthStart = HoloRay.startWidth;
             HoloWidthEnd = HoloRay.endWidth;
             HoloAlpha = HoloRay.material.GetColor("_UnlitColor").a;
-            LightIntensity = Light.intensity;
+
+            // The prefab light is a 15 m point light at 800 lumens with
+            // shadows off and a 10 km fade distance. Unshadowed, that lights
+            // everything within 15 m through any wall between - a post behind
+            // a bulkhead lit the corridor on the other side of it, and on an
+            // interior map several posts together washed the whole space in
+            // team colour. Constrain it to the projector's own pool and let it
+            // cast, so geometry stops it.
+            LightIntensity = BFLocalLightPolicy.Apply(Light);
         }
 
         AudioAmbient = gameObject.AddComponent<AudioSource>();
@@ -229,7 +237,12 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
         HoloRay?.material.SetColor("_EmissiveColor", HoloColor);
         if (Light != null)
         {
-            Light.color = HoloColor;
+            // Tinted rather than the raw team colour. A team colour is a fully
+            // saturated primary, and a light emitting in one channel makes
+            // every surface it touches a silhouette in that channel - which is
+            // why a green post read as a green filter over the frame instead
+            // of as a light in the room. The hue still reads clearly.
+            Light.color = BFLocalLightPolicy.TintForLight(HoloColor);
         }
     }
 
