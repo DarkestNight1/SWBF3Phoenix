@@ -124,9 +124,23 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             sb.Append("  ^ ").Append(shadowedPunctual)
               .AppendLine(" shadow-casting point/spot light(s) - each is up to six shadow renders.");
         }
-        if (directional > 1)
+        // Count how many directionals actually cast, not how many exist. A map
+        // is free to author several; only more than one *casting* is the error
+        // condition, and the previous wording reported a healthy scene as a
+        // problem.
+        int shadowedDirectional = 0;
+        for (int i = 0; i < lights.Length; ++i)
         {
-            sb.AppendLine("  ^ more than one directional light; HDRP shadows only one.");
+            if (lights[i].type == LightType.Directional && lights[i].shadows != LightShadows.None)
+            {
+                ++shadowedDirectional;
+            }
+        }
+        if (shadowedDirectional > 1)
+        {
+            sb.Append("  ^ ").Append(shadowedDirectional)
+              .AppendLine(" directional lights casting; HDRP shadows only one and will report a "
+                          + "cascade atlas failure every frame.");
         }
     }
 

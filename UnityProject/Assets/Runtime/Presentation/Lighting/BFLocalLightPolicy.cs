@@ -103,7 +103,7 @@ public static class BFLocalLightPolicy
         // hard-edged disc of full-brightness light.
         data.applyRangeAttenuation = true;
 
-        if (castShadows && BFPresentationQuality.Tier >= BFQualityTier.Medium)
+        if (castShadows && BFPresentationQuality.ShadowCastingPunctualBudget > 0)
         {
             data.EnableShadows(true);
             data.SetShadowResolution(ShadowResolution);
@@ -114,6 +114,12 @@ public static class BFLocalLightPolicy
             {
                 light.shadows = LightShadows.Soft;
             }
+
+            // Hand it to the budget, which grants shadows only to the nearest
+            // few. Six command posts each casting six shadow maps was over a
+            // thousand shadow draw submissions per frame on a scene of 130k
+            // triangles - the light count, not the geometry, was the cost.
+            BFLightBudget.Register(data, wantsShadows: true);
         }
         else if (light != null)
         {

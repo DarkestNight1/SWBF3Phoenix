@@ -183,15 +183,86 @@ public static class BFSegmentRoles
         return Match(nodeName);
     }
 
+    /// <summary>
+    /// Match on whole name tokens rather than raw substrings.
+    /// </summary>
+    /// <remarks>
+    /// Substring matching was actively wrong, not merely imprecise. Measured
+    /// on a real map, <c>rep_assultship_DOME</c> came back as a <b>leg</b>,
+    /// because "s-hip" contains "hip". "arm" is inside "armor", "alarm" and
+    /// "farm"; "leg" is inside "legend"; "gun" is inside "gunship" whether or
+    /// not that segment is the gun. Every one of those is a confident wrong
+    /// answer, which is worse than Unknown - a mis-roled segment gets the
+    /// wrong damage zone and silently refuses decals.
+    ///
+    /// The names are machine-generated in a consistent style
+    /// (<c>rep_fly_assault_dome</c>, <c>bone_pelvis</c>,
+    /// <c>Main_library_upper_P_light1</c>), so splitting on separators, case
+    /// changes and digits recovers real tokens. A keyword now has to BE a
+    /// token, or a token has to start with it and be barely longer - which
+    /// still catches "turret1" and "legL" without catching "gunship".
+    /// </remarks>
     static BFSegmentRole Match(string name)
     {
         if (string.IsNullOrEmpty(name)) return BFSegmentRole.Unknown;
 
-        string lower = name.ToLowerInvariant();
+        Tokenize(name, TokenScratch);
+        if (TokenScratch.Count == 0) return BFSegmentRole.Unknown;
+
         for (int i = 0; i < Vocabulary.Length; ++i)
         {
-            if (lower.Contains(Vocabulary[i].Keyword)) return Vocabulary[i].Role;
+            string keyword = Vocabulary[i].Keyword;
+            for (int t = 0; t < TokenScratch.Count; ++t)
+            {
+                string token = TokenScratch[t];
+                if (token.Length < keyword.Length) continue;
+
+                // Exact token, or the token is the keyword plus a short
+                // suffix - "turret1", "legs", "wheel_fl". Anything longer is a
+                // different word that happens to start the same way.
+                if (!token.StartsWith(keyword, System.StringComparison.Ordinal)) continue;
+                if (token.Length - keyword.Length > 2) continue;
+
+                return Vocabulary[i].Role;
+            }
         }
         return BFSegmentRole.Unknown;
+    }
+
+    static readonly List<string> TokenScratch = new List<string>();
+    static readonly System.Text.StringBuilder TokenBuilder = new System.Text.StringBuilder();
+
+    /// <summary>Split a source name into lower-case word tokens.</summary>
+    static void Tokenize(string name, List<string> into)
+    {
+        into.Clear();
+        TokenBuilder.Length = 0;
+
+        for (int i = 0; i < name.Length; ++i)
+        {
+            char c = name[i];
+
+            bool separator = c == '_' || c == '-' || c == '.' || c == ' ' || char.IsDigit(c);
+
+            // A lower-to-upper transition starts a new word: "assultShip" is
+            // two tokens even with no separator between them.
+            bool caseBreak = i > 0 && char.IsUpper(c) && char.IsLower(name[i - 1]);
+
+            if (separator || caseBreak)
+            {
+                if (TokenBuilder.Length > 0)
+                {
+                    into.Add(TokenBuilder.ToString().ToLowerInvariant());
+                    TokenBuilder.Length = 0;
+                }
+                if (separator) continue;
+            }
+            TokenBuilder.Append(c);
+        }
+
+        if (TokenBuilder.Length > 0)
+        {
+            into.Add(TokenBuilder.ToString().ToLowerInvariant());
+        }
     }
 }

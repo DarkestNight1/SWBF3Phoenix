@@ -53,6 +53,7 @@ public static class BFPresentation
         // does that on OnMapLoaded rather than here - so component order here
         // is just grouping.
         Host.AddComponent<BFLightingDirector>();
+        Host.AddComponent<BFLightBudget>();
         Host.AddComponent<BFReflectionProbeManager>();
         Host.AddComponent<BFLightProbeManager>();
         Host.AddComponent<BFImpactLightPool>();

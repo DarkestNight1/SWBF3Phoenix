@@ -230,8 +230,33 @@ public sealed class BFLightProbeManager : MonoBehaviour
             renderer.shadowCastingMode = ShadowCastingMode.On;
             renderer.receiveShadows = true;
         }
+        else
+        {
+            // Static scenery below a size threshold stops casting.
+            //
+            // A SWBF2 model is split one renderer per bone, so a level's
+            // shadow-caster count is dominated by small fittings - handrails,
+            // panels, brackets - whose shadow is a few pixels but which are
+            // re-rendered for every cascade and every shadowed light. On the
+            // measured Coruscant scene that is 273 casters against 322
+            // renderers total.
+            renderer.shadowCastingMode = ShouldCastShadows(renderer)
+                ? ShadowCastingMode.On
+                : ShadowCastingMode.Off;
+        }
 
         ++ConfiguredRenderers;
+    }
+
+    static bool ShouldCastShadows(Renderer renderer)
+    {
+        float minRadius = BFPresentationQuality.MinShadowCasterRadius;
+        if (minRadius <= 0f) return true;
+
+        // Bounds rather than triangle count: what matters for a shadow is how
+        // much of the frame it covers, and a large flat wall with two
+        // triangles casts the shadow that actually reads.
+        return renderer.bounds.extents.magnitude >= minRadius;
     }
 
     /// <summary>Configure everything under an object - one spawned unit.</summary>

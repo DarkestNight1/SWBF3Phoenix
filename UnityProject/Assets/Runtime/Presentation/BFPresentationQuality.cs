@@ -157,6 +157,55 @@ public static class BFPresentationQuality
     }
 
     /// <summary>
+    /// How many point/spot lights may cast shadows at once.
+    /// </summary>
+    /// <remarks>
+    /// The most expensive number in this file. A shadowed point light is six
+    /// shadow renders, each walking every shadow caster in the scene - so six
+    /// such lights on a map with 273 casters is over sixteen hundred draw
+    /// submissions per frame for shadows alone, on a scene whose actual
+    /// geometry is 130k triangles. The budget goes to the nearest lights that
+    /// asked for it; the rest keep their light and lose their shadow.
+    /// </remarks>
+    public static int ShadowCastingPunctualBudget
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 0;
+                case BFQualityTier.Medium: return 1;
+                case BFQualityTier.High: return 2;
+                default: return 4;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Bounding-sphere radius below which a renderer stops casting shadows.
+    /// </summary>
+    /// <remarks>
+    /// Measured: 273 of 322 renderers on Coruscant cast shadows, and a SWBF2
+    /// model is split one renderer per bone - so most of those are small
+    /// fittings whose shadow is a few pixels, re-rendered per cascade and per
+    /// shadowed light. Dropping them costs almost nothing visible and removes
+    /// them from every shadow pass at once.
+    /// </remarks>
+    public static float MinShadowCasterRadius
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 2.5f;
+                case BFQualityTier.Medium: return 1.5f;
+                case BFQualityTier.High: return 0.8f;
+                default: return 0f;
+            }
+        }
+    }
+
+    /// <summary>
     /// Cascade splits for directional shadows. Each cascade is another render
     /// of everything inside it.
     /// </summary>
