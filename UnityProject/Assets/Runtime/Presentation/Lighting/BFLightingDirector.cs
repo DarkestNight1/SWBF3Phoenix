@@ -35,6 +35,7 @@ public class BFLightingDirector : MonoBehaviour
 
     Light Sun;
     HDAdditionalLightData SunData;
+    float SunBaselineIntensity;
 
     /// <summary>The profile in force, for anything that needs to read it.</summary>
     public static BFEnvironmentLightingProfile Active { get; private set; } =
@@ -86,15 +87,25 @@ public class BFLightingDirector : MonoBehaviour
         BFSurfaceQuery.MapDefault = Active.DominantSurface;
 
         ApplySky(Active);
-        ApplyFog(Active);
         ApplyExposure(Active);
         ApplyShadows(Active);
         ApplyIndirect(Active);
-        ApplySun(Active);
 
-        Debug.Log($"[BFPresentation] Lighting profile '{Active.Name}' applied for '{worldName}' " +
-                  $"(sun {Active.SunIntensity:F0} lux, fog {(Active.PreferAuthoredFog ? "authored" : Active.FogMeanFreePath.ToString("F0") + "m")}, " +
-                  $"dominant surface {Active.DominantSurface}).");
+        // Sun before fog: the log below reports what both settled at, and the
+        // fog pass reads nothing from the sun, so this ordering costs nothing
+        // and makes the diagnostic complete.
+        ApplySun(Active);
+        ApplyFog(Active);
+
+        // Logged with the resulting numbers, not the requested ones: "the map
+        // looks dark" is otherwise a very expensive thing to trace back to a
+        // multiplier in a table.
+        Debug.Log($"[BFPresentation] Lighting profile '{Active.Name}' for '{worldName}': " +
+                  $"sun {SunBaselineIntensity:F0} x{Active.SunIntensityScale:F2} = " +
+                  $"{(SunData != null ? SunData.intensity : 0f):F0} lux, " +
+                  $"ambient x{Active.AmbientIntensity:F2}, EV {Active.ExposureCompensation:+0.00;-0.00;0}, " +
+                  $"fog {(Fog.enabled.value ? Fog.meanFreePath.value.ToString("F0") + "m" : "off")}, " +
+                  $"dominant surface {Active.DominantSurface}.");
     }
 
     void ApplySky(BFEnvironmentLightingProfile p)
@@ -130,6 +141,20 @@ public class BFLightingDirector : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Atmosphere, but only where the map actually has any.
+    /// </summary>
+    /// <remarks>
+    /// This used to enable fog unconditionally, and it was a large part of why
+    /// maps went dark. Volumetric fog absorbs as well as scatters, so a level
+    /// that authored no fog gained a grey veil, lost contrast, and lost the
+    /// sun's contribution to everything behind it - for no artistic reason,
+    /// since the level designers had chosen clear air.
+    ///
+    /// Fog is now on when the .sky chunk asked for it, or when the environment
+    /// is one that is physically soupy whatever the chunk says (a swamp, a
+    /// storm, an ash cloud). Everything else renders clear, as it did before.
+    /// </remarks>
     void ApplyFog(BFEnvironmentLightingProfile p)
     {
         // Space genuinely has no fog; forcing any is worse than none.
@@ -139,14 +164,19 @@ public class BFLightingDirector : MonoBehaviour
             return;
         }
 
-        bool authored = p.PreferAuthoredFog &&
-                        SWBFSkyProperties.HasSkyInfo &&
+        bool authored = SWBFSkyProperties.HasSkyInfo &&
                         SWBFSkyProperties.FogRange.y > SWBFSkyProperties.FogRange.x &&
                         SWBFSkyProperties.FogRange.y > 0f;
 
+        if (!authored && !p.ForceAtmosphere)
+        {
+            Fog.enabled.Override(false);
+            return;
+        }
+
         Fog.enabled.Override(true);
         Fog.colorMode.Override(FogColorMode.SkyColor);
-        Fog.meanFreePath.Override(authored
+        Fog.meanFreePath.Override(authored && p.PreferAuthoredFog
             ? Mathf.Max(20f, SWBFSkyProperties.FogRange.y)
             : p.FogMeanFreePath);
         Fog.tint.Override(p.FogTint);
@@ -156,12 +186,12 @@ public class BFLightingDirector : MonoBehaviour
         Fog.enableVolumetricFog.Override(p.Volumetrics && BFPresentationQuality.Volumetrics);
         Fog.anisotropy.Override(p.FogAnisotropy);
 
-        // The profile's volumetric multiplier is expressed on the fog's own
-        // albedo rather than a scattering-intensity parameter: HDRP 10.7's Fog
-        // has no multiple-scattering control, and brightening the albedo is
-        // what actually makes light shafts read more strongly through it.
-        float scatter = Mathf.Clamp(p.VolumetricLightingMultiplier, 0.25f, 2f);
-        Fog.albedo.Override(p.FogTint * Mathf.Clamp01(0.5f * scatter));
+        // Albedo is how much of what the fog intercepts it scatters onward
+        // rather than absorbs, so it belongs near white - the tint carries the
+        // colour. Driving it to half grey, as this first did, turned every
+        // fogged map into a light sink and was the other half of the darkness.
+        float scatter = Mathf.Clamp(p.VolumetricLightingMultiplier, 0.5f, 2f);
+        Fog.albedo.Override(Color.Lerp(Color.white, p.FogTint, 0.5f) * Mathf.Clamp01(0.85f * scatter));
         Fog.globalLightProbeDimmer.Override(1f);
     }
 
@@ -194,6 +224,43 @@ public class BFLightingDirector : MonoBehaviour
         IndirectLighting.indirectDiffuseLightingMultiplier.Override(p.IndirectDiffuseIntensity);
         IndirectLighting.reflectionLightingMultiplier.Override(p.IndirectSpecularIntensity);
 
+        ApplyAmbient(p);
+    }
+
+    /// <summary>
+    /// Scale the map's own ambient light.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="BFEnvironmentLightingProfile.AmbientIntensity"/> was a
+    /// declared field that nothing read, so every profile that raises ambient
+    /// to fill shadows under bright ground - Hoth, Mygeeto, Tatooine - was
+    /// asking for something that never happened and kept crushed shadows.
+    ///
+    /// It has to be done by scaling the colours, not by setting
+    /// <c>ambientIntensity</c>: the importer puts the scene in Trilight mode
+    /// with the .lgt's own sky and ground colours, and Unity ignores
+    /// ambientIntensity outside skybox ambient. Scaling the colours also keeps
+    /// the map's authored hue, which is the part that is not ours to change.
+    ///
+    /// Safe to re-run: the importer rewrites these colours on every map load,
+    /// so the scale applies to a fresh baseline rather than compounding.
+    /// </remarks>
+    void ApplyAmbient(BFEnvironmentLightingProfile p)
+    {
+        float scale = Mathf.Max(0f, p.AmbientIntensity);
+        if (Mathf.Approximately(scale, 1f)) return;
+
+        if (RenderSettings.ambientMode == UnityEngine.Rendering.AmbientMode.Skybox)
+        {
+            RenderSettings.ambientIntensity = scale;
+            return;
+        }
+
+        RenderSettings.ambientSkyColor *= scale;
+        RenderSettings.ambientEquatorColor *= scale;
+        RenderSettings.ambientGroundColor *= scale;
+        RenderSettings.ambientLight *= scale;
+
         Reflections.enabled.Override(p.ScreenSpaceReflections && BFPresentationQuality.ScreenSpaceReflections);
         Reflections.minSmoothness = p.ReflectionMinSmoothness;
 
@@ -214,23 +281,35 @@ public class BFLightingDirector : MonoBehaviour
     /// </remarks>
     void ApplySun(BFEnvironmentLightingProfile p)
     {
-        if (p.SunIntensity <= 0f) return;
+        Light found = FindBrightestDirectional();
+        if (found == null) return;
 
-        if (Sun == null || !Sun.isActiveAndEnabled)
+        if (!ReferenceEquals(found, Sun))
         {
-            Sun = FindBrightestDirectional();
-        }
-        if (Sun == null) return;
+            Sun = found;
+            SunData = Sun.GetComponent<HDAdditionalLightData>();
 
-        SunData = Sun.GetComponent<HDAdditionalLightData>();
+            // The importer's value, captured once per sun. Scaling in place on
+            // every Apply would compound: two map loads with a 0.9 scale would
+            // leave the sun at 0.81, and a dozen at a fifth of where it began.
+            SunBaselineIntensity = SunData != null ? SunData.intensity : 0f;
+        }
         if (SunData == null) return;
 
         SunData.EnableColorTemperature(false);
-        SunData.intensity = p.SunIntensity;
         SunData.angularDiameter = p.SunAngularDiameter;
         SunData.EnableShadows(true);
         SunData.shadowUpdateMode = ShadowUpdateMode.EveryFrame;
         SunData.shadowNearPlane = 0.1f;
+
+        // Scale what the importer gave this map, and only when the profile
+        // asks. A scale of 0 means "this environment has no meaningful sun" -
+        // an interior, a hangar - and there the map's own fixtures are the
+        // whole lighting design, so touching the directional at all is wrong.
+        if (p.SunIntensityScale > 0f && SunBaselineIntensity > 0f)
+        {
+            SunData.intensity = SunBaselineIntensity * p.SunIntensityScale;
+        }
 
         Sun.color = p.SunColor;
         Sun.shadows = LightShadows.Soft;

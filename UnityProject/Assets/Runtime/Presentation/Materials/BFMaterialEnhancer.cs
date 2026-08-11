@@ -58,20 +58,66 @@ public static class BFMaterialEnhancer
     }
 
     /// <summary>
-    /// Apply derived maps to a material built from <paramref name="source"/>.
+    /// Derive and cache the maps for one texture, from its raw RGBA bytes.
     /// </summary>
-    /// <param name="surfaceHint">
-    /// What the surface is, where the caller knows. Armour, droids and hull
-    /// plate want metallic response; rock, snow and cloth must never get it,
-    /// and their statistics alone are not enough to tell them apart.
-    /// </param>
+    /// <remarks>
+    /// Called by the texture importer at the one moment the pixels exist on
+    /// the CPU. This is not a convenience - it is the only workable point.
+    /// <c>TextureLoader</c> block-compresses every world texture and then calls
+    /// <c>Apply(mips, makeNoLongerReadable: true)</c>, so by the time a
+    /// material is built the source cannot be read back at all: deriving from
+    /// the finished Texture2D throws, is caught, and silently does nothing for
+    /// every world texture in the game.
+    ///
+    /// The alternative - keeping textures readable and uncompressed - would
+    /// several-times the VRAM of every surface in a level to serve a feature
+    /// that only needs one pass over each.
+    /// </remarks>
+    /// <param name="rgba">Tightly packed RGBA8, row-major.</param>
+    public static void Prepare(string textureName, byte[] rgba, int width, int height)
+    {
+        if (!BFPresentationQuality.DerivedMaterialMaps) return;
+        if (string.IsNullOrEmpty(textureName) || rgba == null) return;
+        if (width < 8 || height < 8) return;                      // UI bits, icons
+        if (rgba.Length < width * height * 4) return;
+        if (Cache.ContainsKey(textureName)) return;
+
+        // The surface decides whether metallic is allowed at all: the pixel
+        // statistics of clone armour and of snow are the same, and only one of
+        // them is metal. Unknown falls back to a non-metal surface rather than
+        // to the map default, because at import time the map default still
+        // belongs to the previous map.
+        BFSurfaceType surface = BFSurfaceQuery.FromKeyword(textureName);
+        if (surface == BFSurfaceType.Unknown) surface = BFSurfaceType.Rock;
+
+        var pixels = new Color32[width * height];
+        for (int i = 0; i < pixels.Length; ++i)
+        {
+            int b = i * 4;
+            pixels[i] = new Color32(rgba[b], rgba[b + 1], rgba[b + 2], rgba[b + 3]);
+        }
+
+        Cache[textureName] = new DerivedMaps
+        {
+            Normal = BuildNormal(pixels, width, height, textureName),
+            MaskMap = BuildMaskMap(pixels, width, height, textureName, surface),
+        };
+    }
+
+    /// <summary>
+    /// Apply the maps derived for <paramref name="source"/>, if any.
+    /// </summary>
+    /// <remarks>
+    /// Silently does nothing when the texture was never prepared - a UI
+    /// texture, a map loaded before the tier allowed derivation, or content
+    /// that arrived by another path. The material keeps its stock response,
+    /// which is a correct outcome rather than a failure.
+    /// </remarks>
     public static void Enhance(Material material, Texture2D source, BFSurfaceType surfaceHint)
     {
         if (!BFPresentationQuality.DerivedMaterialMaps) return;
         if (material == null || source == null) return;
-
-        DerivedMaps maps = Derive(source, surfaceHint);
-        if (maps == null) return;
+        if (!Cache.TryGetValue(source.name, out DerivedMaps maps) || maps == null) return;
 
         if (maps.Normal != null && material.HasProperty("_NormalMap"))
         {
@@ -85,46 +131,6 @@ public static class BFMaterialEnhancer
             material.SetTexture("_MaskMap", maps.MaskMap);
             material.EnableKeyword("_MASKMAP");
         }
-    }
-
-    /// <summary>Derive (and cache) the maps for one source texture.</summary>
-    public static DerivedMaps Derive(Texture2D source, BFSurfaceType surfaceHint)
-    {
-        if (source == null) return null;
-
-        string key = source.name + "|" + surfaceHint;
-        if (Cache.TryGetValue(key, out DerivedMaps known)) return known;
-
-        Color32[] pixels;
-        try
-        {
-            pixels = source.GetPixels32();
-        }
-        catch (UnityException)
-        {
-            // Compressed or non-readable textures cannot be sampled on the CPU.
-            // That is normal for a lot of imported content and is not an error;
-            // the material simply keeps its stock response.
-            Cache[key] = null;
-            return null;
-        }
-
-        int width = source.width;
-        int height = source.height;
-        if (width < 4 || height < 4 || pixels.Length < width * height)
-        {
-            Cache[key] = null;
-            return null;
-        }
-
-        var maps = new DerivedMaps
-        {
-            Normal = BuildNormal(pixels, width, height, source.name),
-            MaskMap = BuildMaskMap(pixels, width, height, source.name, surfaceHint),
-        };
-
-        Cache[key] = maps;
-        return maps;
     }
 
     static float Luminance(Color32 c) => (0.299f * c.r + 0.587f * c.g + 0.114f * c.b) / 255f;
@@ -172,6 +178,12 @@ public static class BFMaterialEnhancer
         }
 
         normal.SetPixels32(output);
+
+        // Compressed and released like the source texture is. Two derived maps
+        // per world texture at RGBA32 with mips is several times the memory of
+        // the level's own art, which is not a trade worth making for maps that
+        // exist to change how light behaves.
+        normal.Compress(true);
         normal.Apply(true, true);
         return normal;
     }
@@ -249,6 +261,7 @@ public static class BFMaterialEnhancer
         }
 
         mask.SetPixels32(output);
+        mask.Compress(true);
         mask.Apply(true, true);
         return mask;
     }

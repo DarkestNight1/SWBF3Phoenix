@@ -59,6 +59,12 @@ public sealed class BFTerrainInteractionSystem : MonoBehaviour, BFInteractionRec
     static readonly int MaskExtentId = Shader.PropertyToID("_BFTerrainDeformationExtent");
     static readonly int MaskCentreId = Shader.PropertyToID("_BFTerrainDeformationCentre");
 
+    // Gate for the shader. A global texture that was never set does not read
+    // as "no deformation" - it reads as whatever Unity's fallback happens to
+    // be - so the shader must be told not to sample at all rather than be
+    // trusted to sample something harmless.
+    static readonly int MaskEnabledId = Shader.PropertyToID("_BFTerrainDeformationEnabled");
+
     public Bounds InteractionBounds =>
         new Bounds(WorldCentre, new Vector3(WorldExtent, 10000f, WorldExtent));
 
@@ -87,6 +93,7 @@ public sealed class BFTerrainInteractionSystem : MonoBehaviour, BFInteractionRec
     {
         if (Instance == this) Instance = null;
         BFSurfaceInteractionSystem.Unregister(this);
+        Shader.SetGlobalFloat(MaskEnabledId, 0f);
         ReleaseTextures();
     }
 
@@ -102,6 +109,7 @@ public sealed class BFTerrainInteractionSystem : MonoBehaviour, BFInteractionRec
     {
         ReleaseTextures();
         BFSurfaceInteractionSystem.Unregister(this);
+        Shader.SetGlobalFloat(MaskEnabledId, 0f);
 
         int resolution = BFPresentationQuality.TerrainDeformationResolution;
         if (resolution <= 0 || !BFPresentationQuality.TerrainDeformation) return;
@@ -131,11 +139,21 @@ public sealed class BFTerrainInteractionSystem : MonoBehaviour, BFInteractionRec
         Clear();
         BuildMaterials();
 
+        // No stamp material means nothing will ever be written, so the shader
+        // must not be told the mask is live - it would sample a cleared
+        // texture forever at the cost of a fetch per terrain pixel.
+        if (StampMaterial == null)
+        {
+            ReleaseTextures();
+            return;
+        }
+
         // Published globally so any shader - terrain, character boots, decals -
         // can sample the same mask without being wired to this component.
         Shader.SetGlobalTexture(MaskId, DeformationMask);
         Shader.SetGlobalFloat(MaskExtentId, WorldExtent);
         Shader.SetGlobalVector(MaskCentreId, WorldCentre);
+        Shader.SetGlobalFloat(MaskEnabledId, 1f);
 
         BFSurfaceInteractionSystem.Register(this);
 

@@ -30,8 +30,35 @@ public sealed class BFEnvironmentLightingProfile
 
     // ------------------------------------------------------------------ sun
 
-    /// <summary>Sun intensity in lux. Overcast ~10k, clear midday ~100k.</summary>
-    public float SunIntensity = 32000f;
+    /// <summary>
+    /// Sun brightness as a multiple of whatever the importer gave the map's
+    /// own directional light. 1 leaves it exactly as the original fork
+    /// rendered it; 0 means "do not touch the intensity at all".
+    /// </summary>
+    /// <remarks>
+    /// Relative, not absolute, and that distinction was worth a bug. These
+    /// profiles first carried physical lux values - Hoth 18000, Mustafar 4000 -
+    /// against an importer that gives every directional light 400000 lux
+    /// (<c>WorldLoader.ImportLights</c>). Nothing else in the scene was
+    /// rescaled with them, so the sun dropped by three to a hundred times
+    /// while the map's point and spot lights stayed at their imported 10000
+    /// lumens and the ambient stayed where the .lgt put it. Auto-exposure
+    /// reopened, local lights blew out, and everything the sun was responsible
+    /// for went dark.
+    ///
+    /// The absolute values were not wrong physically. They were wrong as an
+    /// intervention: the imported scene has no physical calibration to be
+    /// absolute against, so the only safe thing a profile can say is "this
+    /// place is brighter or dimmer than the reference", and the reference has
+    /// to be what the map already had.
+    /// </remarks>
+    public float SunIntensityScale = 1f;
+
+    /// <summary>
+    /// The importer's directional intensity, for anything that needs to reason
+    /// about the resulting absolute value. Not used to set anything.
+    /// </summary>
+    public const float ReferenceSunLux = 400000f;
 
     public Color SunColor = new Color(1f, 0.96f, 0.90f);
 
@@ -79,6 +106,19 @@ public sealed class BFEnvironmentLightingProfile
 
     /// <summary>Enable volumetric (light-scattering) fog rather than flat fog.</summary>
     public bool Volumetrics = true;
+
+    /// <summary>
+    /// Add atmosphere even where the map authored none.
+    /// </summary>
+    /// <remarks>
+    /// Off by default, and that is the important part. Forcing fog onto every
+    /// map darkened the ones that never had any: volumetric fog absorbs as
+    /// well as scatters, so a clear level gained a grey veil and lost contrast
+    /// for nothing. Only environments that are physically soupy - a swamp, a
+    /// storm, an ash cloud - turn this on; everywhere else keeps fog exactly
+    /// when the .sky chunk asked for it.
+    /// </remarks>
+    public bool ForceAtmosphere;
 
     /// <summary>How far light travels before being fully scattered, in metres.</summary>
     public float FogMeanFreePath = 400f;
@@ -173,7 +213,7 @@ public sealed class BFEnvironmentLightingProfile
         { "hot", new BFEnvironmentLightingProfile
             {
                 Name = "Hoth",
-                SunIntensity = 18000f,
+                SunIntensityScale = 0.90f,
                 SunColor = new Color(0.86f, 0.92f, 1f),
                 SunAngle = new Vector2(22f, 200f),
                 SunAngularDiameter = 1.2f,          // diffuse overcast light
@@ -188,7 +228,7 @@ public sealed class BFEnvironmentLightingProfile
                 VolumetricLightingMultiplier = 1.4f,
                 AmbientIntensity = 1.5f,
                 IndirectDiffuseIntensity = 1.6f,    // snow bounce fills shadows
-                ExposureCompensation = -1.1f,
+                ExposureCompensation = -0.35f,
                 ContactShadowLength = 0.5f,
                 AmbientOcclusionIntensity = 0.9f,
                 BaseSnowCoverage = 1f,
@@ -201,7 +241,7 @@ public sealed class BFEnvironmentLightingProfile
         { "geo", new BFEnvironmentLightingProfile
             {
                 Name = "Geonosis",
-                SunIntensity = 90000f,
+                SunIntensityScale = 1.15f,
                 SunColor = new Color(1f, 0.88f, 0.72f),
                 SunAngle = new Vector2(62f, 140f),
                 PlanetaryGroundTint = new Color(0.45f, 0.30f, 0.20f),
@@ -212,7 +252,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogTint = new Color(1f, 0.87f, 0.70f),
                 FogAnisotropy = 0.4f,
                 AmbientIntensity = 1.1f,
-                ExposureCompensation = -0.4f,
+                ExposureCompensation = -0.15f,
                 ShadowDistance = 700f,
                 DominantSurface = BFSurfaceType.Sand,
             }
@@ -224,7 +264,8 @@ public sealed class BFEnvironmentLightingProfile
         { "end", new BFEnvironmentLightingProfile
             {
                 Name = "Endor",
-                SunIntensity = 12000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.70f,
                 SunColor = new Color(0.92f, 1f, 0.80f),
                 SunAngle = new Vector2(58f, 60f),
                 PlanetaryGroundTint = new Color(0.18f, 0.22f, 0.12f),
@@ -236,7 +277,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogMaximumHeight = 120f,
                 VolumetricLightingMultiplier = 1.8f,   // god rays through canopy
                 AmbientIntensity = 1.2f,
-                ExposureCompensation = 0.5f,
+                ExposureCompensation = 0.25f,
                 AmbientOcclusionIntensity = 1.5f,
                 BaseWetness = 0.25f,
                 DominantSurface = BFSurfaceType.Grass,
@@ -247,7 +288,7 @@ public sealed class BFEnvironmentLightingProfile
         { "tat", new BFEnvironmentLightingProfile
             {
                 Name = "Tatooine",
-                SunIntensity = 115000f,
+                SunIntensityScale = 1.25f,
                 SunColor = new Color(1f, 0.94f, 0.80f),
                 SunAngle = new Vector2(70f, 20f),
                 SunAngularDiameter = 0.35f,            // hard-edged shadows
@@ -259,7 +300,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogTint = new Color(1f, 0.93f, 0.78f),
                 AmbientIntensity = 1.3f,
                 IndirectDiffuseIntensity = 1.4f,       // sand bounce
-                ExposureCompensation = -0.8f,
+                ExposureCompensation = -0.30f,
                 ShadowDistance = 800f,
                 DominantSurface = BFSurfaceType.Sand,
             }
@@ -270,7 +311,8 @@ public sealed class BFEnvironmentLightingProfile
         { "mus", new BFEnvironmentLightingProfile
             {
                 Name = "Mustafar",
-                SunIntensity = 4000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.50f,
                 SunColor = new Color(1f, 0.55f, 0.30f),
                 SunAngle = new Vector2(12f, 300f),
                 SunAngularDiameter = 2f,
@@ -284,7 +326,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogMaximumHeight = 500f,
                 VolumetricLightingMultiplier = 2f,
                 AmbientIntensity = 0.7f,
-                ExposureCompensation = 0.3f,
+                ExposureCompensation = 0.15f,
                 ShadowDistance = 300f,
                 AmbientOcclusionIntensity = 1.4f,
                 DominantSurface = BFSurfaceType.Lava,
@@ -296,7 +338,8 @@ public sealed class BFEnvironmentLightingProfile
         { "kam", new BFEnvironmentLightingProfile
             {
                 Name = "Kamino",
-                SunIntensity = 9000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.70f,
                 SunColor = new Color(0.88f, 0.93f, 1f),
                 SunAngle = new Vector2(35f, 250f),
                 SunAngularDiameter = 3f,               // no direct sun at all
@@ -309,7 +352,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogMaximumHeight = 600f,
                 VolumetricLightingMultiplier = 1.6f,
                 AmbientIntensity = 1.6f,
-                ExposureCompensation = -0.3f,
+                ExposureCompensation = -0.10f,
                 ContactShadowLength = 0.35f,
                 ReflectionMinSmoothness = 0.35f,       // wet everything reflects
                 BaseWetness = 1f,
@@ -322,7 +365,7 @@ public sealed class BFEnvironmentLightingProfile
         { "cor", new BFEnvironmentLightingProfile
             {
                 Name = "Coruscant",
-                SunIntensity = 26000f,
+                SunIntensityScale = 0.95f,
                 SunColor = new Color(1f, 0.95f, 0.88f),
                 SunAngle = new Vector2(48f, 110f),
                 PlanetaryGroundTint = new Color(0.32f, 0.32f, 0.34f),
@@ -332,7 +375,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogTint = new Color(0.82f, 0.86f, 0.94f),
                 FogMaximumHeight = 800f,
                 AmbientIntensity = 1.2f,
-                ExposureCompensation = -0.2f,
+                ExposureCompensation = -0.10f,
                 ShadowDistance = 600f,
                 ScreenSpaceGlobalIllumination = true,
                 ReflectionMinSmoothness = 0.45f,
@@ -345,7 +388,7 @@ public sealed class BFEnvironmentLightingProfile
         { "nab", new BFEnvironmentLightingProfile
             {
                 Name = "Naboo",
-                SunIntensity = 75000f,
+                SunIntensityScale = 1.10f,
                 SunColor = new Color(1f, 0.97f, 0.92f),
                 SunAngle = new Vector2(55f, 75f),
                 PlanetaryGroundTint = new Color(0.24f, 0.30f, 0.18f),
@@ -361,7 +404,8 @@ public sealed class BFEnvironmentLightingProfile
         { "kas", new BFEnvironmentLightingProfile
             {
                 Name = "Kashyyyk",
-                SunIntensity = 30000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.85f,
                 SunColor = new Color(1f, 0.97f, 0.85f),
                 SunAngle = new Vector2(52f, 95f),
                 PlanetaryGroundTint = new Color(0.22f, 0.26f, 0.16f),
@@ -380,7 +424,8 @@ public sealed class BFEnvironmentLightingProfile
         { "fel", new BFEnvironmentLightingProfile
             {
                 Name = "Felucia",
-                SunIntensity = 20000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.75f,
                 SunColor = new Color(1f, 0.90f, 0.95f),
                 SunAngle = new Vector2(60f, 140f),
                 PlanetaryGroundTint = new Color(0.30f, 0.20f, 0.28f),
@@ -400,7 +445,7 @@ public sealed class BFEnvironmentLightingProfile
         { "myg", new BFEnvironmentLightingProfile
             {
                 Name = "Mygeeto",
-                SunIntensity = 22000f,
+                SunIntensityScale = 0.90f,
                 SunColor = new Color(0.90f, 0.94f, 1f),
                 SunAngle = new Vector2(30f, 210f),
                 PlanetaryGroundTint = new Color(0.70f, 0.74f, 0.80f),
@@ -409,7 +454,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogTint = new Color(0.86f, 0.90f, 0.96f),
                 AmbientIntensity = 1.4f,
                 IndirectDiffuseIntensity = 1.4f,
-                ExposureCompensation = -0.9f,
+                ExposureCompensation = -0.30f,
                 ReflectionMinSmoothness = 0.5f,
                 BaseSnowCoverage = 0.6f,
                 DominantSurface = BFSurfaceType.Concrete,
@@ -420,7 +465,7 @@ public sealed class BFEnvironmentLightingProfile
         { "uta", new BFEnvironmentLightingProfile
             {
                 Name = "Utapau",
-                SunIntensity = 55000f,
+                SunIntensityScale = 1.00f,
                 SunColor = new Color(1f, 0.94f, 0.85f),
                 SunAngle = new Vector2(78f, 90f),
                 PlanetaryGroundTint = new Color(0.42f, 0.36f, 0.30f),
@@ -437,7 +482,7 @@ public sealed class BFEnvironmentLightingProfile
         { "yav", new BFEnvironmentLightingProfile
             {
                 Name = "Yavin 4",
-                SunIntensity = 60000f,
+                SunIntensityScale = 1.05f,
                 SunColor = new Color(1f, 0.95f, 0.82f),
                 SunAngle = new Vector2(50f, 45f),
                 PlanetaryGroundTint = new Color(0.22f, 0.28f, 0.16f),
@@ -453,7 +498,8 @@ public sealed class BFEnvironmentLightingProfile
         { "dag", new BFEnvironmentLightingProfile
             {
                 Name = "Dagobah",
-                SunIntensity = 7000f,
+                ForceAtmosphere = true,
+                SunIntensityScale = 0.55f,
                 SunColor = new Color(0.88f, 0.95f, 0.85f),
                 SunAngle = new Vector2(40f, 160f),
                 SunAngularDiameter = 2.5f,
@@ -466,7 +512,7 @@ public sealed class BFEnvironmentLightingProfile
                 FogMaximumHeight = 90f,
                 VolumetricLightingMultiplier = 2f,
                 AmbientIntensity = 1.3f,
-                ExposureCompensation = 0.8f,
+                ExposureCompensation = 0.35f,
                 ShadowDistance = 200f,
                 BaseWetness = 0.9f,
                 DominantSurface = BFSurfaceType.Mud,
@@ -487,7 +533,8 @@ public sealed class BFEnvironmentLightingProfile
     {
         Name = name,
         Sky = BFSkyKind.Gradient,
-        SunIntensity = 0f,
+        ForceAtmosphere = true,
+        SunIntensityScale = 0f,
         PreferAuthoredSunAngle = false,
         PreferAuthoredFog = false,
         Volumetrics = true,
@@ -496,7 +543,7 @@ public sealed class BFEnvironmentLightingProfile
         FogMaximumHeight = 60f,
         VolumetricLightingMultiplier = 1.3f,
         AmbientIntensity = 0.5f,
-        ExposureCompensation = 0.4f,
+        ExposureCompensation = 0.2f,
         ShadowDistance = 120f,
         ContactShadowLength = 0.8f,           // interiors live on contact detail
         ScreenSpaceGlobalIllumination = true,
@@ -509,7 +556,7 @@ public sealed class BFEnvironmentLightingProfile
     {
         Name = name,
         Sky = BFSkyKind.Space,
-        SunIntensity = 100000f,
+        SunIntensityScale = 1f,
         SunColor = Color.white,
         SunAngularDiameter = 0.2f,            // pinpoint star, razor shadows
         PreferAuthoredSunAngle = false,
@@ -518,7 +565,7 @@ public sealed class BFEnvironmentLightingProfile
         FogMeanFreePath = 100000f,
         AmbientIntensity = 0.15f,
         IndirectDiffuseIntensity = 0.3f,
-        ExposureCompensation = -0.5f,
+        ExposureCompensation = -0.20f,
         ExposureLimits = new Vector2(-4f, 16f),
         ShadowDistance = 900f,
         ContactShadowLength = 0.5f,
