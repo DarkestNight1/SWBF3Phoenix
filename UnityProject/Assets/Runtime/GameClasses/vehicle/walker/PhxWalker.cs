@@ -176,8 +176,13 @@ public class PhxWalker : PhxVehicle
         }
 
         // accelerate toward the commanded speed
-        float targetSpeed = drive * W.MaxSpeed;
-        CurrentSpeed = Mathf.MoveTowards(CurrentSpeed, targetSpeed, W.Acceleration * deltaTime);
+        // Damage to the legs slows the machine. This is the whole point of
+        // zoned damage on a walker: an AT-ST with a shattered leg should
+        // become a slow target rather than dying at the same rate everywhere.
+        float mobility = MobilityFactor;
+
+        float targetSpeed = drive * W.MaxSpeed * mobility;
+        CurrentSpeed = Mathf.MoveTowards(CurrentSpeed, targetSpeed, W.Acceleration * mobility * deltaTime);
 
         // tank steering
         if (Mathf.Abs(steer) > 0.001f)

@@ -80,9 +80,18 @@ public static class BFSurfaceQuery
         ("metal",     BFSurfaceType.Metal),
         ("steel",     BFSurfaceType.Metal),
         ("hull",      BFSurfaceType.Metal),
-        ("panel",     BFSurfaceType.Metal),
-        ("floor",     BFSurfaceType.Metal),
-        ("wall",      BFSurfaceType.Concrete),
+        ("marble",    BFSurfaceType.Rock),
+        ("temple",    BFSurfaceType.Rock),
+
+        // Deliberately absent: "floor", "wall", "panel", "tile", "pillar" and
+        // anything else that describes a piece of architecture rather than
+        // what it is made of.
+        //
+        // Those were here, mapped to Metal and Concrete, and they are the
+        // reason the Jedi Temple came out chrome: it is a stone building whose
+        // textures are named for the parts they are, so "floor" matched
+        // several hundred marble surfaces and classified every one of them as
+        // metal. A keyword only earns a place here if it names a material.
     };
 
     /// <summary>Fallback when nothing at all identifies the surface.</summary>

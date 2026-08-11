@@ -138,7 +138,7 @@ public static class BFSurfaceInteractionSystem
 
     static bool PassesBudget(in BFSurfaceInteraction interaction)
     {
-        Camera camera = Camera.main;
+        Camera camera = BFWorldQuery.Viewer;
         if (camera == null) return true;    // no view yet: don't second-guess
 
         float distance = Vector3.Distance(camera.transform.position, interaction.Position);

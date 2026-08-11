@@ -49,6 +49,9 @@ public struct BFWorldContext
     /// <summary>Source record of the object here, when there is one.</summary>
     public BFSourceRef Source;
 
+    /// <summary>Which part of a model this is, when it is part of one.</summary>
+    public BFSegmentIdentity Segment;
+
     public bool IsUnderwater => Water != null && WaterDepth > 0f;
 }
 
@@ -88,6 +91,31 @@ public static class BFWorldQuery
     {
         IndoorCache.Clear();
         RegionScratch.Clear();
+        CachedViewer = null;
+    }
+
+    static Camera CachedViewer;
+
+    /// <summary>
+    /// The camera everything measures distance from, resolved once.
+    /// </summary>
+    /// <remarks>
+    /// <c>Camera.main</c> is a tag search. It is cached by Unity, but the
+    /// presentation layer asks for it on every interaction report - which is
+    /// hundreds of times a second once sixty-four soldiers are walking and
+    /// shooting - and a cached reference costs nothing at all. Re-resolved
+    /// when the camera is destroyed, which is what a map change does.
+    /// </remarks>
+    public static Camera Viewer
+    {
+        get
+        {
+            if (CachedViewer == null)
+            {
+                CachedViewer = Camera.main;
+            }
+            return CachedViewer;
+        }
     }
 
     // ------------------------------------------------------------ full query
@@ -114,6 +142,7 @@ public static class BFWorldQuery
             context.GroundNormal = hit.normal;
             context.Surface = BFSurfaceQuery.Resolve(hit);
             context.Source = BFSourceLink.Find(hit.collider.gameObject);
+            context.Segment = BFSegmentIdentity.Of(hit.collider);
         }
 
         context.SurfaceProfile = BFSurfaceProfile.Get(context.Surface);

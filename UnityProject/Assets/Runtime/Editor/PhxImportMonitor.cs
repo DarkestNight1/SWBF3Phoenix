@@ -24,6 +24,49 @@ public class PhxImportMonitor : EditorWindow
         GetWindow<PhxImportMonitor>().Show();
     }
 
+    /// <summary>
+    /// Count how many imported segments got a semantic role.
+    /// </summary>
+    /// <remarks>
+    /// Role inference is keyword matching against the artists' own tags, so
+    /// the only way to know whether it works on real content is to count it on
+    /// real content. A map where almost everything is Unknown means the
+    /// vocabulary in <see cref="BFSegmentRoles"/> does not match how this
+    /// content was named - which is a fixable, findable problem, and invisible
+    /// without this.
+    /// </remarks>
+    static void ReportSegmentRoles()
+    {
+        BFSegmentIdentity[] segments = FindObjectsOfType<BFSegmentIdentity>(true);
+        if (segments.Length == 0)
+        {
+            Debug.Log("[BFImport] No segment identities in the scene - either no models are " +
+                      "loaded, or the importer did not attach them.");
+            return;
+        }
+
+        var counts = new Dictionary<BFSegmentRole, int>();
+        var examples = new Dictionary<BFSegmentRole, string>();
+        for (int i = 0; i < segments.Length; ++i)
+        {
+            BFSegmentRole role = segments[i].Role;
+            counts.TryGetValue(role, out int n);
+            counts[role] = n + 1;
+
+            if (!examples.ContainsKey(role)) examples[role] = segments[i].ToString();
+        }
+
+        var sb = new System.Text.StringBuilder();
+        sb.Append("[BFImport] ").Append(segments.Length).AppendLine(" model segment(s):");
+        foreach (KeyValuePair<BFSegmentRole, int> entry in counts)
+        {
+            sb.Append("  ").Append(entry.Key.ToString().PadRight(10))
+              .Append(entry.Value.ToString().PadLeft(5))
+              .Append("   e.g. ").AppendLine(examples[entry.Key]);
+        }
+        Debug.Log(sb.ToString());
+    }
+
     void OnGUI()
     {
         BFSourceDatabase source = BFSourceDatabase.Active;
@@ -97,6 +140,12 @@ public class PhxImportMonitor : EditorWindow
             {
                 EditorGUILayout.LabelField("   " + failure);
             }
+        }
+
+        EditorGUILayout.Space();
+        if (GUILayout.Button("Report segment roles in scene"))
+        {
+            ReportSegmentRoles();
         }
 
         EditorGUILayout.Space();

@@ -258,6 +258,7 @@ public sealed class BFUnderwaterVolume : MonoBehaviour
     UnityEngine.Rendering.VolumeProfile Profile;
     Fog Fog;
     ColorAdjustments Color;
+    BFWaterSurface PolledWater;
 
     void Start()
     {
@@ -274,12 +275,25 @@ public sealed class BFUnderwaterVolume : MonoBehaviour
         Volume.weight = 0f;
     }
 
+    float PollTimer;
+
     void Update()
     {
-        Camera camera = Camera.main;
+        Camera camera = BFWorldQuery.Viewer;
         if (camera == null || Volume == null) return;
 
-        BFWaterSurface water = BFWaterSystem.BodyAt(camera.transform.position);
+        // Whether the camera is submerged is polled rather than tested every
+        // frame: BodyAt walks every water body on the map, and a map with no
+        // water at all still paid for the walk sixty times a second. The eased
+        // weight below is what actually needs the frame.
+        PollTimer -= Time.deltaTime;
+        if (PollTimer <= 0f)
+        {
+            PollTimer = 0.2f;
+            PolledWater = BFWaterSystem.BodyAt(camera.transform.position);
+        }
+
+        BFWaterSurface water = PolledWater;
         bool submerged = water != null;
 
         if (submerged != CameraSubmerged)

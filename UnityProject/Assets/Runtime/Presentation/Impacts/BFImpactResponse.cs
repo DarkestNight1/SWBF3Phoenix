@@ -31,7 +31,35 @@ public static class BFImpactResponse
                             GameObject instigator = null)
     {
         BFSurfaceType type = BFSurfaceQuery.Resolve(hit);
-        Play(hit.point, hit.normal, direction, type, scale, instigator);
+        Play(hit.point, hit.normal, direction, type, scale, instigator,
+             segment: BFSegmentIdentity.Of(hit.collider));
+    }
+
+    /// <summary>
+    /// Whether a mark belongs on this part of a model.
+    /// </summary>
+    /// <remarks>
+    /// A scorch on a hull plate is right; the same scorch across a cockpit
+    /// canopy or a light housing is not, and neither is one on a wheel that
+    /// then rotates away from where it was struck. Without segment identity
+    /// there is no way to tell those apart and every hit gets a decal, which
+    /// is why authored break-up and battle damage read as stickers.
+    /// </remarks>
+    static bool TakesDecal(BFSegmentIdentity segment)
+    {
+        if (segment == null) return true;    // scenery and terrain: mark freely
+
+        switch (segment.Role)
+        {
+            case BFSegmentRole.Glass:
+            case BFSegmentRole.Light:
+            case BFSegmentRole.Wheel:
+            case BFSegmentRole.Track:
+            case BFSegmentRole.Body:
+                return false;
+            default:
+                return true;
+        }
     }
 
     /// <param name="playSurfaceParticles">
@@ -40,9 +68,13 @@ public static class BFImpactResponse
     /// system then contributes only what the stock format could not express -
     /// the flash, the mark, and the surface's physical reaction.
     /// </param>
+    /// <param name="segment">
+    /// Which part of a model was hit, where that is known. Decides whether a
+    /// mark belongs here at all.
+    /// </param>
     public static void Play(Vector3 position, Vector3 normal, Vector3 direction,
                             BFSurfaceType type, float scale = 1f, GameObject instigator = null,
-                            bool playSurfaceParticles = true)
+                            bool playSurfaceParticles = true, BFSegmentIdentity segment = null)
     {
         BFSurfaceProfile profile = BFSurfaceProfile.Get(type);
 
@@ -57,7 +89,10 @@ public static class BFImpactResponse
         BFSurfaceInteractionSystem.Report(interaction);
 
         PlayFlash(interaction, profile, scale);
-        PlayDecal(interaction, profile, scale);
+        if (TakesDecal(segment))
+        {
+            PlayDecal(interaction, profile, scale);
+        }
         if (playSurfaceParticles)
         {
             PlayParticles(interaction, profile, scale);

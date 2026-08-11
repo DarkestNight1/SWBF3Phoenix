@@ -364,23 +364,39 @@ public sealed class BFEnvironmentLightingProfile
         // hazy sky and a great deal of artificial light.
         { "cor", new BFEnvironmentLightingProfile
             {
+                // The stock cor1 is the RUINS of the Jedi Temple after Order
+                // 66 - a dark stone interior lit by shafts through tall
+                // windows, not the daylit city the name suggests. The
+                // community's "Jedi Temple Daytime" mods exist precisely
+                // because the shipped map is dark, so brightening it here
+                // would be undoing the map's own art direction rather than
+                // modernising it.
+                //
+                // Treated accordingly: the sun contributes through windows
+                // rather than lighting the scene, ambient and the map's own
+                // fixtures carry it, and the surfaces are stone.
                 Name = "Coruscant",
-                SunIntensityScale = 0.95f,
-                SunColor = new Color(1f, 0.95f, 0.88f),
+                Sky = BFSkyKind.Gradient,
+                SunIntensityScale = 0.45f,
+                SunColor = new Color(1f, 0.93f, 0.82f),
                 SunAngle = new Vector2(48f, 110f),
-                PlanetaryGroundTint = new Color(0.32f, 0.32f, 0.34f),
-                AtmosphereTint = new Color(0.5f, 0.58f, 0.72f),
+                SunAngularDiameter = 1.5f,
+                PlanetaryGroundTint = new Color(0.26f, 0.24f, 0.22f),
+                AtmosphereTint = new Color(0.42f, 0.46f, 0.55f),
                 AerosolDensity = 0.028f,
-                FogMeanFreePath = 500f,
-                FogTint = new Color(0.82f, 0.86f, 0.94f),
-                FogMaximumHeight = 800f,
-                AmbientIntensity = 1.2f,
-                ExposureCompensation = -0.10f,
-                ShadowDistance = 600f,
+                ForceAtmosphere = true,
+                FogMeanFreePath = 220f,
+                FogTint = new Color(0.72f, 0.74f, 0.80f),
+                FogMaximumHeight = 60f,
+                VolumetricLightingMultiplier = 1.6f,   // shafts through windows
+                AmbientIntensity = 1.35f,
+                IndirectDiffuseIntensity = 1.3f,
+                ExposureCompensation = 0.25f,
+                ShadowDistance = 180f,
                 ScreenSpaceGlobalIllumination = true,
-                ReflectionMinSmoothness = 0.45f,
-                AmbientOcclusionIntensity = 1.4f,
-                DominantSurface = BFSurfaceType.Concrete,
+                ReflectionMinSmoothness = 0.6f,        // stone, not polished metal
+                AmbientOcclusionIntensity = 1.5f,
+                DominantSurface = BFSurfaceType.Rock,
             }
         },
 

@@ -19,7 +19,7 @@ instead of with disconnected Unity objects.
 
 | System | State | Notes |
 |---|---|---|
-| `BFObjectIdentity` | **partial** | `BFSourceRef` + `BFSourceLink` exist and cover level / world / kind / name / ordinal. Missing: model, **segment**, material and animation-bank identity. |
+| `BFObjectIdentity` | **partial** | `BFSourceRef` + `BFSourceLink` cover level / world / kind / name / ordinal; `BFSegmentIdentity` now covers model / node / tag / role per renderable part. Missing: material and animation-bank identity. |
 | `BFWorldQuerySystem` | **done** | `BFWorldQuery`: surface, ground height, water level, regions, indoor/outdoor, source object, lighting profile. Cached where it is a raycast. |
 | `BFMaterial / Surface system` | **done** | `BFSurfaceType/Profile/Query`, `BFTerrainSurfaceMap`, `BFMaterialDefinition`, `BFMaterialInterpreter`. |
 | `BFSWBF2EventBus` | **done** | `BFEventBus`. Wired to command post capture/neutralise and vehicle destruction; the remaining producers still need connecting. |
@@ -50,20 +50,24 @@ blocked on nothing — see *Segment awareness* below, which needs the same data.
 
 ### Not done, in priority order
 
-**1. Segment-aware rendering.** The largest remaining gap, and the one that
-unblocks the most later work. `Model` → `Segment` is exposed by LibSWBF2 and
-the importer already builds `SWBFSegment` lists in `SWBFModel`, but nothing
-downstream knows a model has semantic parts. With segment identity carried
-through:
+**1. ~~Segment-aware rendering~~ — done, partially consumed.**
+`BFSegmentIdentity` is attached in `ModelLoader` where the importer already
+reconstructs segments, carrying model name, node, the artist's MSH tag, and a
+`BFSegmentRole` inferred from that tag. Consumed so far by:
 
-- per-segment materials (already true, but unaddressable)
-- per-part damage and destruction (Phase 5 vehicle damage zones)
-- selective decals — a scorch on the hull, not on the cockpit glass
-- per-segment emissive, snow accumulation and wetness
-- per-segment LOD and culling
+- selective decals — no scorch marks on canopies, lights, wheels or people
+- `PhxVehicleDamageZones` — per-part damage that modulates rather than
+  replaces vehicle health, so every existing consumer keeps working
+- `BFWorldQuery.Describe` returns the segment at a position
 
-This is one component (`BFSegmentIdentity`) populated in `ModelLoader`, plus
-extending `BFSourceRef` with a segment ordinal. Everything else consumes it.
+Still to consume: per-segment emissive, snow and wetness; per-segment LOD and
+culling; hero hit regions (Phase 3).
+
+Role inference is keyword matching against the artists' own tags, so it needs
+validating on real content — **Phoenix → Import Monitor → "Report segment
+roles in scene"** prints the distribution with examples. A map that comes back
+almost entirely `Unknown` means the vocabulary in `BFSegmentRoles` does not
+match how that content was named.
 
 **2. World animation.** `WorldAnimation`, `WorldAnimationKey`,
 `WorldAnimationGroup` and `WorldAnimationHierarchy` are all parsed and

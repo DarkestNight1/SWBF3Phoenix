@@ -73,10 +73,13 @@ public static class BFPresentationQuality
         {
             switch (tier)
             {
+                // Each live decal is an HDRP projector in the decal atlas and
+                // in the per-pixel decal loop, so the budget is a real render
+                // cost rather than just memory.
                 case BFQualityTier.Low: return 0;
-                case BFQualityTier.Medium: return 96;
-                case BFQualityTier.High: return 256;
-                default: return 512;
+                case BFQualityTier.Medium: return 64;
+                case BFQualityTier.High: return 128;
+                default: return 320;
             }
         }
     }
@@ -126,6 +129,70 @@ public static class BFPresentationQuality
                 case BFQualityTier.Medium: return 4;
                 case BFQualityTier.High: return 10;
                 default: return 20;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Shadow map side length for the one shadow-casting directional light.
+    /// </summary>
+    /// <remarks>
+    /// Applied to the sun only. The previous behaviour raised every
+    /// directional in the scene to 4096, which on a map with more than one
+    /// directional meant several full-resolution cascade atlases rendered and
+    /// then discarded, because HDRP only ever uses one.
+    /// </remarks>
+    public static int SunShadowResolution
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 1024;
+                case BFQualityTier.Medium: return 2048;
+                case BFQualityTier.High: return 2048;
+                default: return 4096;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Cascade splits for directional shadows. Each cascade is another render
+    /// of everything inside it.
+    /// </summary>
+    public static int ShadowCascades
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 2;
+                case BFQualityTier.Medium: return 2;
+                case BFQualityTier.High: return 3;
+                default: return 4;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Multiplier on the profile's shadow distance.
+    /// </summary>
+    /// <remarks>
+    /// Shadow distance is the single most expensive number in the renderer on
+    /// maps this size: everything inside it is drawn again per cascade. The
+    /// profile says how far shadows matter artistically; this says how much of
+    /// that the machine can afford.
+    /// </remarks>
+    public static float ShadowDistanceScale
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 0.25f;
+                case BFQualityTier.Medium: return 0.5f;
+                case BFQualityTier.High: return 0.75f;
+                default: return 1f;
             }
         }
     }

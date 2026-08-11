@@ -200,6 +200,11 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         // which is only right for a vehicle whose MaxHealth happens to be 100.
         CurHealth.Set(C.MaxHealth.Get());
 
+        // Per-part damage, built from the model's own MSH segment tags. A
+        // vehicle whose model carries no recognisable parts gets a single hull
+        // zone and behaves exactly as it did before.
+        DamageZones = gameObject.AddComponent<PhxVehicleDamageZones>();
+
         PhxDestructionRegistry.Register(this);
     }
 
@@ -267,6 +272,22 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
 
     public bool IsDestroyed { get; private set; }
+
+    /// <summary>Per-part damage, built from the model's MSH segments.</summary>
+    public PhxVehicleDamageZones DamageZones { get; private set; }
+
+    /// <summary>
+    /// Speed multiplier from damage to whatever moves this vehicle, 0.25..1.
+    /// </summary>
+    /// <remarks>
+    /// Read by each vehicle type's own movement code rather than applied
+    /// centrally, because "speed" means a different thing to a walker, a hover
+    /// and a flyer, and there is no shared field to scale.
+    /// </remarks>
+    public float MobilityFactor => DamageZones != null ? DamageZones.MobilityFactor : 1f;
+
+    /// <summary>False once every weapon-bearing part has been knocked out.</summary>
+    public bool WeaponsOperational => DamageZones == null || DamageZones.CanFire;
 
     // ------------------------------------------------------ IPhxDestructible
     // A vehicle, a building and a capital-ship subsystem are the same thing to

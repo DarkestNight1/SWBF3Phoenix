@@ -159,7 +159,24 @@ public static class PhxDamage
             : PhxHealthType.Building;   // e.g. capital ship subsystems
 
         float scaled = maxDamage * scales.For(type);
-        if (scaled > 0f) damageable.AddDamage(scaled);
+        if (scaled <= 0f) return 0f;
+
+        // Route a vehicle hit through its damage zones, where it has them.
+        //
+        // The zone decides how much of the hit reaches the vehicle's own
+        // health - a canopy hit carries almost all of it, a track hit carries
+        // a third and cripples the track instead. The vehicle's health, death
+        // path and every consumer of it are untouched; only the amount
+        // changes, and only for vehicles whose model actually has recognisable
+        // parts.
+        PhxVehicleDamageZones zones = collider.GetComponentInParent<PhxVehicleDamageZones>();
+        if (zones != null)
+        {
+            scaled = zones.ApplyZoneDamage(BFSegmentIdentity.Of(collider), scaled);
+            if (scaled <= 0f) return 0f;
+        }
+
+        damageable.AddDamage(scaled);
         return scaled;
     }
 

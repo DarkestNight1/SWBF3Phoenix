@@ -32,6 +32,7 @@ public class BFLightingDirector : MonoBehaviour
     GradientSky GradientSky;
     VisualEnvironment VisualEnvironment;
     GlobalIllumination GlobalIllumination;
+    HDShadowSettings ShadowSettings;
 
     Light Sun;
     HDAdditionalLightData SunData;
@@ -57,6 +58,7 @@ public class BFLightingDirector : MonoBehaviour
         MicroShadows = Profile.Add<MicroShadowing>(true);
         IndirectLighting = Profile.Add<IndirectLightingController>(true);
         GlobalIllumination = Profile.Add<GlobalIllumination>(true);
+        ShadowSettings = Profile.Add<HDShadowSettings>(true);
 
         Volume = gameObject.AddComponent<Volume>();
         Volume.isGlobal = true;
@@ -217,6 +219,64 @@ public class BFLightingDirector : MonoBehaviour
         MicroShadows.opacity.Override(p.MicroShadowOpacity);
 
         AmbientOcclusion.intensity.Override(p.AmbientOcclusionIntensity);
+
+        // Cap the cascade range.
+        //
+        // Nothing was setting this, so directional shadows were rendered to
+        // HDRP's default distance across maps that are a kilometre wide - the
+        // whole level in the cascade atlas, at whatever resolution, every
+        // frame. The profile's ShadowDistance is the distance at which that
+        // map's shadows actually stop mattering, and capping to it is one of
+        // the largest single savings available here.
+        ShadowSettings.maxShadowDistance.Override(
+            p.ShadowDistance * BFPresentationQuality.ShadowDistanceScale);
+        ShadowSettings.cascadeShadowSplitCount.Override(BFPresentationQuality.ShadowCascades);
+    }
+
+    /// <summary>
+    /// Leave exactly one directional light casting shadows.
+    /// </summary>
+    /// <remarks>
+    /// HDRP supports one shadow-casting directional light and reports
+    /// "Cascade Shadow atlasing has failed" - every frame - when it finds
+    /// more. The importer produces more: <c>WorldLoader.ImportLights</c>
+    /// enables HD shadows on the first directional it sees, but then sets
+    /// <c>Light.shadows = Soft</c> on every light it creates, and it is that
+    /// flag the cascade atlas counts. A map with two directionals in its .lgt
+    /// therefore spams the error and pays for shadow work HDRP then discards.
+    ///
+    /// <c>PhxModernLighting</c> compounded it by raising every directional to
+    /// a 4096 shadow resolution, so the wasted work was as expensive as it
+    /// could be.
+    ///
+    /// The sun keeps its shadows; every other directional keeps its light and
+    /// loses only the shadows it was never going to be allowed to cast.
+    /// </remarks>
+    void EnforceSingleShadowCastingSun(Light sun)
+    {
+        Light[] lights = FindObjectsOfType<Light>();
+        int demoted = 0;
+
+        for (int i = 0; i < lights.Length; ++i)
+        {
+            Light light = lights[i];
+            if (light.type != LightType.Directional) continue;
+            if (ReferenceEquals(light, sun)) continue;
+            if (light.shadows == LightShadows.None) continue;
+
+            light.shadows = LightShadows.None;
+
+            HDAdditionalLightData data = light.GetComponent<HDAdditionalLightData>();
+            data?.EnableShadows(false);
+            ++demoted;
+        }
+
+        if (demoted > 0)
+        {
+            Debug.Log($"[BFPresentation] {demoted} directional light(s) demoted to shadowless - " +
+                      "HDRP allows one shadow-casting directional and was reporting a cascade " +
+                      "atlas failure every frame.");
+        }
     }
 
     void ApplyIndirect(BFEnvironmentLightingProfile p)
@@ -301,6 +361,12 @@ public class BFLightingDirector : MonoBehaviour
         SunData.EnableShadows(true);
         SunData.shadowUpdateMode = ShadowUpdateMode.EveryFrame;
         SunData.shadowNearPlane = 0.1f;
+
+        // Resolution by tier rather than the blanket 4096 PhxModernLighting
+        // was applying to every directional light in the scene.
+        SunData.SetShadowResolution(BFPresentationQuality.SunShadowResolution);
+
+        EnforceSingleShadowCastingSun(Sun);
 
         // Scale what the importer gave this map, and only when the profile
         // asks. A scale of 0 means "this environment has no meaningful sun" -

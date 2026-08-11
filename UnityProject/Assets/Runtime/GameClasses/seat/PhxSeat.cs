@@ -176,11 +176,18 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
         }
 
 
+        // A vehicle whose turret or weapon mounts have been shot off cannot
+        // fire, whatever the occupant presses. Vehicles with no recognisable
+        // weapon parts in their model - and everything that is not a vehicle -
+        // report operational and behave exactly as before.
+        PhxVehicle vehicle = Owner as PhxVehicle;
+        if (vehicle != null && !vehicle.WeaponsOperational) return;
+
         if (Controller.ShootPrimary)
-        {   
+        {
             if (WeaponSystems.Count > 0)
             {
-                WeaponSystems[0].Fire(TargetPos);                
+                WeaponSystems[0].Fire(TargetPos);
             }
         }
 

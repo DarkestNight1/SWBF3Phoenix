@@ -236,7 +236,8 @@ public class PhxBolt : PhxOrdnance
                                       : transform.forward,
                                   BFSurfaceQuery.Resolve(coll.collider, Point.point),
                                   scale: 1f, instigator: gameObject,
-                                  playSurfaceParticles: false);
+                                  playSurfaceParticles: false,
+                                  segment: BFSegmentIdentity.Of(coll.collider));
 
             ParentPool.Free(this);
         }

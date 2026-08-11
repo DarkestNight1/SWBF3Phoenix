@@ -100,17 +100,33 @@ public class PhxModernLighting : MonoBehaviour
         Debug.Log("[BF3Legacy] Modern lighting volume active (ACES, SSAO, SSR, volumetrics)");
     }
 
+    /// <summary>
+    /// Raise the shadow resolution of the light that actually casts them.
+    /// </summary>
+    /// <remarks>
+    /// This used to set 4096 on every directional light in the scene. HDRP
+    /// only ever uses one shadow-casting directional - it reports "Cascade
+    /// Shadow atlasing has failed" and drops the rest - so on a map whose .lgt
+    /// declares more than one, that was several full-resolution cascade
+    /// atlases rendered and thrown away every frame.
+    ///
+    /// When the presentation layer is running it owns shadow policy entirely
+    /// (BFLightingDirector picks the sun, demotes the others, and sets
+    /// resolution, cascade count and distance from the quality tier), so this
+    /// stands down rather than fighting it. It still does the job when that
+    /// layer is disabled.
+    /// </remarks>
     void UpgradeShadowQuality()
     {
-        // Push directional shadow distance out - 2005 maps used very short
-        // shadow ranges; modern GPUs can afford full-map shadows.
+        if (BFPresentation.IsActive) return;
+
         HDAdditionalLightData[] lights = FindObjectsOfType<HDAdditionalLightData>();
         foreach (HDAdditionalLightData light in lights)
         {
             Light l = light.GetComponent<Light>();
-            if (l != null && l.type == LightType.Directional)
+            if (l != null && l.type == LightType.Directional && l.shadows != LightShadows.None)
             {
-                light.SetShadowResolution(4096);
+                light.SetShadowResolution(2048);
             }
         }
     }
