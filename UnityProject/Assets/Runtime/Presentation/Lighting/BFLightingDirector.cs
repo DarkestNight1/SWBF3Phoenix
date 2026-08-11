@@ -388,20 +388,39 @@ public class BFLightingDirector : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// The map's sun.
+    /// </summary>
+    /// <remarks>
+    /// Prefers the directional light the importer already chose to cast
+    /// shadows, because that is a decision made with the .lgt in hand -
+    /// the importer picks the brightest authored directional. Comparing
+    /// intensities here instead would compare <c>Light.intensity</c>, which
+    /// under HDRP is not the value that matters (HDRP keeps its own physical
+    /// intensity on HDAdditionalLightData), so it would routinely pick the
+    /// wrong light and then fight the importer over which one is the sun.
+    /// </remarks>
     static Light FindBrightestDirectional()
     {
         Light[] lights = FindObjectsOfType<Light>();
-        Light best = null;
+
+        Light fallback = null;
         float bestIntensity = -1f;
 
         for (int i = 0; i < lights.Length; ++i)
         {
-            if (lights[i].type != LightType.Directional) continue;
-            if (lights[i].intensity <= bestIntensity) continue;
+            Light light = lights[i];
+            if (light.type != LightType.Directional) continue;
 
-            bestIntensity = lights[i].intensity;
-            best = lights[i];
+            if (light.shadows != LightShadows.None) return light;
+
+            HDAdditionalLightData data = light.GetComponent<HDAdditionalLightData>();
+            float intensity = data != null ? data.intensity : light.intensity;
+            if (intensity <= bestIntensity) continue;
+
+            bestIntensity = intensity;
+            fallback = light;
         }
-        return best;
+        return fallback;
     }
 }

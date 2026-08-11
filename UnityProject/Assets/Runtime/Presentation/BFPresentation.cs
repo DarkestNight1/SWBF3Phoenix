@@ -62,6 +62,7 @@ public static class BFPresentation
         Host.AddComponent<BFWetnessSystem>();
         Host.AddComponent<BFSnowAccumulation>();
         Host.AddComponent<BFPresentationMapHook>();
+        Host.AddComponent<BFRenderBudgetReport>();
 
         Debug.Log($"[BFPresentation] Active at quality tier {BFPresentationQuality.Tier}.");
     }

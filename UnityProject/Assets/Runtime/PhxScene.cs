@@ -415,6 +415,8 @@ public class PhxScene
                 instanceObject.transform.SetParent(instancesRoot.transform);
             }
 
+            BatchStaticInstances(instances, instancesRoot);
+
             //Terrain
             var terrain = world.GetTerrain();
             if (terrain != null && !bTerrainImported)
@@ -825,6 +827,60 @@ public class PhxScene
             }
         }
         return instanceObjects;
+    }
+
+    /// <summary>
+    /// Prepare the layer's immovable props for static batching.
+    /// </summary>
+    /// <remarks>
+    /// Unity only static-batches objects that were marked static <i>before the
+    /// scene was built</i>, which never applies to a level assembled at runtime
+    /// from the user's own game files - so nothing here was ever batched, no
+    /// matter that <c>ClassLoader</c> diligently sets <c>isStatic</c>.
+    /// <c>StaticBatchingUtility.Combine</c> is the runtime equivalent and has
+    /// to be called explicitly.
+    ///
+    /// It matters more here than in most projects because of how the source
+    /// data is shaped: a SWBF2 model is split into one renderer per bone, and
+    /// a map places hundreds of props, so a level arrives as many thousands of
+    /// individually-drawn objects.
+    ///
+    /// Only instances whose root is static are included, and that restriction
+    /// is not cosmetic: combining an object welds its vertices into a shared
+    /// buffer in world space, so anything that later moves would smear across
+    /// the map. Command posts, vehicles, doors and animated props are all
+    /// excluded by the same <c>isStatic</c> flag the importer already sets.
+    /// </remarks>
+    void BatchStaticInstances(List<GameObject> instances, GameObject instancesRoot)
+    {
+        var batchable = new List<GameObject>(instances.Count);
+        for (int i = 0; i < instances.Count; ++i)
+        {
+            GameObject instance = instances[i];
+            if (instance == null || !instance.isStatic) continue;
+
+            // A static root that nonetheless carries a tickable instance is
+            // something that can change at runtime - a destructible building
+            // swapping to its ruin, a prop with attached effects. Leave those
+            // addressable.
+            if (instance.GetComponent<PhxInstance>() is IPhxTickable) continue;
+
+            batchable.Add(instance);
+        }
+
+        if (batchable.Count == 0) return;
+
+        try
+        {
+            StaticBatchingUtility.Combine(batchable.ToArray(), instancesRoot);
+            Debug.Log($"[Phoenix] Static-batched {batchable.Count} of {instances.Count} instances " +
+                      $"in '{instancesRoot.transform.parent?.name}'.");
+        }
+        catch (Exception e)
+        {
+            // Batching is an optimisation; losing it must not lose the level.
+            Debug.LogWarning($"Static batching failed for '{instancesRoot.name}': {e.Message}");
+        }
     }
 
     /// <summary>
