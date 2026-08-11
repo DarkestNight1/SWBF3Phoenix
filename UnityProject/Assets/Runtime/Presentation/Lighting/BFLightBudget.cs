@@ -106,7 +106,18 @@ public sealed class BFLightBudget : MonoBehaviour
     static void ApplyVolumetricPolicy(HDAdditionalLightData data, Light light)
     {
         bool worthIt = data.range >= 15f;
-        data.affectsVolumetric = worthIt && BFPresentationQuality.Volumetrics;
+
+        // A strongly coloured light is excluded whatever its size. Fog
+        // scatters colour through the entire camera volume without being
+        // stopped by geometry, so one saturated practical tints a whole
+        // interior - which is how a cave came out uniformly green from a
+        // single command post projector inside it.
+        Color c = light.color;
+        float maxChannel = Mathf.Max(c.r, Mathf.Max(c.g, c.b));
+        float minChannel = Mathf.Min(c.r, Mathf.Min(c.g, c.b));
+        bool saturated = maxChannel > 0.01f && (maxChannel - minChannel) / maxChannel > 0.35f;
+
+        data.affectsVolumetric = worthIt && !saturated && BFPresentationQuality.Volumetrics;
     }
 
     void Update()

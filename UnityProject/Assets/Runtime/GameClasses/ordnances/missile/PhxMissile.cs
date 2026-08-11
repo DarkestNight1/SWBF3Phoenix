@@ -37,6 +37,33 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
     PhxMissileClass MissileClass;
    
     protected Rigidbody Body;
+
+    /// <summary>Set once Init has run; OnEnable fires before it on a fresh pool object.</summary>
+    bool InertiaApplied;
+
+    /// <summary>
+    /// Pin the inertia tensor so PhysX never derives one from the collider.
+    /// </summary>
+    /// <remarks>
+    /// An explicit tensor is what stops PhysX computing its own, but the
+    /// override does not survive the body being disabled - which is exactly
+    /// what pooling does on every impact. Re-asserting it on enable is the
+    /// difference between a projectile that recycles cleanly and one that
+    /// logs a PhysX error every time it is reused.
+    /// </remarks>
+    void ApplyInertia()
+    {
+        if (Body == null) return;
+
+        Body.centerOfMass = Vector3.zero;
+        Body.inertiaTensor = Vector3.one;
+        Body.inertiaTensorRotation = Quaternion.identity;
+    }
+
+    void OnEnable()
+    {
+        if (InertiaApplied) ApplyInertia();
+    }
     Light Light;
 
     protected List<Collider> Colliders;
@@ -53,6 +80,7 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         gameObject.layer = LayerMask.NameToLayer("OrdnanceAll");
 
         Body = GetComponent<Rigidbody>();
+        InertiaApplied = true;
         Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationY | RigidbodyConstraints.FreezeRotationZ;
 
         Light = GetComponent<Light>();
@@ -66,14 +94,21 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
 
         Body.useGravity = false;
         Body.drag = 0f;
-        Body.mass = .0000000001f;
+
+        // Not 1e-10.
+        //
+        // A missile is driven by its velocity, not by forces, so the mass only
+        // has to be small enough that hitting something does not throw it
+        // around. At 1e-10 the inertia tensor PhysX derives from it underflows
+        // to zero, and every time the pool re-enables this body PhysX rejects
+        // it with "Inertia tensor must be larger than zero in all
+        // coordinates" - once per missile impact, for the whole match.
+        Body.mass = 0.01f;
         Body.angularDrag = 0f;
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
-        Body.centerOfMass = Vector3.zero;
-        Body.inertiaTensor = new Vector3(1f,1f,1f);
-        Body.inertiaTensorRotation = Quaternion.identity;
+        ApplyInertia();
 
         SWBFModel Mapping = ModelLoader.Instance.GetModelMapping(gameObject, MissileClass.GeometryName.Get());
         if (Mapping != null)

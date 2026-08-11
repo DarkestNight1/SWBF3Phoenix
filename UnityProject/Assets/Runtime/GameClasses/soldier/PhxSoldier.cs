@@ -1145,7 +1145,17 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                         moveDirWorld = -moveDirWorld;
                     }
 
-                    LookRot = Quaternion.LookRotation(moveDirWorld);
+                    // Same guard as the view-direction LookRotation above, which
+                    // was fixed while this one was not. Quaternion.LookRotation
+                    // of a degenerate vector yields a zero quaternion, and once
+                    // LookRot holds one it never recovers - every subsequent
+                    // frame multiplies through it, so the soldier stops turning
+                    // and MoveRotation rejects it forever after. That is the
+                    // "Rotation quaternions must be unit length" spam.
+                    if (moveDirWorld.sqrMagnitude > 1e-6f)
+                    {
+                        LookRot = Quaternion.LookRotation(moveDirWorld);
+                    }
                 }
 
                 if (TurnTimer == 0f)
@@ -1416,10 +1426,53 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         else if ((State == PhxControlState.Stand || State == PhxControlState.Crouch || State == PhxControlState.Sprint) && LandTimer == 0f)
         {
             Body.MovePosition(Body.position + CurrSpeed * deltaTime);
-            Body.MoveRotation(LookRot);
+
+            // Last line of defence before PhysX. Guarding every producer of
+            // LookRot is the real fix, but a single unguarded path anywhere -
+            // now or later - turns into an error every physics tick for every
+            // soldier, and the message names neither the soldier nor the
+            // cause. Normalising here keeps one bad frame from becoming
+            // permanent, and reports it once instead of forever.
+            Body.MoveRotation(SafeRotation(LookRot));
         }
 
         PrevState = State;
+    }
+
+    /// <summary>
+    /// A rotation PhysX will accept, and a one-shot report when one was not.
+    /// </summary>
+    /// <remarks>
+    /// A quaternion reaches here degenerate (all zeros, from a LookRotation on
+    /// a zero vector) or non-finite (NaN propagated out of a velocity). PhysX
+    /// rejects both and logs per call - which is per soldier per physics tick,
+    /// so a single bad value from one unit buries the console and hides
+    /// everything else.
+    ///
+    /// Logged once per soldier so the underlying cause is still visible
+    /// without the flood.
+    /// </remarks>
+    bool ReportedBadRotation;
+
+    Quaternion SafeRotation(Quaternion rotation)
+    {
+        float lengthSqr = rotation.x * rotation.x + rotation.y * rotation.y +
+                          rotation.z * rotation.z + rotation.w * rotation.w;
+
+        // NaN fails every comparison, so this catches non-finite too.
+        if (lengthSqr > 1e-6f && lengthSqr < 1e6f)
+        {
+            return Quaternion.Normalize(rotation);
+        }
+
+        if (!ReportedBadRotation)
+        {
+            ReportedBadRotation = true;
+            Debug.LogWarning($"[Phoenix] '{name}' produced a non-unit rotation " +
+                             $"({rotation.x}, {rotation.y}, {rotation.z}, {rotation.w}); " +
+                             "falling back to its current facing. Reported once per soldier.");
+        }
+        return transform.rotation;
     }
 
     public Vector3 RotAlt1 = new Vector3(7f, -78f, -130f);

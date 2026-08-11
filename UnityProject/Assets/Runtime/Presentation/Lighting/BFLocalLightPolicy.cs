@@ -96,7 +96,21 @@ public static class BFLocalLightPolicy
 
         data.fadeDistance = FadeDistance;
         data.shadowFadeDistance = ShadowFadeDistance;
+
+        // A team-coloured practical must not light the fog.
+        //
+        // Volumetric fog scatters a light's colour through the whole camera
+        // volume, and unlike the light itself that scattering is not bounded
+        // by geometry - so a green command post projector in a cave tints the
+        // entire interior green, walls the light never reaches included. That
+        // is a wash over the frame, not a light in the room, and it is the
+        // same failure the saturated light colour caused before, arriving by a
+        // different route.
+        //
+        // The light keeps its glow on surfaces; it just stops colouring the
+        // air of the whole level.
         data.volumetricDimmer = VolumetricDimmer;
+        data.affectsVolumetric = false;
 
         // Range attenuation on: without it the light does not fall off toward
         // the edge of its range at all, so shrinking the range just produces a

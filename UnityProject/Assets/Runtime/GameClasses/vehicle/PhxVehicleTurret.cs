@@ -74,8 +74,16 @@ public class PhxVehicleTurret : PhxSeat
     {
         base.Tick(deltaTime);
 
-        if (Occupant == null || !CanRotate) return;
+        if (Occupant == null || !CanRotate || BaseTransform == null) return;
 
-        BaseTransform.rotation *= Quaternion.Euler(new Vector3(0f,Occupant.GetController().mouseX,0f));
+        // An occupant can outlive its controller: a soldier that died, or was
+        // unassigned while still seated, keeps the seat reference but returns
+        // null here. Dereferencing it threw once per turret per frame - and on
+        // an armed building, which ticks its turret unconditionally, that is
+        // every frame for the whole match.
+        PhxPawnController controller = Occupant.GetController();
+        if (controller == null) return;
+
+        BaseTransform.rotation *= Quaternion.Euler(new Vector3(0f, controller.mouseX, 0f));
     }
 }
