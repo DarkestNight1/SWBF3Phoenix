@@ -50,7 +50,19 @@ public static class BFPresentationQuality
     public static bool ImpactLights => tier >= BFQualityTier.Medium;
     public static bool TerrainDeformation => tier >= BFQualityTier.Medium;
     public static bool PlanarWaterReflections => tier >= BFQualityTier.High;
-    public static bool DerivedMaterialMaps => tier >= BFQualityTier.Medium;
+
+    /// <summary>
+    /// Whether stock textures get derived normal/occlusion maps.
+    /// </summary>
+    /// <remarks>
+    /// Has its own switch rather than riding the tier alone. Its cost is paid
+    /// at load, not per frame, so it does not trade off against the other
+    /// features the way the rest of the tier does - and it is the only part of
+    /// the layer that changes how the original art reads, which is a judgement
+    /// a player may reasonably want to make separately from performance.
+    /// </remarks>
+    public static bool DerivedMaterialMaps =>
+        tier >= BFQualityTier.Medium && PhxBF3.Config.DerivedMaterialMaps;
 
     // --------------------------------------------------------------- budgets
 

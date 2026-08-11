@@ -459,12 +459,19 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
         if (Team == 0)
         {
             PhxLuaEvents.Invoke(PhxLuaEvents.Event.OnFinishNeutralize, Scene.GetInstanceIndex(this));
+            BFEventBus.Raise(BFEvent.CommandPostNeutralized, Team.Get(), gameObject, name: name);
         }
         else
         {
             PhxLuaEvents.Invoke(PhxLuaEvents.Event.OnFinishCapture, Scene.GetInstanceIndex(this));
             PhxLuaEvents.Invoke(PhxLuaEvents.Event.OnFinishCaptureName, name, Scene.GetInstanceIndex(this));
             PhxLuaEvents.Invoke(PhxLuaEvents.Event.OnFinishCaptureTeam, Team.Get(), Scene.GetInstanceIndex(this));
+
+            // Announced to engine systems too, not only to Lua. The AI's
+            // objective evaluation, the HUD and scoring all need to know a
+            // post changed hands, and wiring each of them to this class
+            // individually is how a system ends up depending on twenty others.
+            BFEventBus.Raise(BFEvent.CommandPostCaptured, Team.Get(), gameObject, name: name);
         }
 
         RefreshCapture();

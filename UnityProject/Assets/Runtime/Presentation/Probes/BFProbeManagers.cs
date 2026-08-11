@@ -67,9 +67,30 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
         int budget = BFPresentationQuality.ReflectionProbeBudget;
         if (budget <= 0) return;
 
+        StopAllCoroutines();
+        StartCoroutine(PlaceOverFrames(budget));
+    }
+
+    /// <summary>
+    /// Place and render the probes a frame apart.
+    /// </summary>
+    /// <remarks>
+    /// Each probe is six cubemap faces. Rendering ten of them in the frame the
+    /// map finishes loading is sixty scene renders in one frame - which is not
+    /// a frame, it is a stall, and it lands exactly where a player is already
+    /// waiting. One per frame turns it into a fraction of a second nobody
+    /// notices, and probes that have not rendered yet simply fall back to the
+    /// sky, which is what the scene looked like anyway.
+    /// </remarks>
+    System.Collections.IEnumerator PlaceOverFrames(int budget)
+    {
+        // A frame for the scene to settle: probes rendered before the map's
+        // own lights and materials are in place capture the wrong room.
+        yield return null;
+
         PhxScene scene = PhxGame.GetScene();
         PhxCommandpost[] posts = scene?.GetCommandPosts();
-        if (posts == null || posts.Length == 0) return;
+        if (posts == null || posts.Length == 0) yield break;
 
         int placed = 0;
         for (int i = 0; i < posts.Length && placed < budget; ++i)
@@ -78,6 +99,7 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
 
             Place(posts[i].transform.position + Vector3.up * ProbeHeight);
             ++placed;
+            yield return null;
         }
 
         Debug.Log($"[BFPresentation] {placed} reflection probe(s) placed at command posts.");
@@ -154,12 +176,30 @@ public sealed class BFLightProbeManager : MonoBehaviour
 
     void ConfigureScene()
     {
+        StopAllCoroutines();
+        StartCoroutine(ConfigureOverFrames());
+    }
+
+    /// <summary>Renderers configured per frame while walking the scene.</summary>
+    /// <remarks>
+    /// A conquest map has thousands, and touching all of them in one frame at
+    /// the end of a load is a visible hitch on top of a load that is already
+    /// long. Spread out, a renderer configured a few frames late is lit by the
+    /// scene ambient in the meantime, which is what it would have had anyway.
+    /// </remarks>
+    const int ConfigureBatchSize = 400;
+
+    System.Collections.IEnumerator ConfigureOverFrames()
+    {
         ConfiguredRenderers = 0;
+        yield return null;
 
         Renderer[] renderers = FindObjectsOfType<Renderer>();
         for (int i = 0; i < renderers.Length; ++i)
         {
             Configure(renderers[i]);
+
+            if ((i + 1) % ConfigureBatchSize == 0) yield return null;
         }
 
         Debug.Log($"[BFPresentation] Environmental lighting configured on {ConfiguredRenderers} renderer(s).");

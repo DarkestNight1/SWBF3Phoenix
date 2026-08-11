@@ -265,6 +265,26 @@ public class PhxBF3Config
     // Gore: 0 = off, 1 = sparks only (cauterized, no detach), 2 = full dismemberment
     public int GoreLevel = 2;
 
+    /// <summary>
+    /// Presentation quality tier: 0 Low, 1 Medium, 2 High, 3 Ultra.
+    /// Drives every budget in the presentation layer - decals, impact lights,
+    /// probes, terrain deformation resolution, interaction distance, and which
+    /// HDRP features are on at all.
+    /// </summary>
+    public int PresentationQuality = 2;
+
+    /// <summary>
+    /// Derive normal and occlusion maps from the stock diffuse textures.
+    /// </summary>
+    /// <remarks>
+    /// A separate switch from the quality tier because its cost is paid at
+    /// load rather than per frame - one pass over every texture in the level -
+    /// and because it is the one part of the presentation layer that changes
+    /// how the original art reads. Turning it off costs nothing that was in
+    /// the source data.
+    /// </remarks>
+    public bool DerivedMaterialMaps = true;
+
     // Graphics
     public int TargetWidth = 3840;
     public int TargetHeight = 2160;

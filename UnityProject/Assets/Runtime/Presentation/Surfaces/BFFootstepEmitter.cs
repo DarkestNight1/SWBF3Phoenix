@@ -38,6 +38,23 @@ public sealed class BFFootstepEmitter : MonoBehaviour
         LastPosition = transform.position;
     }
 
+    /// <summary>
+    /// Metres of travel that must accumulate before the ground is probed
+    /// again.
+    /// </summary>
+    /// <remarks>
+    /// The first version raycast every soldier every frame, which is sixty-
+    /// four casts a frame before a shot is fired - for an effect that can only
+    /// produce something once per stride. The probe now happens when the
+    /// soldier has actually covered ground, plus whenever it is airborne
+    /// (where the landing has to be caught the frame it happens).
+    /// </remarks>
+    const float ProbeInterval = 0.4f;
+
+    float DistanceSinceProbe;
+    RaycastHit LastGroundHit;
+    bool LastGrounded = true;
+
     void Update()
     {
         if (Soldier == null || Soldier.IsDead) return;
@@ -48,11 +65,28 @@ public sealed class BFFootstepEmitter : MonoBehaviour
 
         float fallSpeed = -delta.y / Mathf.Max(Time.deltaTime, 0.0001f);
 
-        // Ground probe once per frame; both the step and the landing need it,
-        // and it is also what supplies the surface.
-        bool grounded = Physics.Raycast(position + Vector3.up * 0.4f, Vector3.down,
-                                        out RaycastHit hit, 1.2f,
-                                        PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore);
+        DistanceSinceProbe += delta.magnitude;
+
+        // Airborne is probed every frame: the landing is a single-frame event
+        // and missing it loses the impression entirely. On the ground, the
+        // last result stands until the soldier has moved far enough for it to
+        // possibly have changed.
+        bool grounded;
+        RaycastHit hit;
+        if (!LastGrounded || DistanceSinceProbe >= ProbeInterval)
+        {
+            DistanceSinceProbe = 0f;
+            grounded = Physics.Raycast(position + Vector3.up * 0.4f, Vector3.down,
+                                       out hit, 1.2f,
+                                       PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore);
+            LastGroundHit = hit;
+            LastGrounded = grounded;
+        }
+        else
+        {
+            grounded = LastGrounded;
+            hit = LastGroundHit;
+        }
 
         if (!grounded)
         {

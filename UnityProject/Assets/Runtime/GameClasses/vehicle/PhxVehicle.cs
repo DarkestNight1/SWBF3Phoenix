@@ -325,6 +325,7 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
         OnDeath?.Invoke(this);
         PhxDestructionRegistry.NotifyDestroyed(this);
+        BFEventBus.Raise(BFEvent.VehicleDestroyed, Team.Get(), gameObject, name: C?.Name);
         SCENE?.DestroyInstance(this);
     }
 

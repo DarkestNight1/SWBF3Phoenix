@@ -47,8 +47,18 @@ public static class BFMaterialEnhancer
     static readonly Dictionary<string, DerivedMaps> Cache =
         new Dictionary<string, DerivedMaps>(System.StringComparer.OrdinalIgnoreCase);
 
-    /// <summary>Strength of the derived normal relief.</summary>
-    public static float NormalStrength = 1.6f;
+    /// <summary>
+    /// Strength of the derived normal relief.
+    /// </summary>
+    /// <remarks>
+    /// Low, and it has to be. A luminance gradient over hand-painted art
+    /// reads every painted highlight and every panel line as geometry, so at
+    /// any real strength the surface stops looking like a wall with detail on
+    /// it and starts looking like crumpled foil - which, together with a
+    /// derived metallic that should never have existed, is exactly what
+    /// happened. This is a hint of relief, not a height field.
+    /// </remarks>
+    public static float NormalStrength = 0.45f;
 
     public static int CachedCount => Cache.Count;
 
@@ -82,26 +92,80 @@ public static class BFMaterialEnhancer
         if (rgba.Length < width * height * 4) return;
         if (Cache.ContainsKey(textureName)) return;
 
-        // The surface decides whether metallic is allowed at all: the pixel
-        // statistics of clone armour and of snow are the same, and only one of
-        // them is metal. Unknown falls back to a non-metal surface rather than
-        // to the map default, because at import time the map default still
-        // belongs to the previous map.
-        BFSurfaceType surface = BFSurfaceQuery.FromKeyword(textureName);
-        if (surface == BFSurfaceType.Unknown) surface = BFSurfaceType.Rock;
-
-        var pixels = new Color32[width * height];
-        for (int i = 0; i < pixels.Length; ++i)
-        {
-            int b = i * 4;
-            pixels[i] = new Color32(rgba[b], rgba[b + 1], rgba[b + 2], rgba[b + 3]);
-        }
+        // Derived at reduced resolution.
+        //
+        // Both maps carry low-frequency information - where the surface is in
+        // shadow, roughly how broken up it is - and neither needs the source's
+        // full detail. Deriving a 1024 texture at 1024 costs sixteen times a
+        // 256 pass, and mip filtering discards most of the difference anyway.
+        // Doing it at full size is what turned map load into a visible stall.
+        Downsample(rgba, width, height, out Color32[] pixels, out int w, out int h);
 
         Cache[textureName] = new DerivedMaps
         {
-            Normal = BuildNormal(pixels, width, height, textureName),
-            MaskMap = BuildMaskMap(pixels, width, height, textureName, surface),
+            Normal = BuildNormal(pixels, w, h, textureName),
+            MaskMap = BuildMaskMap(pixels, w, h, textureName),
         };
+    }
+
+    /// <summary>Largest side length the derivation runs at.</summary>
+    const int DerivationResolution = 256;
+
+    /// <summary>
+    /// Box-filter the source down to at most <see cref="DerivationResolution"/>
+    /// on its longest side, converting to Color32 on the way.
+    /// </summary>
+    static void Downsample(byte[] rgba, int width, int height,
+                           out Color32[] pixels, out int outWidth, out int outHeight)
+    {
+        int step = 1;
+        while (width / step > DerivationResolution || height / step > DerivationResolution)
+        {
+            step *= 2;
+        }
+
+        outWidth = Mathf.Max(4, width / step);
+        outHeight = Mathf.Max(4, height / step);
+        pixels = new Color32[outWidth * outHeight];
+
+        if (step == 1)
+        {
+            for (int i = 0; i < pixels.Length; ++i)
+            {
+                int b = i * 4;
+                pixels[i] = new Color32(rgba[b], rgba[b + 1], rgba[b + 2], rgba[b + 3]);
+            }
+            return;
+        }
+
+        int samples = step * step;
+        for (int y = 0; y < outHeight; ++y)
+        {
+            for (int x = 0; x < outWidth; ++x)
+            {
+                int r = 0, g = 0, bl = 0, a = 0;
+                for (int sy = 0; sy < step; ++sy)
+                {
+                    int srcY = y * step + sy;
+                    if (srcY >= height) break;
+
+                    for (int sx = 0; sx < step; ++sx)
+                    {
+                        int srcX = x * step + sx;
+                        if (srcX >= width) break;
+
+                        int b = (srcY * width + srcX) * 4;
+                        r += rgba[b];
+                        g += rgba[b + 1];
+                        bl += rgba[b + 2];
+                        a += rgba[b + 3];
+                    }
+                }
+                pixels[y * outWidth + x] = new Color32(
+                    (byte)(r / samples), (byte)(g / samples),
+                    (byte)(bl / samples), (byte)(a / samples));
+            }
+        }
     }
 
     /// <summary>
@@ -113,7 +177,15 @@ public static class BFMaterialEnhancer
     /// that arrived by another path. The material keeps its stock response,
     /// which is a correct outcome rather than a failure.
     /// </remarks>
-    public static void Enhance(Material material, Texture2D source, BFSurfaceType surfaceHint)
+    /// <param name="authoredSmoothness">
+    /// What the source material asked for. The mask map's smoothness channel
+    /// is banded around it rather than replacing it - see
+    /// <see cref="BFMaterialInterpreter.BandMaskSmoothness"/>. Binding a mask
+    /// map without doing this hands the material's entire response to derived
+    /// data, because HDRP stops reading the scalar properties the moment a
+    /// mask is present.
+    /// </param>
+    public static void Enhance(Material material, Texture2D source, float authoredSmoothness)
     {
         if (!BFPresentationQuality.DerivedMaterialMaps) return;
         if (material == null || source == null) return;
@@ -130,6 +202,7 @@ public static class BFMaterialEnhancer
         {
             material.SetTexture("_MaskMap", maps.MaskMap);
             material.EnableKeyword("_MASKMAP");
+            BFMaterialInterpreter.BandMaskSmoothness(material, authoredSmoothness);
         }
     }
 
@@ -167,7 +240,11 @@ public static class BFMaterialEnhancer
                 float dx = (l20 + 2f * l21 + l22) - (l00 + 2f * l01 + l02);
                 float dy = (l02 + 2f * l12 + l22) - (l00 + 2f * l10 + l20);
 
-                Vector3 n = new Vector3(-dx * NormalStrength, -dy * NormalStrength, 1f).normalized;
+                // Baked at unit strength; the material's _NormalScale carries
+                // NormalStrength. Applying it twice - once here and once on
+                // the material - squared it, which is how a 0.45 setting was
+                // still producing foil.
+                Vector3 n = new Vector3(-dx, -dy, 1f).normalized;
 
                 output[y * width + x] = new Color32(
                     (byte)Mathf.Clamp((n.x * 0.5f + 0.5f) * 255f, 0f, 255f),
@@ -191,13 +268,28 @@ public static class BFMaterialEnhancer
     /// <summary>
     /// HDRP mask map: metallic, occlusion, detail mask, smoothness.
     /// </summary>
-    static Texture2D BuildMaskMap(Color32[] pixels, int width, int height,
-                                  string name, BFSurfaceType surfaceHint)
+    /// <remarks>
+    /// Two of those four channels are deliberately inert.
+    ///
+    /// <b>Metallic is always zero.</b> Nothing in a hand-painted diffuse
+    /// texture reliably distinguishes a conductor from a bright desaturated
+    /// dielectric - clone armour and snow have the same statistics - and the
+    /// source material already says, via its EnvMap flag, which surfaces
+    /// reflect their surroundings. Guessing here overrode that and turned a
+    /// Coruscant hangar into chrome. The interpreter collapses the metallic
+    /// remap to a point so this channel cannot contribute even in principle.
+    ///
+    /// <b>Smoothness is a variation, not a value.</b> It is written centred on
+    /// 0.5 and remapped by the interpreter into a narrow band around whatever
+    /// the authored specular exponent asked for, so local contrast makes panel
+    /// lines read slightly crisper and cannot decide how shiny a wall is.
+    ///
+    /// Occlusion is the one channel derived outright, because the source has
+    /// no occlusion data at all and the painted-in shadow is a genuine record
+    /// of where light does not reach.
+    /// </remarks>
+    static Texture2D BuildMaskMap(Color32[] pixels, int width, int height, string name)
     {
-        BFSurfaceProfile profile = BFSurfaceProfile.Get(surfaceHint);
-        bool allowMetallic = surfaceHint == BFSurfaceType.Metal ||
-                             surfaceHint == BFSurfaceType.Glass;
-
         var mask = new Texture2D(width, height, TextureFormat.RGBA32, true, true)
         {
             name = name + "_bf_mask",
@@ -236,24 +328,19 @@ public static class BFMaterialEnhancer
                 float contrast = Mathf.Clamp01(hi - lo);
 
                 // Occlusion: how much darker than the texture's own average.
-                float occlusion = Mathf.Clamp01(1f - Mathf.Max(0f, mean - l) * 1.8f);
+                // Floored so a dark asset does not read as fully occluded -
+                // the painted shadow is a hint about geometry, not a light
+                // budget.
+                float occlusion = Mathf.Clamp(1f - Mathf.Max(0f, mean - l) * 1.4f, 0.55f, 1f);
 
-                // Smoothness: the surface's baseline, pushed by local contrast.
-                float smoothness = Mathf.Clamp01(profile.BaseSmoothness + contrast * 0.45f);
-
-                // Metallic: bright and desaturated, but only where the surface
-                // type permits it at all.
-                float metallic = 0f;
-                if (allowMetallic)
-                {
-                    float maxc = Mathf.Max(c.r, Mathf.Max(c.g, c.b)) / 255f;
-                    float minc = Mathf.Min(c.r, Mathf.Min(c.g, c.b)) / 255f;
-                    float saturation = maxc > 0.001f ? (maxc - minc) / maxc : 0f;
-                    metallic = Mathf.Clamp01((1f - saturation * 2.2f) * Mathf.Clamp01(l * 1.6f));
-                }
+                // Smoothness variation around neutral. Centred on 0.5 because
+                // the interpreter remaps this into a narrow band around the
+                // authored value; anything else here would bias every surface
+                // in the game in one direction.
+                float smoothness = Mathf.Clamp01(0.5f + (contrast - 0.25f) * 0.8f);
 
                 output[idx] = new Color32(
-                    (byte)(metallic * 255f),
+                    0,                                // metallic: authored, never derived
                     (byte)(occlusion * 255f),
                     128,                              // detail mask: neutral
                     (byte)(smoothness * 255f));

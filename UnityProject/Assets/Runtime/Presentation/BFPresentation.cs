@@ -44,6 +44,8 @@ public static class BFPresentation
         Host = new GameObject("BFPresentation");
         Object.DontDestroyOnLoad(Host);
 
+        BFPresentationQuality.Tier = (BFQualityTier)Mathf.Clamp(
+            PhxBF3.Config.PresentationQuality, (int)BFQualityTier.Low, (int)BFQualityTier.Ultra);
         BFPresentationQuality.Apply();
 
         // Order matters only in that the lighting director resolves the map
@@ -70,6 +72,7 @@ public static class BFPresentation
         BFSurfaceQuery.Reset();
         BFSurfaceInteractionSystem.Reset();
         BFTerrainSurfaceMap.Reset();
+        BFWorldQuery.Reset();
         BFDecalSystem.Clear();
         BFImpactLightPool.Clear();
         BFMaterialEnhancer.Reset();
