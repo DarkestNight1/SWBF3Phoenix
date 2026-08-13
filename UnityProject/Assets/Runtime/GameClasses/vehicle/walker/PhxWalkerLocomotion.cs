@@ -40,7 +40,36 @@ public sealed class PhxWalkerLocomotion
     /// first one that resolves wins. A walker whose bank matches none of them
     /// still moves - it simply does not animate, which is where this started.
     /// </summary>
-    static readonly string[] WalkClipNames = { "walk", "walkforward", "forward", "move", "run" };
+    /// <summary>
+    /// BF2 walker gait clips, in preference order.
+    /// </summary>
+    /// <remarks>
+    /// These are the real names, recovered by hashing lookup.csv against the
+    /// animation CRCs in imp.lvl. The list this used to hold - walk,
+    /// walkforward, forward, move, run - matched NOTHING: across 188
+    /// animations only "idle" ever hit, so HasWalkClip was always false and
+    /// AT-ATs and AT-STs slid along with their legs frozen.
+    ///
+    /// The naming is a gait state machine rather than a loop: each clip is one
+    /// half-step, named for which foot is planted and which is coming down.
+    /// The _leftup/_rightup variants are the turning forms. Playing the two
+    /// base halves alternately reproduces the walk cycle.
+    /// </remarks>
+    static readonly string[] WalkClipNames =
+    {
+        "walk_leftfoot_rightfoot", "walk_rightfoot_leftfoot",
+
+        // Kept as fallbacks: mod walkers do not have to follow the stock
+        // naming, and a custom machine calling its cycle "walk" should still
+        // animate.
+        "walk", "walkforward", "forward", "move", "run",
+    };
+
+    /// <summary>The second half of the gait, alternated with the first.</summary>
+    static readonly string[] WalkClipNamesB =
+    {
+        "walk_rightfoot_leftfoot", "walk_leftfoot_rightfoot",
+    };
     static readonly string[] IdleClipNames = { "idle", "stand", "rest" };
 
     /// <summary>
@@ -84,6 +113,12 @@ public sealed class PhxWalkerLocomotion
     float StrideSpeed = 1f;
     float ClipDuration;
 
+    // The other half of the gait. Stock walkers author the cycle as two
+    // half-steps rather than one loop, so alternating them on each plant is
+    // what produces a walk rather than one leg twitching.
+    CraPlayer WalkPlayerB;
+    bool OnSecondHalf;
+
     /// <summary>Effect played where a foot lands; empty for none.</summary>
     public string FootstepEffect;
 
@@ -124,6 +159,7 @@ public sealed class PhxWalkerLocomotion
         if (string.IsNullOrEmpty(animationBank)) return;
 
         WalkPlayer = TryCreate(root, animationBank, WalkClipNames);
+        WalkPlayerB = TryCreate(root, animationBank, WalkClipNamesB);
         IdlePlayer = TryCreate(root, animationBank, IdleClipNames);
 
         HasWalkClip = WalkPlayer.IsValid();
@@ -178,7 +214,7 @@ public sealed class PhxWalkerLocomotion
         {
             if (WalkPlaying)
             {
-                WalkPlayer.SetPlaybackSpeed(0f);
+                ActiveWalk.SetPlaybackSpeed(0f);
                 WalkPlaying = false;
                 if (IdlePlayer.IsValid()) IdlePlayer.Play();
             }
@@ -188,9 +224,38 @@ public sealed class PhxWalkerLocomotion
         if (!WalkPlaying)
         {
             WalkPlaying = true;
-            WalkPlayer.Play();
+            ActiveWalk.Play();
         }
-        WalkPlayer.SetPlaybackSpeed(groundSpeed / StrideSpeed);
+        ActiveWalk.SetPlaybackSpeed(groundSpeed / StrideSpeed);
+    }
+
+    /// <summary>The gait half currently running.</summary>
+    CraPlayer ActiveWalk => (OnSecondHalf && WalkPlayerB.IsValid()) ? WalkPlayerB : WalkPlayer;
+
+    /// <summary>
+    /// Swap to the other half of the gait.
+    /// </summary>
+    /// <remarks>
+    /// Stock walkers author the cycle as two half-steps - walk_leftfoot_rightfoot
+    /// and walk_rightfoot_leftfoot - rather than one loop, so a single clip on
+    /// repeat plays the same half forever and the machine limps. Alternating on
+    /// each plant is what the naming is telling us to do. A walker whose bank
+    /// only had one clip keeps using it; ActiveWalk falls back when B is
+    /// invalid.
+    /// </remarks>
+    void AdvanceGait()
+    {
+        if (!WalkPlayerB.IsValid() || !WalkPlaying) return;
+
+        CraPlayer previous = ActiveWalk;
+        OnSecondHalf = !OnSecondHalf;
+        CraPlayer next = ActiveWalk;
+
+        if (!ReferenceEquals(previous, next))
+        {
+            previous.SetPlaybackSpeed(0f);
+            next.Play();
+        }
     }
 
     /// <summary>
@@ -256,6 +321,7 @@ public sealed class PhxWalkerLocomotion
         {
             foot.Planted = true;
             OnFootPlanted?.Invoke(foot.Node.position);
+            AdvanceGait();
             return;
         }
 

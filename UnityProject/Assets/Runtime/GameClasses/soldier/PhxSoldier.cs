@@ -365,7 +365,11 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         // FrameCount x BoneCount into one fixed buffer.
         PhxAnimationLoader.ApplyBindPose(transform, C.SkeletonName.Get());
 
-        Animator = new PhxHumanAnimator(transform, weapAnimBanks, C.SkeletonName.Get());
+        // AnimationName is the species vocabulary ("human", "droideka", "gam").
+        // It was never passed, so every species was animated as a human and
+        // non-humans resolved no clips at all.
+        Animator = new PhxHumanAnimator(transform, weapAnimBanks, C.SkeletonName.Get(),
+                                        C.AnimationName.Get());
 
 
         // this needs to happen after the Animator is initialized, since swicthing

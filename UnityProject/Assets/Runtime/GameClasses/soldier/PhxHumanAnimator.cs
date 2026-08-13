@@ -228,8 +228,13 @@ public struct PhxHumanAnimator
     // rig the constructor used.
     Transform AnimRoot;
 
+    // The odf's AnimationName - "human", "droideka", "gam", "wok". Everything
+    // used to assume "human", so no other species ever resolved a clip.
+    string Species;
 
-    public PhxHumanAnimator(Transform root, string[] weaponAnimBanks, string skeletonName = null)
+
+    public PhxHumanAnimator(Transform root, string[] weaponAnimBanks, string skeletonName = null,
+                            string species = "human")
     {
         Anim = CraAnimator.CreateNew(2, 128);
         ClipPlayers = new Dictionary<string, CraPlayer>();
@@ -241,6 +246,7 @@ public struct PhxHumanAnimator
         SkeletonName = skeletonName;
         OverrideStates = new Dictionary<string, int>();
         AnimRoot = root;
+        Species = string.IsNullOrEmpty(species) ? "human" : species;
 
         // This is a struct, so every field has to be definitely assigned before
         // the constructor may call any instance method (GetPlayer below is one).
@@ -260,18 +266,18 @@ public struct PhxHumanAnimator
         {
             if (PhxAnimationBanks.Banks["human"].TryGetValue(weaponAnimBanks[i], out PhxAnimationBanks.PhxAnimBank bank))
             {
-                Banks[i].StandIdle = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandIdle, true));
-                Banks[i].StandWalk = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandWalk, true));
-                Banks[i].StandRun = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandRun, true));
-                Banks[i].StandSprint = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandSprint, true));
-                Banks[i].StandBackward = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandBackward, true));
-                Banks[i].StandReload = Anim.AddState(1, GetPlayer(root, HUMANM_BANKS, bank.StandReload, false, "bone_a_spine"));
-                Banks[i].StandShootPrimary = Anim.AddState(1, GetPlayer(root, HUMANM_BANKS, bank.StandShootPrimary, false, "bone_a_spine"));
+                Banks[i].StandIdle = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "idle_emote", bank.StandIdle, true);
+                Banks[i].StandWalk = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "walkforward", bank.StandWalk, true);
+                Banks[i].StandRun = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "runforward", bank.StandRun, true);
+                Banks[i].StandSprint = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "sprint", bank.StandSprint, true);
+                Banks[i].StandBackward = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "runbackward", bank.StandBackward, true);
+                Banks[i].StandReload = AddSpeciesState(root, 1, Species, weaponAnimBanks[i], "reload", bank.StandReload, false, "bone_a_spine");
+                Banks[i].StandShootPrimary = AddSpeciesState(root, 1, Species, weaponAnimBanks[i], "shoot", bank.StandShootPrimary, false, "bone_a_spine");
                 Banks[i].StandShootSecondary = Anim.AddState(1, GetPlayer(root, HUMANM_BANKS, bank.StandShootSecondary, false, "bone_a_spine"));
-                Banks[i].StandAlertIdle = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandAlertIdle, true));
-                Banks[i].StandAlertWalk = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandAlertWalk, true));
-                Banks[i].StandAlertRun = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandAlertRun, true));
-                Banks[i].StandAlertBackward = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.StandAlertBackward, true));
+                Banks[i].StandAlertIdle = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "idle_emote", bank.StandAlertIdle, true);
+                Banks[i].StandAlertWalk = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "walkforward", bank.StandAlertWalk, true);
+                Banks[i].StandAlertRun = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "runforward", bank.StandAlertRun, true);
+                Banks[i].StandAlertBackward = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "runbackward", bank.StandAlertBackward, true);
                 Banks[i].Jump = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.Jump, false));
                 Banks[i].Fall = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.Fall, true));
                 Banks[i].LandSoft = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.LandSoft, false));
@@ -304,6 +310,73 @@ public struct PhxHumanAnimator
         Anim.SetState(1, CraSettings.STATE_NONE);
 
         Anim.AddOnStateFinishedListener(StateFinished);
+    }
+
+
+    /// <summary>
+    /// Clip names to try for one role, in preference order, for a species that
+    /// is not "human".
+    /// </summary>
+    /// <remarks>
+    /// The bank table above describes the human vocabulary only, and the
+    /// constructor reads it as Banks["human"] against the fixed HUMANM_BANKS
+    /// list. Every other species therefore asked for human clip names in human
+    /// banks and got nothing - which is why droidekas, ewoks, gamorreans and
+    /// wampas have no animation at all rather than the wrong animation.
+    ///
+    /// Stock species do not share one naming scheme. Recovered from the game's
+    /// own CRCs, a droideka's clips are droidekafp_rifle_idle / _walk / _shoot
+    /// / _reload - short, with an "fp" infix and no stand_ or _full - while a
+    /// battle droid uses the full human-style bdroid_rifle_stand_idle_emote.
+    /// So rather than encode a table per species, generate the plausible names
+    /// and let the loader tell us which exists.
+    /// </remarks>
+    static string[] SpeciesCandidates(string species, string posture, string motion)
+    {
+        return new[]
+        {
+            // human-style, which most humanoid species follow
+            $"{species}_{posture}_stand_{motion}",
+            $"{species}_{posture}_stand_{motion}_full",
+            $"{species}_{posture}_{motion}",
+            $"{species}_{posture}_{motion}_full",
+
+            // droideka-style: "fp" infix, no stance segment
+            $"{species}fp_{posture}_{motion}",
+
+            // last resort - species and motion only
+            $"{species}_{motion}",
+        };
+    }
+
+    /// <summary>
+    /// Register a state for a role, trying the species vocabulary and falling
+    /// back to whatever the human table asked for.
+    /// </summary>
+    int AddSpeciesState(Transform root, int layer, string species, string posture,
+                        string motion, string humanClip, bool loop, string mask = null)
+    {
+        // Humans keep exactly the behaviour they had - the curated table names
+        // specific variants ("idle_emote_full") that a generated list would not
+        // guess, and those are known good.
+        if (string.Equals(species, "human", System.StringComparison.OrdinalIgnoreCase))
+        {
+            return Anim.AddState(layer, GetPlayer(root, HUMANM_BANKS, humanClip, loop, mask));
+        }
+
+        string[] banks = { species, species + "_0", species + "_1", species + "fp" };
+        foreach (string candidate in SpeciesCandidates(species, posture, motion))
+        {
+            CraPlayer p = PhxAnimationLoader.CreatePlayer(root, banks, candidate, loop, mask, SkeletonName);
+            if (p.IsValid())
+            {
+                return Anim.AddState(layer, p);
+            }
+        }
+
+        // Nothing matched. Fall back to the human clip so the state exists and
+        // the state machine stays well-formed; it simply will not play.
+        return Anim.AddState(layer, GetPlayer(root, HUMANM_BANKS, humanClip, loop, mask));
     }
 
     public void PlayIntroAnim()

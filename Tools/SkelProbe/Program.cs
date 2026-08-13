@@ -27,14 +27,23 @@ namespace SkelProbe
     /// </summary>
     static class Program
     {
+        static string OdfFilter;
+        static bool ResolveNames;
+        static string LookupCsv = "lookup.csv";
+
         static int Main(string[] args)
         {
             var files = new List<string>();
             int limit = 6;
+            OdfFilter = null;
+            ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--limit" && i + 1 < args.Length)
+                if (args[i] == "--names") { ResolveNames = true; }
+                else if (args[i] == "--csv" && i + 1 < args.Length) { LookupCsv = args[++i]; }
+                else if (args[i] == "--odf" && i + 1 < args.Length) { OdfFilter = args[++i].ToLowerInvariant(); }
+                else if (args[i] == "--limit" && i + 1 < args.Length)
                 {
                     limit = int.Parse(args[++i]);
                 }
@@ -99,6 +108,9 @@ namespace SkelProbe
                 }
 
                 SoundCheck.Run(level, Path.GetFileName(path));
+                AnimNameProbe.Run(level, Path.GetFileName(path));
+                if (OdfFilter != null) OdfProbe.Run(level, OdfFilter);
+                if (ResolveNames) CrcNames.Run(level, LookupCsv, limit);
                 ProbeBanks(banks, jointsByCRC, limit);
                 CompareToModelSkeletons(level, jointsByCRC, limit);
                 Console.WriteLine();
