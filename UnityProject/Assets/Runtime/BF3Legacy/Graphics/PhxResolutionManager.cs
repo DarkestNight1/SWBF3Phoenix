@@ -28,6 +28,14 @@ public class PhxResolutionManager : MonoBehaviour
         QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
         QualitySettings.lodBias = 2f;
 
+        // Frame pacing. Without this the project runs every quality tier at
+        // vSyncCount 0, and an uncapped borderless-fullscreen window presents
+        // out of step with the compositor - judder that reads as a low frame
+        // rate even when the frame rate is high.
+        QualitySettings.vSyncCount = cfg.VSync ? 1 : 0;
+        Application.targetFrameRate = cfg.VSync ? -1
+                                                : (cfg.TargetFrameRate > 0 ? cfg.TargetFrameRate : -1);
+
         Debug.Log($"[BF3Legacy] Resolution set to {best.width}x{best.height} " +
                   $"(requested {cfg.TargetWidth}x{cfg.TargetHeight})");
     }

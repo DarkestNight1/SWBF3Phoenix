@@ -154,13 +154,50 @@ public class PhxMusicManager
     {
         AmbientMusic[teamIdx] = musicName;
 
+        // Usually a no-op at the point it is called. Era scripts set ambient
+        // music from ScriptInit, which runs before the match exists and before
+        // the player has a team - so this returns early and the name is only
+        // stored. OnMatchStart is what actually starts it, once there is a
+        // player to pick a team's track for. Without that pairing the music is
+        // configured and never heard, which is exactly what happened.
         PhxMatch match = PhxGame.GetMatch();
-        if (match == null || MatchEnded) return;
+        if (match == null || match.Player == null || MatchEnded) return;
         if (teamIdx != 0 && teamIdx != match.Player.Team) return;
 
         PlayMusic(musicName, loop: true);
     }
 
+    /// <summary>
+    /// Start the ambient track the mission configured, now that there is a
+    /// player and a team to choose it for.
+    /// </summary>
+    /// <remarks>
+    /// Falls back to team 0, which is how the scripts express "everyone hears
+    /// this" - most stock maps set only that one.
+    /// </remarks>
+    public void OnMatchStart()
+    {
+        MatchEnded = false;
+
+        PhxMatch match = PhxGame.GetMatch();
+        if (match == null || match.Player == null) return;
+
+        int playerTeam = match.Player.Team;
+        if (!AmbientMusic.TryGetValue(playerTeam, out string musicName) ||
+            string.IsNullOrEmpty(musicName))
+        {
+            AmbientMusic.TryGetValue(0, out musicName);
+        }
+
+        if (string.IsNullOrEmpty(musicName))
+        {
+            Debug.Log("[VO/Music] No ambient music configured for this map; " +
+                      "the mission script never called SetAmbientMusic.");
+            return;
+        }
+
+        PlayMusic(musicName, loop: true);
+    }
     public void SetVictoryMusic(int teamIdx, string soundName) => VictoryMusic[teamIdx] = soundName;
     public void SetDefeatMusic(int teamIdx, string soundName) => DefeatMusic[teamIdx] = soundName;
     public void SetSoundEffect(string eventName, string soundName) => SoundEffects[eventName] = soundName;
@@ -175,7 +212,7 @@ public class PhxMusicManager
     public void BroadcastVoiceOver(string voName, int teamIdx)
     {
         PhxMatch match = PhxGame.GetMatch();
-        if (match == null) return;
+        if (match == null || match.Player == null) return;
         if (teamIdx != 0 && teamIdx != match.Player.Team) return;
 
         AudioClip clip = ResolveClip(voName);
@@ -207,6 +244,7 @@ public class PhxMusicManager
         PhxMatch match = PhxGame.GetMatch();
         if (match == null) return;
 
+        if (match.Player == null) return;
         int playerTeam = match.Player.Team;
         bool won = winningTeam == playerTeam || match.IsFriend(winningTeam, playerTeam);
 

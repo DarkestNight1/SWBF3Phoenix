@@ -247,6 +247,33 @@ public class PhxEnvironment
         return LuaRT;
     }
 
+    /// <summary>
+    /// Every wrapper of a type across all mounted levels.
+    /// </summary>
+    /// <remarks>
+    /// Container.Get resolves one wrapper by name, which is enough when the
+    /// caller knows what it is looking for. Sound does not work that way: a
+    /// clip lives inside a SoundBank rather than at the level's top level, so
+    /// finding one means walking every bank in every mounted level.
+    /// </remarks>
+    public T[] FindAll<T>() where T : NativeWrapper, new()
+    {
+        var results = new List<T>();
+        if (EnvCon == null) return results.ToArray();
+
+        foreach (SWBF2Handle handle in EnvCon.GetLoadedLevels())
+        {
+            Level level = EnvCon.GetLevel(handle);
+            if (level == null) continue;
+
+            T[] found;
+            try { found = level.Get<T>(); }
+            catch { continue; }
+            if (found != null) results.AddRange(found);
+        }
+        return results.ToArray();
+    }
+
     public T Find<T>(string name) where T : NativeWrapper, new()
     {
         return EnvCon.Get<T>(name);

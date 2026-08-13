@@ -79,7 +79,7 @@ namespace SkelProbe
                 AnimationSkeleton[] skels = level.Get<AnimationSkeleton>();
                 AnimationBank[] banks = level.Get<AnimationBank>();
 
-                if (skels.Length == 0 && banks.Length == 0) continue;
+                if (skels.Length == 0 && banks.Length == 0) { SoundCheck.Run(level, Path.GetFileName(path)); continue; }
 
                 Console.WriteLine($"=== {Path.GetFileName(path)} : {skels.Length} skeleton(s), {banks.Length} bank(s)");
 
@@ -98,6 +98,7 @@ namespace SkelProbe
                     Console.WriteLine($"  ... ({skels.Length} skeletons total)");
                 }
 
+                SoundCheck.Run(level, Path.GetFileName(path));
                 ProbeBanks(banks, jointsByCRC, limit);
                 CompareToModelSkeletons(level, jointsByCRC, limit);
                 Console.WriteLine();

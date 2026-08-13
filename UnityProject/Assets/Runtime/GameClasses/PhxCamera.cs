@@ -10,6 +10,13 @@ public class PhxCamera : MonoBehaviour
         Free,
         Follow,
         Track,
+
+        /// <summary>
+        /// Player death. Pulls back off the body and drifts, biased toward
+        /// whoever did it - BF2 shows you your corpse and your killer rather
+        /// than freezing on a first-person view of the ground.
+        /// </summary>
+        Death,
     }
                      
     public CamMode    Mode { get; private set; } = CamMode.Free;
@@ -18,6 +25,12 @@ public class PhxCamera : MonoBehaviour
     public Vector3    PositionOffset             = new Vector3(0f, 2f, -2f);
     public float      FollowSpeed                = 100.0f;
     public float      MouseSensitivity           = 5f;
+
+    // Death camera framing. Roughly BF2's: a few metres back, a little above,
+    // turning slowly so the moment reads as deliberate.
+    public float      DeathCamDistance           = 4.5f;
+    public float      DeathCamHeight             = 2.0f;
+    public float      DeathCamDriftDegrees       = 8f;
 
 
     IPhxControlableInstance FollowInstance;
@@ -52,6 +65,41 @@ public class PhxCamera : MonoBehaviour
         transform.rotation = t.Rotation;
     }
 
+
+    // --- death camera --------------------------------------------------
+    Transform DeathVictim;
+    Transform DeathKiller;
+    float DeathCamTime;
+    Vector3 DeathCamPivot;
+
+    /// <summary>
+    /// Watch the player's own death.
+    /// </summary>
+    /// <remarks>
+    /// BF2 pulls the view off the body and holds it there, turned toward
+    /// whoever killed you, until the spawn screen comes up. Phoenix left the
+    /// camera in Follow on a pawn that had just been unassigned, so the view
+    /// stayed locked to a corpse's last aim direction - which reads as the game
+    /// hanging rather than as dying.
+    ///
+    /// The killer is optional: a fall, a vehicle explosion or a stray
+    /// explosion has none, and in that case the camera simply looks down at
+    /// the body.
+    /// </remarks>
+    public void Death(Transform victim, Transform killer)
+    {
+        Mode = CamMode.Death;
+        DeathVictim = victim;
+        DeathKiller = killer;
+        DeathCamTime = 0f;
+        FollowInstance = null;
+
+        // Remember where the body is now. The corpse keeps simulating for a
+        // couple of seconds and can slide or roll, and a camera that chases it
+        // turns a death into a rollercoaster.
+        DeathCamPivot = victim != null ? victim.position : transform.position;
+    }
+
     public void Free()
     {
         Mode = CamMode.Free;
@@ -81,6 +129,64 @@ public class PhxCamera : MonoBehaviour
                 float newRotationX = transform.localEulerAngles.y + Input.GetAxis("Mouse X") * FreeRotationSpeed;
                 float newRotationY = transform.localEulerAngles.x - Input.GetAxis("Mouse Y") * FreeRotationSpeed;
                 transform.localEulerAngles = new Vector3(newRotationY, newRotationX, 0f);
+            }
+        }
+        else if (Mode == CamMode.Death)
+        {
+            DeathCamTime += deltaTime;
+
+            // The body can slide as it settles; follow it loosely so the shot
+            // stays framed without chasing every twitch.
+            if (DeathVictim != null)
+            {
+                DeathCamPivot = Vector3.Lerp(DeathCamPivot, DeathVictim.position, deltaTime * 2f);
+            }
+
+            Vector3 focus = DeathCamPivot + Vector3.up * 1.0f;
+
+            // Face the killer if there was one, so you can see what hit you.
+            // Otherwise hold whatever direction the camera already had, which
+            // is where the player was last looking.
+            Vector3 viewDir;
+            if (DeathKiller != null)
+            {
+                viewDir = DeathKiller.position - focus;
+                viewDir.y = 0f;
+            }
+            else
+            {
+                viewDir = transform.forward;
+                viewDir.y = 0f;
+            }
+            if (viewDir.sqrMagnitude < 1e-4f) viewDir = Vector3.forward;
+            viewDir.Normalize();
+
+            // Ease back and up over the first second, then drift slowly around
+            // the body. Both are what makes it read as a considered shot
+            // rather than a camera that stopped.
+            float pullBack = Mathf.Lerp(1.5f, DeathCamDistance, Mathf.Clamp01(DeathCamTime));
+            float height = Mathf.Lerp(0.5f, DeathCamHeight, Mathf.Clamp01(DeathCamTime));
+            float drift = DeathCamTime * DeathCamDriftDegrees;
+
+            Vector3 back = Quaternion.Euler(0f, drift, 0f) * -viewDir;
+            Vector3 wanted = focus + back * pullBack + Vector3.up * height;
+
+            // Keep the camera out of geometry - a death cam inside a wall shows
+            // the inside of a wall.
+            if (Physics.Linecast(focus, wanted, out RaycastHit hit,
+                                 PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore))
+            {
+                wanted = hit.point + hit.normal * 0.3f;
+            }
+
+            transform.position = Vector3.Lerp(transform.position, wanted, deltaTime * 4f);
+
+            Vector3 lookAt = focus - transform.position;
+            if (lookAt.sqrMagnitude > 1e-4f)
+            {
+                transform.rotation = Quaternion.Slerp(transform.rotation,
+                                                      Quaternion.LookRotation(lookAt),
+                                                      deltaTime * 4f);
             }
         }
         else if (Mode == CamMode.Follow)

@@ -415,6 +415,18 @@ public class ModelLoader : Loader {
 
         //Below, we handle 
         SkinnedMeshRenderer skinRenderer = newObject.AddComponent<SkinnedMeshRenderer>();
+
+        // Motion vectors, or TAA smears every animated character.
+        //
+        // HDRP resolves temporal antialiasing by blending each pixel against
+        // history, and it needs to know where that pixel was last frame. A
+        // SkinnedMeshRenderer does not report that unless asked: without
+        // skinnedMotionVectors the skinning is invisible to the motion pass,
+        // so TAA blends a moving soldier against where it used to be and the
+        // result reads as a permanently slightly-out-of-focus character.
+        // Motion blur has the same dependency.
+        skinRenderer.skinnedMotionVectors = true;
+        skinRenderer.motionVectorGenerationMode = MotionVectorGenerationMode.Object;
         ReadOnlyCollection<LibBone> bonesSWBF = model.Skeleton;
 
         /*

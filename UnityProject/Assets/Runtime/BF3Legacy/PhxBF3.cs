@@ -289,6 +289,20 @@ public class PhxBF3Config
     public int TargetWidth = 3840;
     public int TargetHeight = 2160;
     public bool UseDynamicResolution = true;
+
+    /// <summary>
+    /// Sync presentation to the display. On by default.
+    /// </summary>
+    /// <remarks>
+    /// Every quality tier shipped with vSyncCount 0. Uncapped presentation
+    /// into a borderless fullscreen window judders regardless of how high the
+    /// frame rate is, because frames finish out of step with the compositor -
+    /// which reads as choppiness even on hardware with headroom to spare.
+    /// </remarks>
+    public bool VSync = true;
+
+    /// <summary>Frame cap when VSync is off. 0 leaves it uncapped.</summary>
+    public int TargetFrameRate = 0;
     public float RenderScale = 1.0f;
     public bool RayTracedEffects = false;     // only honored on capable hardware
 

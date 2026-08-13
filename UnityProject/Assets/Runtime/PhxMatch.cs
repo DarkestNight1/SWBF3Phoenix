@@ -1706,6 +1706,11 @@ public class PhxMatch
     public void StartMatch()
     {
         AvailablePauseMenu = true;
+
+        // Ambient music the mission configured during ScriptInit, which ran
+        // before there was a player to pick a team track for. Started here
+        // rather than there, or it is set and never heard.
+        PhxMusicManager.Instance?.OnMatchStart();
         ShowCharacterSelection();
         CAM.Fixed(RTS.GetNextCameraShot());
     }

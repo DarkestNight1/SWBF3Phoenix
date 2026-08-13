@@ -595,6 +595,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         // the link, and decides if we hand back to the spawn menu below.
         bool wasPlayer = Controller is PhxPlayerController;
 
+        // Capture the killer before UnAssign clears LastAttacker's link.
+        PhxInstance killerForCam = LastAttacker?.Pawn?.GetInstance();
+
         // Release the controller. Tick/TickPhysics both early-out on IsDead, so
         // the body is inert from here on regardless of what still references it.
         UnAssign();
@@ -613,6 +616,12 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
         if (wasPlayer)
         {
+            // Get the camera off the corpse. It was left in Follow on a pawn
+            // that had just been unassigned, so the view froze on a dead
+            // soldier's last aim direction - which reads as the game hanging
+            // rather than as dying.
+            CAM?.Death(transform, killerForCam != null ? killerForCam.transform : null);
+
             StartCoroutine(ReturnPlayerToSpawnMenu());
         }
     }
