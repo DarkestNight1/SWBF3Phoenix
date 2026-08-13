@@ -1954,6 +1954,178 @@ public static class PhxLuaAPI
 	{
 		PhxLuaEvents.Register(PhxLuaEvents.Event.OnTeamPointsChangeTeam, callback, teamIdx);
 	}
+
+	// ================================================================
+	// Campaign
+	// ================================================================
+	//
+	// BF2 ships its campaign in Lua - ifs_campaign_menu, campaign_data, the
+	// briefing and battle-card screens - and Phoenix already runs that Lua.
+	// What it needs underneath is this set of callbacks. None of them existed,
+	// which is why the campaign has never been reachable: the first thing the
+	// campaign shell does is ask the engine what the player has already done,
+	// and an unimplemented callback leaves the script without an answer.
+	//
+	// State lives in BFCampaign, which persists it beside the BF3 Legacy
+	// config. Nothing routes the player into the campaign shell yet, so these
+	// stay dormant in practice - they run only when campaign Lua calls them.
+
+	/// <summary>How far the player has got. 0 for a key never reached.</summary>
+	public static float ScriptCB_GetSPProgress(string key)
+	{
+		return BFCampaign.GetProgress(key);
+	}
+
+	/// <summary>
+	/// Record progress. Also accepts the no-key form some scripts use, where
+	/// the value is overall campaign progress.
+	/// </summary>
+	public static void ScriptCB_SetSPProgress(string key, float value)
+	{
+		BFCampaign.SetProgress(key, value);
+	}
+
+	public static void ScriptCB_SetSPProgress(float value)
+	{
+		BFCampaign.SetProgress("campaign", value);
+	}
+
+	/// <summary>Copy the live campaign state into a named slot.</summary>
+	public static void ScriptCB_SaveCampaignState(string name)
+	{
+		BFCampaign.SaveState(name);
+	}
+
+	public static void ScriptCB_SaveCampaignState()
+	{
+		BFCampaign.SaveState(null);
+	}
+
+	/// <summary>Make a saved slot live. No name means the most recent.</summary>
+	public static bool ScriptCB_LoadCampaignState(string name)
+	{
+		return BFCampaign.LoadState(name);
+	}
+
+	public static bool ScriptCB_LoadCampaignState()
+	{
+		return BFCampaign.LoadState(null);
+	}
+
+	/// <summary>Start a fresh campaign. Saved slots are kept.</summary>
+	public static void ScriptCB_ClearCampaignState()
+	{
+		BFCampaign.ClearState();
+	}
+
+	public static bool ScriptCB_IsCampaignStateSaved()
+	{
+		return BFCampaign.HasSavedState;
+	}
+
+	/// <summary>
+	/// Number of saved campaigns.
+	/// </summary>
+	/// <remarks>
+	/// Stock almost certainly hands back a table of names here. PhxLuaRuntime
+	/// can push numbers, strings, booleans and functions to Lua but not tables,
+	/// so a count is the most useful thing that can be returned truthfully. A
+	/// shell that only asks "are there saves" gets a correct answer; one that
+	/// wants to list them by name needs table-push support in the runtime
+	/// first, and BFCampaign.GetSavedNames is already there to feed it.
+	/// </remarks>
+	public static int ScriptCB_GetSavedCampaignList()
+	{
+		return BFCampaign.GetSavedNames().Count;
+	}
+
+	/// <summary>
+	/// The shell entering a mission.
+	/// </summary>
+	/// <remarks>
+	/// Variadic because the argument shape is not documented and differs
+	/// between the campaign and instant-action paths. The first string argument
+	/// that looks like a map script is taken as the mission; anything else is
+	/// recorded and ignored rather than dropped silently, so a shape we did not
+	/// anticipate shows up in the log instead of as a mission that never
+	/// starts.
+	/// </remarks>
+	public static void ScriptCB_EnterMission(params object[] args)
+	{
+		string mission = null;
+		for (int i = 0; i < args.Length; ++i)
+		{
+			if (args[i] is string s && !string.IsNullOrEmpty(s))
+			{
+				mission = s;
+				break;
+			}
+		}
+
+		if (string.IsNullOrEmpty(mission))
+		{
+			Debug.LogWarning($"[BFCampaign] ScriptCB_EnterMission called with {args.Length} " +
+							 "argument(s) and no map script among them; ignoring.");
+			return;
+		}
+
+		BFCampaign.QueueMission(mission);
+		Debug.Log($"[BFCampaign] Mission requested: '{mission}'.");
+	}
+
+	/// <summary>Mission names the shell wants remembered, in order.</summary>
+	public static void ScriptCB_SetMissionNames(params object[] args)
+	{
+		var names = new System.Collections.Generic.List<string>();
+		for (int i = 0; i < args.Length; ++i)
+		{
+			if (args[i] is string s && !string.IsNullOrEmpty(s)) names.Add(s);
+		}
+		BFCampaign.SetMissionNames(names);
+	}
+
+	public static void ScriptCB_ClearMissionSetup()
+	{
+		BFCampaign.ClearMissionSetup();
+	}
+
+	/// <summary>Queue a mission for the shell's mission list.</summary>
+	public static void ScriptCB_SaveMissionSetup(params object[] args)
+	{
+		for (int i = 0; i < args.Length; ++i)
+		{
+			if (args[i] is string s && !string.IsNullOrEmpty(s))
+			{
+				BFCampaign.QueueMission(s);
+			}
+		}
+	}
+
+	public static int ScriptCB_GetMaxMissionQueue()
+	{
+		return BFCampaign.MaxMissionQueue;
+	}
+
+	public static void ScriptCB_UnlockUnlockable(string name)
+	{
+		BFCampaign.Unlock(name);
+		BFCampaign.Save();
+	}
+
+	public static bool ScriptCB_UnlockableState(string name)
+	{
+		return BFCampaign.IsUnlocked(name);
+	}
+
+	public static bool ScriptCB_GetInTrainingMission()
+	{
+		return BFCampaign.InTrainingMission;
+	}
+
+	public static void ScriptCB_SetInTrainingMission(bool inTraining)
+	{
+		BFCampaign.InTrainingMission = inTraining;
+	}
 }
 
 public static class PhxLuaEvents

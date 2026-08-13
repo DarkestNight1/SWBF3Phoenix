@@ -1519,9 +1519,35 @@ public class PhxMatch
         Debug.Log($"[BF3Legacy] Match over - {name} (team {winningTeam}) wins.");
 
         PhxMusicManager.Instance?.OnMatchEnd(winningTeam);
+
+        RecordCampaignResult(winningTeam);
     }
 
     /// <summary>
+    /// <summary>
+    /// If this was a campaign mission and the player's side won, remember it.
+    /// </summary>
+    /// <remarks>
+    /// Campaign objectives live in each mission's own Lua, and the mission
+    /// signals the outcome by ending the match - so hooking the result here
+    /// works for every campaign map, including addon ones, without
+    /// reimplementing objectives Phoenix already runs.
+    ///
+    /// BF2 names campaign scripts with a trailing _c, the same way conquest is
+    /// _con, so the mode is read off the script name rather than from a list
+    /// that would need maintaining.
+    /// </remarks>
+    void RecordCampaignResult(int winningTeam)
+    {
+        string script = PhxGame.Instance != null ? PhxGame.Instance.CurrentMapScript : null;
+        if (!BFCampaign.IsCampaignScript(script)) return;
+
+        // A campaign mission is only complete if the player's own side won.
+        if (Player == null || winningTeam != Player.Team) return;
+
+        BFCampaign.MarkComplete(script);
+    }
+
     /// Every controller fighting for a team, player included, for the
     /// scoreboard. Keeps AIControllers private - callers get a filtered copy
     /// rather than the live list.
