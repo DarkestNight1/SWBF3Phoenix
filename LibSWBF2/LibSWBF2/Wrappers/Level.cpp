@@ -475,8 +475,11 @@ namespace LibSWBF2::Wrappers
 		SoundStream stream;
 		if (SoundStream::FromChunk(streamChunk, stream))
 		{
+			// Read the name before handing the stream over: Add moves from it.
+			FNVHash streamName = stream.GetHashedName();
+
 			auto streamIndex = m_SoundStreams.Add(std::move(stream));
-			m_NameToIndexMaps->SoundStreamHashToIndex.emplace(stream.GetHashedName(), streamIndex);
+			m_NameToIndexMaps->SoundStreamHashToIndex.emplace(streamName, streamIndex);
 
 			return &(m_SoundStreams[streamIndex]);
 		}

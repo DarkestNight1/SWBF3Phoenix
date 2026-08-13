@@ -31,6 +31,10 @@ namespace SkelProbe
         static bool ResolveNames;
         static bool DestructMode;
         static bool SubLvlMode;
+        static bool SoundMode;
+        static bool SndChunkMode;
+        static bool PairMode;
+        static bool StreamMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -40,11 +44,19 @@ namespace SkelProbe
             OdfFilter = null;
             DestructMode = false;
             SubLvlMode = false;
+            SoundMode = false;
+            SndChunkMode = false;
+            PairMode = false;
+            StreamMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--sublvl") { SubLvlMode = true; }
+                if (args[i] == "--streams") { StreamMode = true; }
+                else if (args[i] == "--soundpair") { PairMode = true; }
+                else if (args[i] == "--sndchunks") { SndChunkMode = true; }
+                else if (args[i] == "--soundreach") { SoundMode = true; }
+                else if (args[i] == "--sublvl") { SubLvlMode = true; }
                 else if (args[i] == "--destruct") { DestructMode = true; }
                 else if (args[i] == "--names") { ResolveNames = true; }
                 else if (args[i] == "--csv" && i + 1 < args.Length) { LookupCsv = args[++i]; }
@@ -73,8 +85,13 @@ namespace SkelProbe
                 return 2;
             }
 
+            if (PairMode) { SoundPair.Run(files.ToArray()); return 0; }
+
             foreach (string path in files)
             {
+                if (StreamMode) { StreamProbe.Run(path, LookupCsv); continue; }
+                if (SndChunkMode) { SndChunks.Run(path); continue; }
+                if (SoundMode) { SoundReach.Run(path, Path.GetFileName(path)); continue; }
                 if (SubLvlMode) { SubLvlProbe.Run(path, LookupCsv); continue; }
                 if (DestructMode) { DestructProbe.Run(path, Path.GetFileName(path)); continue; }
                 Level level;

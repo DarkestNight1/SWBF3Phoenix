@@ -72,7 +72,36 @@ public class PhxMusicManager
         {
             Object.Destroy(Instance.Host);
         }
+        Instance.ReleaseStreamBuffer();
         Instance = null;
+    }
+
+    /// <summary>
+    /// Scratch buffer the native stream decodes through, allocated once.
+    /// </summary>
+    /// <remarks>
+    /// SetFileStreamBuffer stores the raw pointer, and the stream wrapper is
+    /// cached inside the Level for the rest of the session - so this has to
+    /// outlive any single decode. One shared buffer avoids handing the native
+    /// side a pointer that a later GC or free could invalidate.
+    /// </remarks>
+    const int StreamBufferBytes = 1 << 16;
+    System.IntPtr StreamBuffer = System.IntPtr.Zero;
+
+    System.IntPtr GetStreamBuffer()
+    {
+        if (StreamBuffer == System.IntPtr.Zero)
+        {
+            StreamBuffer = System.Runtime.InteropServices.Marshal.AllocHGlobal(StreamBufferBytes);
+        }
+        return StreamBuffer;
+    }
+
+    void ReleaseStreamBuffer()
+    {
+        if (StreamBuffer == System.IntPtr.Zero) return;
+        System.Runtime.InteropServices.Marshal.FreeHGlobal(StreamBuffer);
+        StreamBuffer = System.IntPtr.Zero;
     }
 
     void Init()
@@ -367,7 +396,16 @@ public class PhxMusicManager
             ReportStreamFailure(handle, segmentName, "stream not found in that lvl");
             return null;
         }
-        if (!stream.SetSegment(HashUtils.GetFNV(segmentName)))
+
+        // The Data chunk only recorded where each segment begins - none of the
+        // samples were loaded - so the stream needs an open reader and a
+        // scratch buffer before a segment can be selected. Without both,
+        // SetSegment refuses and every track comes back silent.
+        stream.SetFileReader(reader);
+        stream.SetFileStreamBuffer(GetStreamBuffer(), StreamBufferBytes);
+
+        uint segmentHash = HashUtils.GetFNV(segmentName);
+        if (!stream.SetSegment(segmentHash))
         {
             ReportStreamFailure(handle, segmentName, "segment not present in the stream");
             return null;
@@ -388,6 +426,10 @@ public class PhxMusicManager
             if (read < ChunkSamples) break;
         }
 
+        // The native stream holds the reader as a raw pointer for the whole
+        // decode; the wrapper's finalizer would close it out from under us.
+        System.GC.KeepAlive(reader);
+
         if (pcm.Count == 0)
         {
             ReportStreamFailure(handle, segmentName, "segment decoded to zero samples");
@@ -395,7 +437,16 @@ public class PhxMusicManager
         }
 
         int channels = (int)Mathf.Max(1, stream.NumChannels);
-        AudioClip clip = AudioClip.Create(segmentName, pcm.Count / channels, channels, 44100, false);
+
+        // Rate comes from the segment header. Stock music is 44.1kHz, but
+        // voice-over segments are routinely lower, and playing those back at a
+        // hardcoded 44100 would pitch them up.
+        Sound segment = stream.GetSound(segmentHash);
+        int rate = segment != null && segment.SampleRate > 0 ? segment.SampleRate : 44100;
+
+        // ReadSamplesUnity returns interleaved samples across every channel,
+        // whereas AudioClip.Create wants the per-channel frame count.
+        AudioClip clip = AudioClip.Create(segmentName, pcm.Count / channels, channels, rate, false);
         clip.SetData(pcm.ToArray(), 0);
         return clip;
     }

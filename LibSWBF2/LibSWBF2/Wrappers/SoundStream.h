@@ -6,6 +6,7 @@
 //#include "Audio/AudioStreamer.h"
 #include "Types/LibString.h"
 #include "Types/List.h"
+#include <memory>
 
 
 
@@ -37,7 +38,7 @@ namespace LibSWBF2::Wrappers
 		friend List<SoundStream>;
 
 		SoundStream() = default;
-		~SoundStream();
+		~SoundStream() = default;
 
 
 		Stream* p_StreamChunk;
@@ -64,12 +65,23 @@ namespace LibSWBF2::Wrappers
 		/*
 		Decoder, there was originally one for each substream,
 		but soundmunge exe says substream interleave will never interrupt a
-		IMAADPCM block, so one will do. 
+		IMAADPCM block, so one will do.
 		*/
 
-		SoundDecoder * p_Decoder = nullptr;
+		/*
+		Shared rather than raw because Level keeps these in a List, and List
+		stores elements by copy-assignment: Add moves into a slot and Resize
+		copies the whole array into a bigger one, destroying the originals.
+		A raw pointer plus a destructor that deletes it means the temporary
+		frees the decoder the stored copy still points at, so the first
+		SetSegment dereferences freed memory. Sharing ownership makes every
+		one of those copies safe, and disposes of the maps wrapper that the
+		old destructor leaked.
+		*/
 
-		class SoundMapsWrapper* p_NameToIndexMaps;
+		std::shared_ptr<SoundDecoder> p_Decoder;
+
+		std::shared_ptr<SoundMapsWrapper> p_NameToIndexMaps;
 
 
 

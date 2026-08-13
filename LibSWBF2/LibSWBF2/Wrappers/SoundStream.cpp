@@ -19,10 +19,6 @@ namespace LibSWBF2::Wrappers
 	using Types::SoundClip;
 
 
-	SoundStream::~SoundStream()
-	{
-		delete p_Decoder;
-	}
 
 
 	bool SoundStream::SetFileReader(FileReader * reader)
@@ -115,14 +111,30 @@ namespace LibSWBF2::Wrappers
     	size_t BytesRead;
 
 
-    	while (NumSamplesRead < numSamplesToRead && BytesLeftInSegment() > 0)
+    	// Loop on "is there anything left to decode", which means bytes still in
+    	// the buffer as well as bytes still in the segment. Gating on the
+    	// segment alone dropped everything held in the buffer once the last
+    	// file read had consumed the segment - for a segment smaller than one
+    	// buffer that is most of the audio, and for every other segment it is
+    	// the tail.
+    	while (NumSamplesRead < numSamplesToRead)
     	{
     		NumBytesLeftInBuffer = m_StreamBufferDataSize - m_StreamBufferReadOffset;
 
     		if (NumBytesLeftInBuffer <= 0)
     		{
+    			if (BytesLeftInSegment() <= 0)
+    			{
+    				break;
+    			}
+
     			ReadBytesFromStream(m_SizeStreamBuffer);
 	    		NumBytesLeftInBuffer = m_StreamBufferDataSize - m_StreamBufferReadOffset;
+
+	    		if (NumBytesLeftInBuffer <= 0)
+	    		{
+	    			break;
+	    		}
     		}
 
     		int32_t NumSamplesDecoded;
@@ -138,6 +150,13 @@ namespace LibSWBF2::Wrappers
 	    	else 
 	    	{
 	    		return -1;
+	    	}
+
+	    	// A decoder that consumes nothing and produces nothing would spin
+	    	// here forever now that the segment no longer bounds the loop.
+	    	if (NumSamplesDecoded <= 0 && BytesRead == 0)
+	    	{
+	    		break;
 	    	}
 
 	    	NumSamplesRead += NumSamplesDecoded;
@@ -176,8 +195,16 @@ namespace LibSWBF2::Wrappers
     bool SoundStream::SetSegment(FNVHash segmentNameHash)
     {
     	if (p_Reader == nullptr)
-    	{	
+    	{
     		LOG_ERROR("Cannot set segment, reader is unassigned!");
+    		return false;
+    	}
+
+    	// FromChunk builds the decoder inside a loop over the substream count,
+    	// so a stream declaring zero substreams leaves it null.
+    	if (p_Decoder == nullptr)
+    	{
+    		LOG_ERROR("Cannot set segment, stream has no decoder (unsupported format?)!");
     		return false;
     	}
 
@@ -219,18 +246,18 @@ namespace LibSWBF2::Wrappers
 		}
 
 		out.p_StreamChunk = streamChunk;
-		out.p_NameToIndexMaps = new SoundMapsWrapper();
+		out.p_NameToIndexMaps = std::make_shared<SoundMapsWrapper>();
 
 		for (int i = 0; i < streamChunk -> p_Info -> m_NumSubstreams; i++)
 		{
 			auto format = streamChunk -> p_Info -> m_Format;
 			if (format == ESoundFormat::IMAADPCM)
 			{
-				out.p_Decoder = new IMAADPCMDecoder(streamChunk -> p_Info -> m_NumChannels, streamChunk -> p_Info -> m_ChannelInterleave);
+				out.p_Decoder = std::make_shared<IMAADPCMDecoder>(streamChunk -> p_Info -> m_NumChannels, streamChunk -> p_Info -> m_ChannelInterleave);
 			}
 			else if (format == ESoundFormat::PCM16)
 			{
-				out.p_Decoder = new PCM16Decoder();
+				out.p_Decoder = std::make_shared<PCM16Decoder>();
 			}
 		}
 
@@ -271,7 +298,7 @@ namespace LibSWBF2::Wrappers
 	bool SoundStream::HasSegment(FNVHash segmentName) const
 	{
 		auto it = p_NameToIndexMaps->SoundHashToIndex.find(segmentName);
-		return it == p_NameToIndexMaps->SoundHashToIndex.end();
+		return it != p_NameToIndexMaps->SoundHashToIndex.end();
 	}
 
 
