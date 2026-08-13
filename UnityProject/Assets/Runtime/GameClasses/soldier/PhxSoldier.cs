@@ -499,6 +499,29 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     PhxPawnController LastAttacker;
 
     // Damage with hit context, so lethal saber hits can dismember (BF3 Legacy)
+    /// <summary>
+    /// Kill this soldier outright, crediting <paramref name="instigator"/>.
+    /// </summary>
+    /// <remarks>
+    /// For deaths that are not a damage event with a direction: the vehicle you
+    /// were riding exploded, or the turret you were manning was destroyed. BF2
+    /// kills occupants in both cases; Phoenix used to eject them, which left
+    /// a squad walking away unhurt from a tank that had just blown up.
+    /// </remarks>
+    public void KillInPlace(PhxPawnController instigator = null)
+    {
+        if (IsDead) return;
+
+        if (instigator != null) LastAttacker = instigator;
+
+        CurHealth.Set(0f);
+
+        // Hit position is the soldier itself, so the death animation picks a
+        // direction from its own facing rather than from a shot that never
+        // happened.
+        Die(transform.position, false);
+    }
+
     public void AddDamageFrom(float damage, Vector3 hitPos, bool isSaber, PhxPawnController instigator = null)
     {
         if (IsDead)
@@ -897,7 +920,19 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             Body = null;
         }
 
-        GetComponent<CapsuleCollider>().enabled = false;
+        // Exposed occupants stay hittable.
+        //
+        // Disabling the collider unconditionally is why nobody could be killed
+        // in a seat: no collider, no raycast or overlap hit, so a gunner sitting
+        // in the open was invulnerable. BF2 makes that distinction by whether
+        // you can see them, and the seat already encodes it - a section with a
+        // PilotPosition shows the soldier (an open turret, a speeder bike), one
+        // without hides them inside the hull.
+        //
+        // So the renderer and the collider now agree: visible means shootable,
+        // hidden means protected.
+        bool exposed = section.PilotPosition != null;
+        GetComponent<CapsuleCollider>().enabled = exposed;
 
 
         if (section.PilotPosition == null)

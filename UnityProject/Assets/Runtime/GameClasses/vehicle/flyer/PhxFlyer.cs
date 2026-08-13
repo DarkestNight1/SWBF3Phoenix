@@ -204,7 +204,16 @@ public class PhxFlyer : PhxVehicle
         */
 
         Body = gameObject.AddComponent<Rigidbody>();
-        Body.mass = F.GravityScale * 10f;
+        // Same 10x mass bug the hover class already fixed, left behind here.
+        //
+        // A default flyer (GravityScale .5) came out at 5kg. A soldier is also
+        // a Rigidbody with a capsule collider, so anyone could shove a starship
+        // around by walking into it, and any contact threw the craft.
+        // GravityScale is a gravity multiplier in the odf rather than a mass,
+        // but scaling it keeps the per-vehicle ratios it expresses while making
+        // aircraft immovable on foot - which is what the hover does, so the two
+        // now agree.
+        Body.mass = Mathf.Max(1000f, F.GravityScale * 2000f);
         Body.useGravity = true;
         Body.drag = 0.2f;
         Body.angularDrag = 10f;

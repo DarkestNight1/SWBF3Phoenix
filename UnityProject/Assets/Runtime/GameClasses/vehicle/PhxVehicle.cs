@@ -303,8 +303,8 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
     /// <summary>
     /// Vehicles were previously invulnerable - nothing implemented
     /// IPhxDamageableInstance, so all ordnance hits were dropped. Damage now
-    /// applies to CurHealth (odf MaxHealth), and destruction ejects everyone
-    /// aboard before the wreck is removed.
+    /// applies to CurHealth (odf MaxHealth), and destruction KILLS everyone
+    /// aboard - as BF2 does - before the wreck is removed.
     /// </summary>
     public virtual void AddDamage(float damage)
     {
@@ -339,19 +339,37 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         if (IsDestroyed) return;
         IsDestroyed = true;
 
-        // throw out every occupant so they aren't stranded in a dead vehicle
+        // Everyone aboard dies with it.
+        //
+        // They used to be ejected, which meant a full crew stepped out of an
+        // exploding tank without a scratch - and made vehicles a safe place to
+        // sit out a firefight. BF2 kills occupants when the vehicle goes up,
+        // and the kill is credited to whoever destroyed it so the scoreboard
+        // and the mission's OnCharacterDeath hooks both see it.
         if (Seats != null)
         {
             for (int i = 0; i < Seats.Count; ++i)
             {
-                if (Seats[i] != null && Seats[i].Occupant != null)
+                PhxSeat seat = Seats[i];
+                if (seat?.Occupant == null) continue;
+
+                // Read the occupant before anything detaches it - killing one
+                // seat's rider can cascade into the seat list.
+                if (seat.Occupant.GetInstance() is PhxSoldier rider && !rider.IsDead)
                 {
+                    // Uncredited: IPhxDamageableInstance.AddDamage carries only a
+                    // float, so the vehicle never learns who destroyed it.
+                    // Crediting these kills means widening that interface.
+                    rider.KillInPlace(null);
+                }
+                else
+                {
+                    // Not a soldier (a droid, a scripted pawn): fall back to
+                    // ejecting rather than leaving it attached to a corpse.
                     Eject(i);
                 }
             }
         }
-
-        // The authored break-up, before the wreck goes away: PhxChunkSpawner
         // reparents the pieces it takes off this model, so it has to run while
         // the model is still here.
         Rigidbody body = GetComponent<Rigidbody>();
