@@ -166,6 +166,8 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         }
 
         ModelMapping.GameRole = SWBFGameRole.Vehicle;
+
+
         ModelMapping.ExpandMultiLayerColliders();
         ModelMapping.SetColliderLayerFromMaskAll();
         ModelMapping.ConvexifyMeshColliders();

@@ -456,6 +456,19 @@ public class WorldLoader : Loader
         coll.sharedMesh = terrainMesh;
         coll.sharedMaterial = ModelLoader.Instance.PhyMat;
 
+        // Terrain belongs on TerrainAll, not Default.
+        //
+        // WorldLoader set no collision layer at all, so terrain stayed on
+        // layer 0. Infantry survived that by accident - SoldierAll happens to
+        // collide with Default - which is why "wrong layer" was investigated
+        // once and ruled out. Vehicles do not survive it. Decoding the physics
+        // matrix, VehicleTerrain (layer 20) collides with TerrainAll and
+        // NOTHING else, and TerrainAll does not collide with Default either.
+        // So every collider BF2 authors specifically for vehicle-to-ground
+        // contact was colliding with nothing at all.
+        int terrainLayer = LayerMask.NameToLayer("TerrainAll");
+        if (terrainLayer >= 0) terrainObj.layer = terrainLayer;
+
         // TERR tile ranges belong to the standalone Mod Tools TERR format,
         // not the munged LVL tern/INFO wrapper used at runtime. Keep the
         // source metadata hook, but do not fabricate values from a different
@@ -569,6 +582,19 @@ public class WorldLoader : Loader
         MeshCollider coll = terrainObj.AddComponent<MeshCollider>();
         coll.sharedMesh = terrainMesh;
         coll.sharedMaterial = ModelLoader.Instance.PhyMat;
+
+        // Terrain belongs on TerrainAll, not Default.
+        //
+        // WorldLoader set no collision layer at all, so terrain stayed on
+        // layer 0. Infantry survived that by accident - SoldierAll happens to
+        // collide with Default - which is why "wrong layer" was investigated
+        // once and ruled out. Vehicles do not survive it. Decoding the physics
+        // matrix, VehicleTerrain (layer 20) collides with TerrainAll and
+        // NOTHING else, and TerrainAll does not collide with Default either.
+        // So every collider BF2 authors specifically for vehicle-to-ground
+        // contact was colliding with nothing at all.
+        int terrainLayer = LayerMask.NameToLayer("TerrainAll");
+        if (terrainLayer >= 0) terrainObj.layer = terrainLayer;
 
         // Every prior hypothesis for "falls through terrain" (empty buffers,
         // triangle winding, convex-mesh vertex cap, wrong layer name) has been
