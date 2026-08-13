@@ -57,7 +57,8 @@ public static class BFAIActionAnimation
     /// with the weapon posture to form the clip name the bank actually holds.
     /// </param>
     /// <returns>true when a clip was found and started.</returns>
-    public static bool Play(PhxSoldier soldier, BFAIAction action, string bankPrefix, string posture)
+    public static bool Play(PhxSoldier soldier, BFAIAction action, string bankPrefix,
+                            string posture, float holdSeconds = 1.5f)
     {
         if (soldier == null || string.IsNullOrEmpty(bankPrefix)) return false;
         if (!Clips.TryGetValue(action, out string[] candidates)) return false;
@@ -73,7 +74,10 @@ public static class BFAIActionAnimation
             // Pass no bank: bankPrefix is a clip-name prefix ("human"), NOT an
             // animation bank. The animator resolves against its own real banks
             // (human_0..human_4, human_sabre).
-            if (soldier.PlayOverrideAnim(null, clip))
+            // Through the arbitrator, not straight at the animator: PhxSoldier
+            // writes layer 0 every frame from locomotion, and it has to agree
+            // to yield. It refuses while airborne, landing or turning in place.
+            if (soldier.RequestAnimOverride(null, clip, holdSeconds))
             {
                 return true;
             }

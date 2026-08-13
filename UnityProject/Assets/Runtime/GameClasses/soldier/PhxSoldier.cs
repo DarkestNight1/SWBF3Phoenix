@@ -696,6 +696,90 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;
     }
 
+
+    // --- animation layer 0 arbitration --------------------------------------
+    //
+    // Locomotion writes layer 0 every frame from the movement state. Anything
+    // else that wants the full body - an AI action, a scripted pose - has to be
+    // able to hold it for a while without being overwritten on the next frame,
+    // and has to give it back. Without an owner, two writers just fight: the
+    // first version of the AI action layer set layer 0 directly and either lost
+    // within a frame or won briefly and stuttered.
+    //
+    // The rule is deliberately simple. Locomotion yields while an override is
+    // held, unless the soldier is doing something locomotion must win - falling,
+    // landing, turning in place, dying - because those read as broken far more
+    // obviously than a missed idle animation does.
+
+    float OverrideAnimTimer;
+    string OverrideAnimName;
+
+    /// <summary>Is a full-body override currently holding layer 0?</summary>
+    public bool HasAnimOverride => OverrideAnimTimer > 0f;
+
+    /// <summary>
+    /// Take layer 0 for <paramref name="holdSeconds"/>, playing a clip from an
+    /// arbitrary bank.
+    /// </summary>
+    /// <remarks>
+    /// Returns false when the clip is not in any of the soldier's banks, so the
+    /// caller can fall back rather than assume it succeeded. Requests are also
+    /// refused outright while locomotion owns the body, which keeps the "who
+    /// wins" question in one place instead of at every call site.
+    /// </remarks>
+    public bool RequestAnimOverride(string bankName, string animName, float holdSeconds)
+    {
+        if (!CanYieldLocomotion()) return false;
+
+        // Re-requesting the clip that is already playing just extends it;
+        // restarting would hold it on frame zero for as long as the caller
+        // keeps asking.
+        if (HasAnimOverride && OverrideAnimName == animName)
+        {
+            OverrideAnimTimer = Mathf.Max(OverrideAnimTimer, holdSeconds);
+            return true;
+        }
+
+        if (!Animator.PlayOverrideAnim(bankName, animName)) return false;
+
+        OverrideAnimName = animName;
+        OverrideAnimTimer = Mathf.Max(0.05f, holdSeconds);
+        return true;
+    }
+
+    /// <summary>Hand layer 0 back to locomotion immediately.</summary>
+    public void ReleaseAnimOverride()
+    {
+        OverrideAnimTimer = 0f;
+        OverrideAnimName = null;
+    }
+
+    /// <summary>
+    /// States where locomotion must keep the body regardless of what anyone
+    /// else wants. Airborne and turn-in-place both drive position or facing, so
+    /// replacing their animation desynchronises what the soldier looks like
+    /// from what it is doing.
+    /// </summary>
+    bool CanYieldLocomotion()
+    {
+        if (!Grounded) return false;
+        if (TurnTimer > 0f || LandTimer > 0f) return false;
+        if (State == PhxControlState.Jump || State == PhxControlState.Roll ||
+            State == PhxControlState.Tumble) return false;
+        return true;
+    }
+
+    void TickAnimOverride(float deltaTime)
+    {
+        if (OverrideAnimTimer <= 0f) return;
+
+        OverrideAnimTimer -= deltaTime;
+
+        // Give the body back the moment locomotion needs it, rather than
+        // waiting out the hold and animating a jump as a reload.
+        if (!CanYieldLocomotion()) ReleaseAnimOverride();
+    }
+
     public override void PlayIntroAnim()
     {
         Animator.PlayIntroAnim();
@@ -844,6 +928,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         {
             return;
         }
+        TickAnimOverride(deltaTime);
         Profiler.BeginSample("Tick Soldier");
         UpdateState(deltaTime);
         Profiler.EndSample();
@@ -1198,7 +1283,10 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                     }
                 }
 
-                if (TurnTimer == 0f)
+                // Locomotion yields layer 0 while an override holds it. Without
+                // this the two writers fight every frame - see
+                // RequestAnimOverride.
+                if (TurnTimer == 0f && !HasAnimOverride)
                 {
                     // ---------------------------------------------------------------------------------------------
                     // Forward

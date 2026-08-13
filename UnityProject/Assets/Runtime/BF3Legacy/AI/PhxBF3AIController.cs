@@ -404,6 +404,17 @@ public class PhxBF3AIController : PhxAIController
 
         LastAnimAction = action;
         HaveAnimAction = true;
+
+        // Only the actions locomotion cannot already express are worth playing.
+        // Running to an objective looks like running whether the intent is
+        // Advance, Pursue or Reinforce, and overriding those would replace a
+        // speed-matched locomotion clip with a fixed one. Reload and SeekCover
+        // are postures the movement state has no way to show.
+        if (action != BFAIAction.Reload && action != BFAIAction.SeekCover) return;
+
+        BFAIActionAnimation.Play(soldier, action,
+                                 soldier.GetAnimationBankPrefix(),
+                                 soldier.GetWeaponPosture());
     }
 
     // Maximum drop an AI will willingly walk into. Anything deeper is treated

@@ -142,6 +142,55 @@ public class PhxAIDirector : MonoBehaviour
         Replan();
     }
 
+
+    /// <summary>
+    /// Give each squad member its own approach offset, from the formation
+    /// BFSquadSystem chose.
+    /// </summary>
+    /// <remarks>
+    /// This is what stops a squad moving as one body. The offsets are in the
+    /// leader's frame at assignment time rather than continuously maintained -
+    /// a rigid formation marched through a doorway looks worse than a loose
+    /// one, and the planning graph already handles the routing. The point is
+    /// that four soldiers approaching the same command post approach four
+    /// slightly different points, so they spread across the objective instead
+    /// of stacking on it.
+    ///
+    /// Additive with FlankOffset: the flank decides which way the squad swings
+    /// wide, the slot decides where each member sits within it.
+    /// </remarks>
+    static void AssignFormationSlots(BFSquad squad)
+    {
+        if (squad == null || squad.Members.Count <= 1) return;
+
+        squad.ElectLeader();
+        squad.ChooseFormation();
+
+        // The leader's facing is the frame the offsets are expressed in. Before
+        // anyone has moved that is whichever way they spawned, which is good
+        // enough - the offsets only need to differ from each other.
+        Vector3 forward = Vector3.forward;
+        if (squad.Leader != null && squad.Leader.Pawn?.GetInstance() != null)
+        {
+            Transform lt = squad.Leader.Pawn.GetInstance().transform;
+            forward = lt.forward;
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 1e-4f) forward = Vector3.forward;
+            forward.Normalize();
+        }
+
+        Quaternion frame = Quaternion.LookRotation(forward, Vector3.up);
+
+        for (int i = 0; i < squad.Members.Count; ++i)
+        {
+            PhxBF3AIController member = squad.Members[i];
+            if (member == null) continue;
+
+            Vector3 slot = frame * squad.SlotOffset(i);
+            member.FlankOffset += slot;
+        }
+    }
+
     static int ComputeOwnershipSignature()
     {
         PhxCommandpost[] posts = PhxGame.GetScene()?.GetCommandPosts();
@@ -420,6 +469,17 @@ public class PhxAIDirector : MonoBehaviour
                 member.BoardTarget = null;
                 member.FlankOffset = flankOffset;
             }
+
+            // AFTER the flank assignment, which uses "=" and would otherwise
+            // wipe the slots. The flank decides which way the squad swings
+            // wide; the slot decides where each member sits within it.
+            //
+            // Without this every member carries the SAME offset and routes to
+            // the SAME point through the SAME hubs, so the squad computes one
+            // identical path and walks it in a clump. That is the "troops
+            // travel in packs" behaviour - not a pathfinding failure, an
+            // absence of per-member destinations.
+            AssignFormationSlots(tactical);
         }
     }
 
