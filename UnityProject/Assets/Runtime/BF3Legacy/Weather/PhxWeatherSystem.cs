@@ -11,8 +11,10 @@ using UnityEngine;
 ///
 /// Profiles map SWBF2 planet prefixes to sensible weather: Hoth snows, Kamino
 /// storms, Mustafar rains embers, Felucia drifts spores, Dagobah sits in fog.
-/// Time of day is deterministic per map name (so Coruscant is reliably a
-/// night city) unless the config forces one.
+///
+/// This applies to BF3 Legacy and addon maps only. Stock maps ship finished
+/// lighting and sky data, and overriding it is how a bright daytime Coruscant
+/// became a dark rainy one - see Apply.
 /// </summary>
 public class PhxWeatherSystem : MonoBehaviour
 {
@@ -81,6 +83,32 @@ public class PhxWeatherSystem : MonoBehaviour
 
     void Apply(string mapScript)
     {
+        // A stock map is presented exactly as it was authored.
+        //
+        // This system invents content rather than interpreting it: the profile
+        // table decided Coruscant is a rainy night city, and ApplyTimeOfDay
+        // then rescales the map's own directional lights to match. On stock
+        // cor1 that turned a bright daytime plaza into a dark one and put rain
+        // on it - the map's .lgt said otherwise, and the .lgt is the source of
+        // truth. That is the whole "stock data, modern interpretation"
+        // promise: HDRP may light the authored sun better, it may not decide
+        // the sun has set.
+        //
+        // BF3 Legacy's own maps are a different case. They ship greybox
+        // levels with no finished sky, and the pack's look is what they are
+        // for - so weather stays enabled there.
+        if (PhxGame.Instance != null && !PhxGame.Instance.CurrentMapIsAddon)
+        {
+            // Cleared, not just skipped: this is static and survives the map
+            // change, so a stock map loaded after a BF3 night map would
+            // otherwise inherit its time of day.
+            ActiveTimeOfDay = PhxTimeOfDay.Auto;
+
+            Debug.Log($"[BF3Legacy] '{mapScript}' is a stock map; weather and time of day " +
+                      "left as authored.");
+            return;
+        }
+
         PhxWeatherProfile profile = null;
         foreach (KeyValuePair<string, PhxWeatherProfile> kv in Profiles)
         {
@@ -96,19 +124,15 @@ public class PhxWeatherSystem : MonoBehaviour
         WeatherRoot.transform.SetParent(transform, false);
 
         // ---- time of day ----
+        // Auto means "leave the lighting alone", not "pick one".
+        //
+        // This used to derive the time of day from the hash of the map name -
+        // Coruscant was night because "cor1c_con".GetHashCode() % 5 happened
+        // to be 1. An arbitrary function of a string is not a lighting
+        // decision, and a map with no profile entry has nothing to say about
+        // its time of day, so the authored lighting stands.
         PhxTimeOfDay tod = profile.ForcedTime;
-        if (tod == PhxTimeOfDay.Auto)
-        {
-            // deterministic per map name so revisits look the same
-            int hash = Mathf.Abs(mapScript.GetHashCode());
-            tod = (hash % 5) switch
-            {
-                0 => PhxTimeOfDay.Dusk,
-                1 => PhxTimeOfDay.Night,
-                _ => PhxTimeOfDay.Day,
-            };
-        }
-        ApplyTimeOfDay(tod);
+        ActiveTimeOfDay = tod;
 
         // ---- precipitation ----
         if (profile.Precipitation != PhxPrecipitation.None)
@@ -126,28 +150,51 @@ public class PhxWeatherSystem : MonoBehaviour
                   $"x{profile.Intensity}, {tod}{(profile.Storm ? ", storm" : "")}");
     }
 
-    void ApplyTimeOfDay(PhxTimeOfDay tod)
-    {
-        // scale the map's directional lights; night gets a cool moonlight tint
-        foreach (Light light in FindObjectsOfType<Light>())
-        {
-            if (light.type != LightType.Directional) continue;
+    /// <summary>
+    /// The time of day this map asked for. Read by BFLightingDirector, which
+    /// is the only thing that writes the sun.
+    /// </summary>
+    /// <remarks>
+    /// Published rather than applied. This used to walk every directional
+    /// light and rescale its intensity and colour in place - a fifth writer of
+    /// the sun, on top of the importer, the director, PhxMapAtmosphere and the
+    /// profile. Direct property writes are not arbitrated by volume priority,
+    /// so whichever ran last won, and that followed component construction
+    /// order rather than any intent.
+    ///
+    /// Worse, the scaling was in place with no baseline: intensity was
+    /// multiplied by 0.12 for night wherever it happened to be at that moment,
+    /// so the result depended on whether the director had already applied its
+    /// own scale. On the BF3 Legacy Coruscant map that produced a sun at a
+    /// fraction of its authored strength, pushed 70% toward blue - a dark,
+    /// cold, glossy city that neither the map nor the profile asked for.
+    ///
+    /// Time of day is a lighting decision, so it belongs to the component that
+    /// owns lighting. This states the request; the director resolves it once,
+    /// against the authored baseline it already tracks.
+    /// </remarks>
+    public static PhxTimeOfDay ActiveTimeOfDay { get; private set; } = PhxTimeOfDay.Auto;
 
-            // NOTE: must go through the helper - under HDRP the effective
-            // intensity lives on HDAdditionalLightData, not Light.intensity.
-            switch (tod)
-            {
-                case PhxTimeOfDay.Dusk:
-                    PhxRuntimeAssets.ScaleIntensity(light, 0.55f);
-                    light.color = Color.Lerp(light.color, new Color(1f, 0.6f, 0.35f), 0.5f);
-                    Vector3 e = light.transform.eulerAngles;
-                    light.transform.rotation = Quaternion.Euler(Mathf.Min(e.x, 18f), e.y, e.z);
-                    break;
-                case PhxTimeOfDay.Night:
-                    PhxRuntimeAssets.ScaleIntensity(light, 0.12f);
-                    light.color = Color.Lerp(light.color, new Color(0.55f, 0.65f, 1f), 0.7f);
-                    break;
-            }
+    /// <summary>Sun intensity scale and colour shift for a time of day.</summary>
+    public static void GetTimeOfDayGrade(out float intensityScale, out Color tint, out float tintWeight)
+    {
+        switch (ActiveTimeOfDay)
+        {
+            case PhxTimeOfDay.Dusk:
+                intensityScale = 0.55f;
+                tint = new Color(1f, 0.6f, 0.35f);
+                tintWeight = 0.5f;
+                return;
+            case PhxTimeOfDay.Night:
+                intensityScale = 0.12f;
+                tint = new Color(0.55f, 0.65f, 1f);
+                tintWeight = 0.7f;
+                return;
+            default:
+                intensityScale = 1f;
+                tint = Color.white;
+                tintWeight = 0f;
+                return;
         }
     }
 

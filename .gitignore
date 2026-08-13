@@ -3,3 +3,20 @@
 # Unity manual activation request (machine-specific, not source)
 *.alf
 *.ulf
+
+# --- build output and local scratch -------------------------------------
+# CMake tree for the native library (Tools/nativebuild), several hundred MB.
+/Tools/nativebuild/
+
+# .NET build output for the helper tools.
+/Tools/*/bin/
+/Tools/*/obj/
+
+# Binary snapshots kept while chasing the debug-CRT and FNV bugs. Useful
+# locally for A/B testing a rebuilt native library, not something to publish.
+/Tools/lib-backup-debug/
+/Tools/lib-backup-prefnvfix/
+/Tools/staged-libs/
+
+# A stray Unity project that ended up in the repo root; nothing references it.
+/My project/

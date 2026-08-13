@@ -46,13 +46,21 @@ public class PhxAnimationGroup
     {
         for (int i = 0; i < Animators.Count; i++)
         {
-            Animators[i].gameObject.transform.parent.position = StartPoints[i];
-            Animators[i].gameObject.transform.localPosition = Vector3.zero;
-            
+            if (Animators[i] == null) continue;
+
+            // The anim root is created during initialisation, but a world can
+            // name an instance that was already at the scene root, and a
+            // destroyed instance leaves a null parent behind. Neither should
+            // take out every other animation in the group.
+            Transform tx = Animators[i].gameObject.transform;
+            if (tx.parent != null)
+            {
+                tx.parent.position = StartPoints[i];
+                tx.localPosition = Vector3.zero;
+            }
+
             Animators[i].enabled = true;
             Animators[i].Play(AnimationNames[i]);
-
-            AnimationState aState = Animators[i][AnimationNames[i]];
         }
     }
 
@@ -103,21 +111,41 @@ public class PhxSceneAnimator
         {
             foreach (WorldAnimationGroup animGroup in world.GetAnimationGroups())
             {
-                if (AnimGroupDB.ContainsKey(animGroup.Name)) continue;
+                // Both the guard and the store have to agree on case. They used
+                // to disagree - ContainsKey on the raw name, store on the lower
+                // one - so the guard never fired and a group named in two
+                // worlds silently replaced the first one's animators.
+                string groupKey = animGroup.Name.ToLower();
+                if (AnimGroupDB.ContainsKey(groupKey)) continue;
 
                 PhxAnimationGroup newAnimGroup = new PhxAnimationGroup();
-                AnimGroupDB[animGroup.Name.ToLower()] = newAnimGroup;
+                int bound = 0;
 
                 List<Tuple<string,string>> AnimInstPairs = animGroup.GetAnimationInstancePairs();
                 foreach (var pair in AnimInstPairs)
                 {
-                    GameObject instance = GameObject.Find(pair.Item2);
-
-                    if (instance == null || !WorldAnims.TryGetValue(pair.Item1, out WorldAnimation wldAnim))
+                    if (!WorldAnims.TryGetValue(pair.Item1, out WorldAnimation wldAnim))
                     {
+                        BFImportDiagnostics.Missing(BFSourceKind.Animation, pair.Item1,
+                                                    $"world animation group '{animGroup.Name}'");
                         continue;
                     }
 
+                    GameObject instance = ResolveInstance(pair.Item2);
+                    if (instance == null)
+                    {
+                        // Every miss used to be a silent continue, which is why
+                        // a map full of dead machinery looked like a map with no
+                        // machinery in it.
+                        BFImportDiagnostics.Missing(BFSourceKind.Instance, pair.Item2,
+                                                    $"world animation '{pair.Item1}'");
+                        continue;
+                    }
+
+                    BFImportDiagnostics.Resolved(BFSourceKind.Animation, pair.Item1);
+
+                    // Static batching bakes a renderer's transform into the
+                    // combined mesh, so a batched object cannot be moved.
                     instance.isStatic = false;
 
                     Animation anim = instance.GetComponent<Animation>();
@@ -126,19 +154,33 @@ public class PhxSceneAnimator
                         anim = instance.AddComponent<Animation>();
                     }
 
-                    if (instance.transform.parent.gameObject.name != instance.name + "_animroot")
+                    // The clip drives localPosition/localRotation, so the
+                    // instance needs a parent holding its world placement -
+                    // otherwise the animation's local-space keys are read as
+                    // world space and the object teleports to the origin.
+                    Transform parent = instance.transform.parent;
+                    if (parent == null || parent.gameObject.name != instance.name + "_animroot")
                     {
-                        GameObject dummmyPrnt = new GameObject(instance.name + "_animroot");
-                        dummmyPrnt.transform.position = instance.transform.position;
-                        dummmyPrnt.transform.rotation = instance.transform.rotation;
-                        dummmyPrnt.transform.SetParent(instance.transform.parent, true);
+                        GameObject animRoot = new GameObject(instance.name + "_animroot");
+                        animRoot.transform.position = instance.transform.position;
+                        animRoot.transform.rotation = instance.transform.rotation;
+                        if (parent != null)
+                        {
+                            animRoot.transform.SetParent(parent, true);
+                        }
 
-                        instance.transform.SetParent(dummmyPrnt.transform, true);                         
+                        instance.transform.SetParent(animRoot.transform, true);
                     }
-
 
                     AnimationCurve[] rKeys = AnimationLoader.Instance.GetWorldAnimationRotationCurves(wldAnim, instance.transform);
                     AnimationCurve[] pKeys = AnimationLoader.Instance.GetWorldAnimationPositionCurves(wldAnim, instance.transform);
+
+                    if (rKeys == null && pKeys == null)
+                    {
+                        BFImportDiagnostics.Missing(BFSourceKind.Animation, wldAnim.Name,
+                                                    $"no position or rotation curves for '{pair.Item2}'");
+                        continue;
+                    }
 
                     AnimationClip clip = new AnimationClip();
                     clip.legacy = true;
@@ -146,22 +188,29 @@ public class PhxSceneAnimator
 
                     if (rKeys != null)
                     {
-                        clip.SetCurve("", typeof(Transform), "localEulerAngles.x", rKeys[0]);
-                        clip.SetCurve("", typeof(Transform), "localEulerAngles.y", rKeys[1]);
-                        clip.SetCurve("", typeof(Transform), "localEulerAngles.z", rKeys[2]);
+                        // "localEulerAngles" is NOT an animatable property.
+                        // Unity accepts the SetCurve call, warns once, and then
+                        // drops the curve - which is exactly what "the machinery
+                        // is parsed but nothing rotates" looks like from the
+                        // outside. "localEulerAnglesRaw" is the real backing
+                        // property and is what the editor writes for euler
+                        // rotation curves.
+                        clip.SetCurve("", typeof(Transform), "localEulerAnglesRaw.x", rKeys[0]);
+                        clip.SetCurve("", typeof(Transform), "localEulerAnglesRaw.y", rKeys[1]);
+                        clip.SetCurve("", typeof(Transform), "localEulerAnglesRaw.z", rKeys[2]);
                     }
 
                     if (pKeys != null)
                     {
                         clip.SetCurve("", typeof(Transform), "localPosition.x", pKeys[0]);
                         clip.SetCurve("", typeof(Transform), "localPosition.y", pKeys[1]);
-                        clip.SetCurve("", typeof(Transform), "localPosition.z", pKeys[2]);  
-                    } 
+                        clip.SetCurve("", typeof(Transform), "localPosition.z", pKeys[2]);
+                    }
 
                     clip.wrapMode = wldAnim.IsLooping ? WrapMode.Loop : WrapMode.ClampForever;
 
-
                     anim.AddClip(clip, clip.name);
+                    AnimDB[clip.name] = clip;
 
                     if (animGroup.PlaysAtStart)
                     {
@@ -171,17 +220,69 @@ public class PhxSceneAnimator
                     }
 
                     newAnimGroup.AddInstanceAnimationPair(anim, clip.name);
+                    ++bound;
+                }
+
+                // An empty group registered anyway would make PlayAnimation
+                // return true having done nothing, which reads as "the script
+                // is wrong" rather than "the group never bound".
+                if (bound > 0)
+                {
+                    AnimGroupDB[groupKey] = newAnimGroup;
+                }
+                else if (AnimInstPairs.Count > 0)
+                {
+                    BFImportDiagnostics.Missing(BFSourceKind.Animation, animGroup.Name,
+                                                "world animation group bound no instances");
+                }
+            }
+        }
+    }
+
+    // GameObject.Find walks every root object in the scene, matches on name
+    // only, and cannot see inactive objects. World instances are frequently
+    // nested under their world root and are inactive while the level is still
+    // loading, so it misses constantly. Index the scene once instead.
+    Dictionary<string, GameObject> InstanceIndex;
+
+    GameObject ResolveInstance(string name)
+    {
+        if (string.IsNullOrEmpty(name)) return null;
+
+        GameObject direct = GameObject.Find(name);
+        if (direct != null) return direct;
+
+        if (InstanceIndex == null)
+        {
+            InstanceIndex = new Dictionary<string, GameObject>(StringComparer.OrdinalIgnoreCase);
+            foreach (Transform tx in UnityEngine.Object.FindObjectsOfType<Transform>(true))
+            {
+                // First writer wins: an instance nearer the scene root is more
+                // likely to be the one the world file means than a same-named
+                // child deeper in some model's hierarchy.
+                if (!InstanceIndex.ContainsKey(tx.name))
+                {
+                    InstanceIndex[tx.name] = tx.gameObject;
                 }
             }
         }
 
-
+        return InstanceIndex.TryGetValue(name, out GameObject found) ? found : null;
     }
 
 
+    // Groups are stored under a lowercased key. Lua passes whatever case the
+    // mission script author typed, so every lookup has to lower it too - these
+    // three matched only when the script happened to agree with the world file.
+    bool TryGetGroup(string name, out PhxAnimationGroup grp)
+    {
+        grp = null;
+        return !string.IsNullOrEmpty(name) && AnimGroupDB.TryGetValue(name.ToLower(), out grp);
+    }
+
     public bool PlayAnimation(string AnimationGroupName)
     {
-        if (AnimGroupDB.TryGetValue(AnimationGroupName, out PhxAnimationGroup grp))
+        if (TryGetGroup(AnimationGroupName, out PhxAnimationGroup grp))
         {
             grp.Play();
             return true;
@@ -191,9 +292,12 @@ public class PhxSceneAnimator
 
     public bool RewindAnimation(string AnimationGroupName)
     {
-        if (AnimGroupDB.TryGetValue(AnimationGroupName, out PhxAnimationGroup grp))
+        if (TryGetGroup(AnimationGroupName, out PhxAnimationGroup grp))
         {
-            grp.Play();
+            // Was calling Play(). Rewinding restarted the animation instead of
+            // returning it to frame zero, so a script that rewound a mechanism
+            // to reset it got the mechanism running again.
+            grp.Rewind();
             return true;
         }
 
@@ -202,7 +306,7 @@ public class PhxSceneAnimator
 
     public bool PauseAnimation(string AnimationGroupName)
     {
-        if (AnimGroupDB.TryGetValue(AnimationGroupName, out PhxAnimationGroup grp))
+        if (TryGetGroup(AnimationGroupName, out PhxAnimationGroup grp))
         {
             grp.Pause();
             return true;

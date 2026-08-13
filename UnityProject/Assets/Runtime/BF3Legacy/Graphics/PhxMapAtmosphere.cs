@@ -3,34 +3,26 @@ using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
 
 /// <summary>
-/// Applies each map's authored atmosphere - fog color/range from SkyInfo,
-/// sun key/back light from SunInfo, dome ambient - parsed by the world
-/// importer into SWBFSkyProperties. This is the per-map fog PhxModernLighting
-/// deliberately does not provide globally: a fixed fog density is meaningless
-/// across an open battlefield, a ship interior and a vacuum space map alike.
-///
-/// Attached to the persistent BF3Legacy host by PhxBF3.Bootstrap().
+/// Reports each map's authored atmosphere. Fog itself is owned by
+/// <see cref="BFLightingDirector"/>.
 /// </summary>
+/// <remarks>
+/// This used to own a Fog override on a priority-110 volume, reading the
+/// map's authored FogColor and setting ConstantColor - the correct, faithful
+/// behaviour. BFLightingDirector then ran at priority 120 and overrode
+/// colorMode back to SkyColor, so the authored colour was read, logged, and
+/// thrown away on every map. The log said the fog was right while the frame
+/// showed a generic sky-tinted wash.
+///
+/// Two volumes writing one parameter is the bug, not the priority ordering.
+/// The director now reads the authored colour itself, and this keeps only the
+/// diagnostic - which is worth having, because it reports what the source
+/// data said independently of what the renderer did with it.
+/// </remarks>
 public class PhxMapAtmosphere : MonoBehaviour
 {
-    Volume Volume;
-    VolumeProfile Profile;
-    Fog Fog;
-
     void Start()
     {
-        Profile = ScriptableObject.CreateInstance<VolumeProfile>();
-        Profile.name = "BF3LegacyMapAtmosphere";
-        Fog = Profile.Add<Fog>(true);
-        Fog.enabled.Override(false);
-
-        Volume = gameObject.AddComponent<Volume>();
-        Volume.isGlobal = true;
-        // Above PhxModernLighting (100): map-authored atmosphere wins over
-        // the generic modernization defaults.
-        Volume.priority = 110f;
-        Volume.profile = Profile;
-
         if (PhxGame.Instance != null)
         {
             PhxGame.Instance.OnMapLoaded += Apply;
@@ -39,28 +31,14 @@ public class PhxMapAtmosphere : MonoBehaviour
 
     void Apply()
     {
-        if (Fog == null) return;
-
         bool fogAuthored = SWBFSkyProperties.HasSkyInfo &&
                            SWBFSkyProperties.FogRange.y > SWBFSkyProperties.FogRange.x &&
                            SWBFSkyProperties.FogRange.y > 0f;
-        if (fogAuthored)
-        {
-            Fog.enabled.Override(true);
-            Fog.color.Override(SWBFSkyProperties.FogColor);
-            Fog.colorMode.Override(FogColorMode.ConstantColor);
-            // BF2's linear fog start/end mapped onto HDRP's height fog: use the
-            // far distance as the attenuation distance so full fog lands where
-            // the original renderer reached it.
-            Fog.meanFreePath.Override(Mathf.Max(20f, SWBFSkyProperties.FogRange.y));
-            Fog.baseHeight.Override(0f);
-            Fog.maximumHeight.Override(400f);
-            Debug.Log($"[BF3Legacy] Map fog: color {SWBFSkyProperties.FogColor}, range {SWBFSkyProperties.FogRange}");
-        }
-        else
-        {
-            Fog.enabled.Override(false);
-        }
+
+        Debug.Log(fogAuthored
+            ? $"[BF3Legacy] Map authored fog: colour {SWBFSkyProperties.FogColor}, " +
+              $"linear range {SWBFSkyProperties.FogRange} - applied by BFLightingDirector."
+            : "[BF3Legacy] Map authored no fog.");
 
         if (SWBFSkyProperties.HasSunInfo)
         {
@@ -76,31 +54,25 @@ public class PhxMapAtmosphere : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Report the authored sun. BFLightingDirector applies it.
+    /// </summary>
+    /// <remarks>
+    /// This used to set the sun's colour and rotation directly, and so did
+    /// BFLightingDirector - as plain property writes on the Light, not volume
+    /// overrides, so nothing arbitrated between them. Volume priority does not
+    /// apply to a direct assignment: whichever OnMapLoaded handler ran last
+    /// won, and that order follows which host component happened to be
+    /// constructed first. The sun's colour on every map was decided by
+    /// component construction order.
+    ///
+    /// The director now reads the authored values itself and prefers them over
+    /// its profile, so there is one writer and the source data wins.
+    /// </remarks>
     void ApplySun()
     {
-        // Find the map's shadow-casting directional light (the importer only
-        // enables shadows on the sun) and align it with the authored angle.
-        Light sun = null;
-        foreach (Light l in FindObjectsOfType<Light>())
-        {
-            if (l.type != LightType.Directional) continue;
-            if (sun == null || l.shadows != LightShadows.None)
-            {
-                sun = l;
-                if (l.shadows != LightShadows.None) break;
-            }
-        }
-        if (sun == null) return;
-
-        Vector2 angle = SWBFSkyProperties.SunAngle;
-        // .sky Angle(azimuth, elevation): elevation is negative-down in the
-        // authored data, Unity pitches the light down with positive X.
-        sun.transform.rotation = Quaternion.Euler(-angle.y, angle.x, 0f);
-
-        if (SWBFSkyProperties.SunColor.maxColorComponent > 0f)
-        {
-            sun.color = SWBFSkyProperties.SunColor;
-        }
+        Debug.Log($"[BF3Legacy] Map authored sun: colour {SWBFSkyProperties.SunColor}, " +
+                  $"angle {SWBFSkyProperties.SunAngle} - applied by BFLightingDirector.");
     }
 
     void OnDestroy()
@@ -108,10 +80,6 @@ public class PhxMapAtmosphere : MonoBehaviour
         if (PhxGame.Instance != null)
         {
             PhxGame.Instance.OnMapLoaded -= Apply;
-        }
-        if (Profile != null)
-        {
-            ScriptableObject.Destroy(Profile);
         }
     }
 }

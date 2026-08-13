@@ -66,6 +66,10 @@ public class PhxMatch
         // tickets" (space assault, and any mode scored by objectives).
         public bool SpentReinforcements;
         public float SpawnDelay = 1.0f;
+
+        /// <summary>Fraction of SpawnDelay the wait may vary by, so a squad
+        /// does not arrive in lockstep. Set by the mission script.</summary>
+        public float SpawnDelaySpread = 0f;
         public HashSet<PhxUnitClass> UnitClasses = new HashSet<PhxUnitClass>();
         public PhxClass HeroClass = null;
         public bool[] Friends = new bool[MAX_TEAMS];
@@ -932,8 +936,21 @@ public class PhxMatch
             // spawn cadence.
             AISpawnTimers[slot] = spawned > 1
                 ? BatchFillInterval
-                : Mathf.Max(team.SpawnDelay, 0.1f);
+                : NextSpawnInterval(team);
         }
+    }
+
+    /// <summary>
+    /// The wait before this team's next AI arrives, jittered by the spread the
+    /// mission script asked for.
+    /// </summary>
+    static float NextSpawnInterval(PhxTeam team)
+    {
+        float delay = Mathf.Max(team.SpawnDelay, 0.1f);
+        if (team.SpawnDelaySpread <= 0f) return delay;
+
+        float jitter = delay * team.SpawnDelaySpread;
+        return Mathf.Max(delay + UnityEngine.Random.Range(-jitter, jitter), 0.1f);
     }
 
     /// <summary>
@@ -1350,6 +1367,24 @@ public class PhxMatch
     {
         if (!CheckTeamIdx(--teamIdx)) return;
         Teams[teamIdx].BleedRate = rate;
+    }
+
+    /// <summary>
+    /// How long this team waits between putting AI into the world, and how
+    /// much that wait varies.
+    /// </summary>
+    /// <remarks>
+    /// The spread is a fraction of the delay, matching what the stock missions
+    /// pass. It is clamped to the delay itself because a spread wider than the
+    /// interval would let the low end reach zero, which is the lockstep spawn
+    /// the spread exists to prevent.
+    /// </remarks>
+    public void SetSpawnDelay(int teamIdx, float delay, float spread)
+    {
+        if (!CheckTeamIdx(--teamIdx)) return;
+
+        Teams[teamIdx].SpawnDelay = Mathf.Max(delay, 0.1f);
+        Teams[teamIdx].SpawnDelaySpread = Mathf.Clamp01(spread);
     }
 
     // Bleed thresholds are NOT tracked here. ObjectiveConquest:AddBleedThreshold

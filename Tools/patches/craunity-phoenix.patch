@@ -1,0 +1,78 @@
+From 5d2ed2dc15cab1ef1b89f64b64a2d6b6c2739711 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Wed, 12 Aug 2026 20:19:38 -0400
+Subject: [PATCH] Size the clip pools for real content; drop an unguarded
+ editor import
+
+MAX_BAKED_CLIP_TRANSFORMS was 65535*4. Cra indexes baked frames directly
+(FrameIndex = floor(FPS * Playback)) with no interpolation, so clips are baked
+at 120fps to look smooth and that cost cannot be lowered without visible
+stepping. One human soldier loads ~62 clips across rifle, pistol and bazooka
+banks plus death and hit states; at 240 frames over 20 bones that is near 300k
+transforms, over the old ceiling before a second species is touched. Past the
+limit SetClip silently returns false and soldiers animate with no clip at all.
+
+Raised the transform, bone and clip-data ceilings accordingly (~29 MB), and
+removed an unguarded `using UnityEditor;` from CraClip that would fail any
+standalone player build.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ CraClip.cs |  1 -
+ CraMain.cs | 28 +++++++++++++++++++++++-----
+ 2 files changed, 23 insertions(+), 6 deletions(-)
+
+diff --git a/CraClip.cs b/CraClip.cs
+index fd900d0..8c84811 100644
+--- a/CraClip.cs
++++ b/CraClip.cs
+@@ -6,7 +6,6 @@ using Unity.Mathematics;
+ using UnityEngine;
+ using UnityEngine.Profiling;
+ 
+-using UnityEditor;
+ 
+ 
+ public enum CraInterpMethod
+diff --git a/CraMain.cs b/CraMain.cs
+index 95a08fe..0f1faa5 100644
+--- a/CraMain.cs
++++ b/CraMain.cs
+@@ -57,10 +57,28 @@ public static class CraSettings
+     public const int MAX_ANIMATORS = 2048;
+ 
+     public const int MAX_PLAYER_DATA = MAX_PLAYERS / 4;
+-    public const int MAX_CLIP_DATA = 256;
+-    public const int MAX_BAKED_CLIP_TRANSFORMS = 65535 * 4;
+-    public const int MAX_BONE_DATA = 65535 * 4;
+-    public const int MAX_BONES = 65535 * 4;
++
++    // Sized for the stock content rather than for a guess.
++    //
++    // The transform pool is a bump allocator: Alloc only advances Head and the
++    // only way to reclaim is Clear(). Cra also indexes baked frames directly
++    // (FrameIndex = floor(FPS * Playback)) with no interpolation, so the bake
++    // rate IS the playback rate - clips are baked at 120 to look smooth, and
++    // that cost cannot be reduced without visible stepping.
++    //
++    // One human weapon bank is 18 clips; a soldier loads rifle, pistol and
++    // bazooka plus 4 death and 4 hit states, so ~62 clips. A 2 second clip at
++    // 120 fps over 20 bones is 240 * 20 = 4800 transforms, which puts one
++    // species alone near 300k - over the old 262140 ceiling before a second
++    // species or a hero bank is touched. That is why clips silently stopped
++    // being settable: the pool ran out and every later SetClip failed.
++    //
++    // At 28 bytes per CraTransform (float3 + float4) this is ~29 MB, which is a
++    // reasonable trade for animation that works.
++    public const int MAX_CLIP_DATA = 1024;
++    public const int MAX_BAKED_CLIP_TRANSFORMS = 65535 * 16;
++    public const int MAX_BONE_DATA = 65535 * 8;
++    public const int MAX_BONES = 65535 * 8;
+ 
+     public static Func<string, int> BoneHashFunction;
+-}
+\ No newline at end of file
++}
+-- 
+2.55.0.windows.3
+

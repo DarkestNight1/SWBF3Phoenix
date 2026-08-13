@@ -1,0 +1,40 @@
+From 0bbe6f2ce0afd787633797af44fef863c61dc07c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 20:20:27 -0400
+Subject: [PATCH] Link the CRT statically in Release x64
+
+/MD leaves lua50-swbf2-x64.dll dependent on VCRUNTIME140.dll, which ships
+with the Visual C++ redistributable rather than with Windows. As a library
+loaded by Unity through P/Invoke, a missing runtime surfaces only as a
+DllNotFoundException naming this library - never naming the runtime that is
+actually absent, which makes the failure very hard to diagnose.
+
+With /MT the DLL's only import is KERNEL32.dll.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ mak.vs2022/lua50_dll.vcxproj | 8 +++++++-
+ 1 file changed, 7 insertions(+), 1 deletion(-)
+
+diff --git a/mak.vs2022/lua50_dll.vcxproj b/mak.vs2022/lua50_dll.vcxproj
+index 608122c..978b9c9 100644
+--- a/mak.vs2022/lua50_dll.vcxproj
++++ b/mak.vs2022/lua50_dll.vcxproj
+@@ -179,7 +179,13 @@
+       <AdditionalIncludeDirectories>../include;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+       <PreprocessorDefinitions>USE_TMPNAME=1;_CRT_SECURE_NO_DEPRECATE;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+       <StringPooling>true</StringPooling>
+-      <RuntimeLibrary>MultiThreadedDLL</RuntimeLibrary>
++      <!--
++        Static CRT (/MT) rather than /MD. As a DLL loaded by Unity via P/Invoke
++        this must not depend on the Visual C++ redistributable being present:
++        a missing VCRUNTIME140.dll surfaces only as a DllNotFoundException
++        naming this library, never naming the runtime that is actually absent.
++      -->
++      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+       <FunctionLevelLinking>true</FunctionLevelLinking>
+       <PrecompiledHeader>
+       </PrecompiledHeader>
+-- 
+2.55.0.windows.3
+

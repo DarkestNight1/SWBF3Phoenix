@@ -86,6 +86,14 @@ public sealed class BFEnvironmentLightingProfile
         Gradient,
         /// <summary>Effectively black, for space.</summary>
         Space,
+        /// <summary>
+        /// The map paints its own sky on the dome. The procedural atmosphere
+        /// stands down to a flat gradient matching the authored fog colour, so
+        /// it neither shows through the dome nor lights the map for a planet
+        /// the player cannot see. Chosen by BFSkydomeReconciler at load, not
+        /// authored in a profile.
+        /// </summary>
+        AuthoredDome,
     }
 
     public BFSkyKind Sky = BFSkyKind.PhysicallyBased;
@@ -175,7 +183,17 @@ public sealed class BFEnvironmentLightingProfile
     public bool ScreenSpaceReflections = true;
 
     /// <summary>Smoothness below which SSR stops contributing.</summary>
-    public float ReflectionMinSmoothness = 0.6f;
+    /// <remarks>
+    /// Must sit clear of <see cref="BFMaterialInterpreter.SmoothnessDetailBand"/>.
+    /// That band varies smoothness either side of the authored value to give
+    /// flat 2005 textures some relief; a cutoff inside it is crossed by the
+    /// variation, so reflections switch on and off across what is physically
+    /// one surface. At 0.6 - the old default - a floor authored anywhere near
+    /// 0.6 reflected in patches. Above the band a surface either reflects or
+    /// does not, as one surface, and only genuinely polished floors and hulls
+    /// qualify.
+    /// </remarks>
+    public float ReflectionMinSmoothness = 0.8f;
 
     /// <summary>Ambient occlusion strength; greebled interiors want more.</summary>
     public float AmbientOcclusionIntensity = 1.2f;

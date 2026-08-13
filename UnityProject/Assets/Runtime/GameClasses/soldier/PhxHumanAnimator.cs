@@ -1,7 +1,6 @@
 using System.Collections;
 using System.Collections.Generic;
 using UnityEngine;
-using UnityEditor;
 using UnityEngine.Profiling;
 
 public static class PhxAnimationBanks
@@ -214,13 +213,34 @@ public struct PhxHumanAnimator
     int[] DeathStates;
     int[] HitStates;
 
+    // The odf's SkeletonName. Clips are resolved against it so bones the
+    // animation doesn't key still land on their authored rest pose rather than
+    // on whatever the model import left behind - see PhxAnimationLoader.
+    string SkeletonName;
 
-    public PhxHumanAnimator(Transform root, string[] weaponAnimBanks)
+    // States registered after construction, keyed by "<bank>/<anim>". The
+    // stock banks are a fixed set known up front; combo moves are not - which
+    // hero is holding which saber decides them - so they get registered the
+    // first time they're actually played.
+    Dictionary<string, int> OverrideStates;
+
+    // Kept so a lazily registered state can build its player against the same
+    // rig the constructor used.
+    Transform AnimRoot;
+
+
+    public PhxHumanAnimator(Transform root, string[] weaponAnimBanks, string skeletonName = null)
     {
         Anim = CraAnimator.CreateNew(2, 128);
         ClipPlayers = new Dictionary<string, CraPlayer>();
         NameToBankIdx = new Dictionary<string, int>();
         CurrentBankIdx = 0;
+
+        // Assigned in the prologue with the rest: this is a struct, and
+        // GetPlayer below reads it.
+        SkeletonName = skeletonName;
+        OverrideStates = new Dictionary<string, int>();
+        AnimRoot = root;
 
         // This is a struct, so every field has to be definitely assigned before
         // the constructor may call any instance method (GetPlayer below is one).
@@ -339,6 +359,75 @@ public struct PhxHumanAnimator
         Anim.SetState(1, HitStates[(int)dir]);
     }
 
+    /// <summary>
+    /// Play one named clip out of an arbitrary bank on the full-body layer.
+    /// </summary>
+    /// <remarks>
+    /// This is what connects the combo state machine to the screen. The runner
+    /// has always known which move is playing - <c>PhxComboMove.AnimationName</c>
+    /// is read straight off the authored data - but nothing ever played it, so
+    /// a hero's saber work was a damage sweep over whatever locomotion clip
+    /// happened to be running.
+    ///
+    /// Layer 0 rather than 1: a saber swing commits the whole body, and the
+    /// upper-body mask that suits a reload would leave the legs running.
+    /// Returns false when the clip isn't in the bank, which lets the caller
+    /// fall back rather than freeze the hero on a state that never advances.
+    /// </remarks>
+    public bool PlayOverrideAnim(string bankName, string animName)
+    {
+        if (string.IsNullOrEmpty(animName)) return false;
+        if (OverrideStates == null || AnimRoot == null) return false;
+
+        string key = (bankName ?? "*") + "/" + animName;
+        if (!OverrideStates.TryGetValue(key, out int state))
+        {
+            // An explicit bank (a hero's ComboAnimationBank) is tried first,
+            // then the standard soldier banks.
+            //
+            // Callers used to pass a bank PREFIX here - "human" - which is not
+            // a bank at all: the real ones are human_0..human_4 and
+            // human_sabre. Every call therefore failed inside
+            // PhxAnimationLoader with "Cannot find AnimationBank 'human'!",
+            // once per soldier per action change.
+            string[] banks;
+            if (string.IsNullOrEmpty(bankName))
+            {
+                banks = HUMANM_BANKS;
+            }
+            else
+            {
+                banks = new string[HUMANM_BANKS.Length + 1];
+                banks[0] = bankName;
+                System.Array.Copy(HUMANM_BANKS, 0, banks, 1, HUMANM_BANKS.Length);
+            }
+
+            CraPlayer player = PhxAnimationLoader.CreatePlayer(
+                AnimRoot, banks, animName, false, null, SkeletonName);
+
+            // CreateEmpty is what CreatePlayer hands back for a clip it could
+            // not find. Registering it would give us a state that finishes
+            // instantly and forever - remember the miss instead, so a clip that
+            // does not exist costs one lookup rather than one per frame.
+            if (!player.IsValid())
+            {
+                OverrideStates.Add(key, -1);
+                return false;
+            }
+
+            state = Anim.AddState(0, player);
+            OverrideStates.Add(key, state);
+        }
+
+        if (state < 0) return false;
+
+        // Clear the upper body: a half-played shoot or reload on layer 1 would
+        // otherwise fight the swing for the arms.
+        Anim.SetState(1, CraSettings.STATE_NONE);
+        Anim.SetState(0, state);
+        return true;
+    }
+
     public void SetAnimBank(string bankName)
     {
         if (string.IsNullOrEmpty(bankName))
@@ -358,7 +447,7 @@ public struct PhxHumanAnimator
         {
             return player;
         }
-        player = PhxAnimationLoader.CreatePlayer(root, animBanks, animName, loop, maskBone);
+        player = PhxAnimationLoader.CreatePlayer(root, animBanks, animName, loop, maskBone, SkeletonName);
         ClipPlayers.Add(animName, player);
         return player;
     }

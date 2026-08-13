@@ -1,0 +1,31 @@
+<!--
+  Preserves types the managed stripper cannot see are used.
+
+  ProjectSettings has stripEngineCode enabled, and stripping works by static
+  reachability analysis. Three things in this project are invisible to it:
+
+    * PhxScene resolves ODF class labels to C# types by NAME and instantiates
+      them with Activator.CreateInstance. No call site references the concrete
+      PhxClass subclasses, so every game class - soldier, vehicle, weapon,
+      turret - looks unreachable and can be stripped. The result is a player
+      that loads a map and spawns nothing.
+
+    * PhxClass.InitClass and PhxInstance.InitInstance enumerate fields with
+      Type.GetMembers() and match them to ODF properties by name, so the
+      PhxProp fields themselves are only ever touched reflectively.
+
+    * LibSWBF2.NET marshals native structs; stripping its types breaks the
+      P/Invoke layer in ways that surface as memory corruption rather than as
+      a missing method.
+
+  This costs a small amount of build size and removes an entire class of
+  "works in the editor, broken in the player" failure.
+-->
+<linker>
+  <assembly fullname="Assembly-CSharp" preserve="all" />
+  <assembly fullname="LibSWBF2.NET" preserve="all" />
+
+  <!-- Referenced only from shaders, Resources.Load and script-side lookups. -->
+  <assembly fullname="Unity.RenderPipelines.HighDefinition.Runtime" preserve="all" />
+  <assembly fullname="Unity.RenderPipelines.Core.Runtime" preserve="all" />
+</linker>

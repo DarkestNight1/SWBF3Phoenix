@@ -42,6 +42,15 @@ public class PhxTextureUpscaler : MonoBehaviour
     readonly Dictionary<Texture, RenderTexture> Cache = new Dictionary<Texture, RenderTexture>();
     readonly HashSet<Texture> Rejected = new HashSet<Texture>();
 
+    // Shared imported material -> our upscaled copy. A null value is a
+    // remembered "nothing here worth upscaling", so the second renderer
+    // using that material skips the check entirely.
+    readonly Dictionary<Material, Material> Instanced = new Dictionary<Material, Material>();
+
+    // Set from PhxGame.OnMapLoaded. The pass used to guess with a fixed
+    // one-second delay and usually walked an empty scene.
+    bool MapLoaded;
+
     // Material texture slots worth upscaling, and whether each is a normal map
     static readonly (string prop, bool isNormal)[] TextureSlots =
     {
@@ -52,6 +61,12 @@ public class PhxTextureUpscaler : MonoBehaviour
         ("_MaskMap", false),
         ("_EmissiveColorMap", false),
         ("_DetailMap", false),
+        // MaterialLoader binds glow through _EmissionMap (builtin name)
+        // as well as _EmissiveColorMap, and writes the base map via
+        // Material.mainTexture - which resolves to _BaseColorMap on
+        // HDRP/Lit and _MainTex elsewhere. Both are already listed
+        // above; _EmissionMap was the one genuinely missing.
+        ("_EmissionMap", false),
     };
 
 
@@ -67,6 +82,13 @@ public class PhxTextureUpscaler : MonoBehaviour
             return;
         }
         UpscaleMat = new Material(shader);
+
+        // The real load-complete signal, replacing a fixed delay that was
+        // always a guess. Subscribed once here rather than per map.
+        if (PhxGame.Instance != null)
+        {
+            PhxGame.Instance.OnMapLoaded += () => MapLoaded = true;
+        }
     }
 
     void Update()
@@ -86,6 +108,16 @@ public class PhxTextureUpscaler : MonoBehaviour
         }
         Cache.Clear();
         Rejected.Clear();
+
+        // Our instanced copies referenced the old map's textures. Destroy
+        // them rather than leaking one material per distinct source
+        // material, every map load.
+        foreach (Material m in Instanced.Values)
+        {
+            if (m != null) Destroy(m);
+        }
+        Instanced.Clear();
+        MapLoaded = false;
         BudgetUsedBytes = 0;
 
         if (scene != null && PhxBF3.Config.UpscaleTextures)
@@ -94,35 +126,126 @@ public class PhxTextureUpscaler : MonoBehaviour
         }
     }
 
+    /// <remarks>
+    /// This is a second writer of material texture state, and it writes to
+    /// <c>sharedMaterials</c> - the imported asset itself, not a per-renderer
+    /// copy - a second after the map loads. MaterialLoader is the first
+    /// writer, at import; nothing reconciles the two, and because the target
+    /// is shared, a swap made while walking one renderer silently applies to
+    /// every other renderer using that material.
+    ///
+    /// It is also, on the evidence, doing nothing: the last run reported
+    /// "0 textures upscaled (0 slots inspected)". A pass that inspects zero
+    /// slots has found no material with any of its TextureSlots, which means
+    /// the property names it looks for do not match what MaterialLoader binds.
+    /// So this is currently a dormant hazard rather than an active one - it
+    /// costs a full scene walk and delivers nothing.
+    ///
+    /// Left in place rather than removed because the intent is sound and the
+    /// fix is to reconcile the slot names, but it must not be woken up before
+    /// it either takes ownership from MaterialLoader or works on instanced
+    /// copies. Waking it as-is would mutate shared imported assets from a
+    /// coroutine, which is the same class of bug as the lighting writers.
+    /// </remarks>
+    /// <summary>
+    /// Walk the loaded map's materials and swap in upscaled textures.
+    /// </summary>
+    /// <remarks>
+    /// Four things had to be true before this could be woken up safely, and
+    /// none of them were:
+    ///
+    /// 1. It ran on a fixed one-second delay, which is nowhere near a real map
+    ///    import, so it usually walked an empty scene. It now runs off the
+    ///    actual load-complete signal.
+    /// 2. FindObjectsOfType skipped inactive objects, and plenty of map
+    ///    geometry is inactive while loading finishes.
+    /// 3. Its slot list did not match what MaterialLoader binds: the importer
+    ///    writes the base map through Material.mainTexture and glow through
+    ///    _EmissionMap, neither of which was looked for. That is why it kept
+    ///    reporting "0 slots inspected".
+    /// 4. It wrote to sharedMaterials - the imported asset itself - so a swap
+    ///    made while walking one renderer silently applied everywhere, and
+    ///    fought MaterialLoader for ownership.
+    ///
+    /// (4) is fixed by instancing once per shared material and giving every
+    /// renderer that referenced the original the same instance. That keeps one
+    /// material per distinct source material, so batching survives, while the
+    /// imported asset is left alone.
+    /// </remarks>
     IEnumerator UpscaleSceneTextures()
     {
-        // let the map finish importing before we walk its materials
-        yield return new WaitForSeconds(1f);
+        // Wait for the map to actually finish importing. The old fixed delay
+        // was a guess, and usually a wrong one.
+        float timeout = Time.realtimeSinceStartup + 120f;
+        while (!MapLoaded && Time.realtimeSinceStartup < timeout)
+        {
+            yield return null;
+        }
+        if (!MapLoaded) yield break;
+
+        // One more frame so the last import batch has its renderers enabled.
+        yield return null;
 
         long budgetBytes = (long)PhxBF3.Config.UpscaleBudgetMB * 1024L * 1024L;
-        int processed = 0, upscaled = 0, thisFrame = 0;
+        int processed = 0, upscaled = 0, thisFrame = 0, instanced = 0;
 
-        Renderer[] renderers = FindObjectsOfType<Renderer>();
+        // Include inactive: map geometry is frequently still being enabled.
+        Renderer[] renderers = FindObjectsOfType<Renderer>(true);
+
         foreach (Renderer r in renderers)
         {
             if (r == null) continue;
 
-            foreach (Material mat in r.sharedMaterials)
+            Material[] shared = r.sharedMaterials;
+            if (shared == null || shared.Length == 0) continue;
+
+            Material[] replacement = null;
+
+            for (int slot = 0; slot < shared.Length; ++slot)
             {
-                if (mat == null) continue;
+                Material source = shared[slot];
+                if (source == null) continue;
+
+                // Already instanced this source material for an earlier
+                // renderer - reuse it so they keep sharing one material.
+                if (Instanced.TryGetValue(source, out Material existing))
+                {
+                    if (existing != null)
+                    {
+                        replacement = replacement ?? (Material[])shared.Clone();
+                        replacement[slot] = existing;
+                    }
+                    continue;
+                }
+
+                // Decide whether this material has anything worth upscaling
+                // BEFORE instancing it - instancing every material in the map
+                // would multiply draw-call state for no benefit.
+                if (!MaterialHasUpscalable(source, budgetBytes))
+                {
+                    // Remember the miss so the next renderer using it skips
+                    // the whole check.
+                    Instanced[source] = null;
+                    continue;
+                }
+
+                Material copy = new Material(source);
+                copy.name = source.name + " (upscaled)";
+                Instanced[source] = copy;
+                ++instanced;
 
                 foreach ((string prop, bool isNormal) in TextureSlots)
                 {
-                    if (!mat.HasProperty(prop)) continue;
+                    if (!copy.HasProperty(prop)) continue;
 
-                    Texture src = mat.GetTexture(prop);
+                    Texture src = copy.GetTexture(prop);
                     if (src == null || Rejected.Contains(src)) continue;
 
                     processed++;
 
                     if (Cache.TryGetValue(src, out RenderTexture cached))
                     {
-                        mat.SetTexture(prop, cached);
+                        copy.SetTexture(prop, cached);
                         continue;
                     }
 
@@ -144,7 +267,7 @@ public class PhxTextureUpscaler : MonoBehaviour
                     if (result != null)
                     {
                         Cache[src] = result;
-                        mat.SetTexture(prop, result);
+                        copy.SetTexture(prop, result);
                         BudgetUsedBytes += cost;
                         upscaled++;
                     }
@@ -159,12 +282,46 @@ public class PhxTextureUpscaler : MonoBehaviour
                         yield return null;
                     }
                 }
+
+                replacement = replacement ?? (Material[])shared.Clone();
+                replacement[slot] = copy;
+            }
+
+            // Assign once per renderer rather than per slot: every write to
+            // .materials reallocates the array.
+            if (replacement != null && r != null)
+            {
+                r.sharedMaterials = replacement;
             }
         }
 
         Debug.Log($"[BF3Legacy] Texture upscale pass: {upscaled} textures upscaled " +
-                  $"({processed} slots inspected, {BudgetUsedBytes / (1024 * 1024)} MB / " +
+                  $"({processed} slots inspected, {instanced} material(s) instanced, " +
+                  $"{BudgetUsedBytes / (1024 * 1024)} MB / " +
                   $"{PhxBF3.Config.UpscaleBudgetMB} MB budget used)");
+    }
+
+    /// <summary>
+    /// Whether a material holds at least one texture this pass would replace.
+    /// </summary>
+    /// <remarks>
+    /// Checked before instancing so materials that would gain nothing keep
+    /// pointing at the shared imported asset.
+    /// </remarks>
+    bool MaterialHasUpscalable(Material mat, long budgetBytes)
+    {
+        foreach ((string prop, bool _) in TextureSlots)
+        {
+            if (!mat.HasProperty(prop)) continue;
+
+            Texture src = mat.GetTexture(prop);
+            if (src == null) continue;
+
+            if (Cache.ContainsKey(src)) return true;
+            if (Rejected.Contains(src)) continue;
+            if (ShouldUpscale(src)) return true;
+        }
+        return false;
     }
 
     bool ShouldUpscale(Texture src)
@@ -257,6 +414,16 @@ public class PhxTextureUpscaler : MonoBehaviour
             if (rt != null) rt.Release();
         }
         Cache.Clear();
-        if (UpscaleMat != null) Destroy(UpscaleMat);
+        Rejected.Clear();
+
+        // Our instanced copies referenced the old map's textures. Destroy
+        // them rather than leaking one material per distinct source
+        // material, every map load.
+        foreach (Material m in Instanced.Values)
+        {
+            if (m != null) Destroy(m);
+        }
+        Instanced.Clear();
+        MapLoaded = false;
     }
 }

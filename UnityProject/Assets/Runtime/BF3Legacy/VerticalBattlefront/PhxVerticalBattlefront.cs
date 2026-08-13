@@ -87,6 +87,17 @@ public class PhxVerticalBattlefront : MonoBehaviour
         string mapScript = PhxGame.Instance != null ? PhxGame.Instance.CurrentMapScript : null;
         if (string.IsNullOrEmpty(mapScript)) return;
 
+        // Greybox capital ships are content this project invented; a stock map
+        // gets the skybox its artists drew. Hanging two stand-in cruisers over
+        // the Coruscant plaza is not an interpretation of anything in the
+        // map's data - the stock space maps that really do have ships drive
+        // them through PhxSpaceAssault, which is handled below.
+        if (PhxGame.Instance != null && !PhxGame.Instance.CurrentMapIsAddon)
+        {
+            Debug.Log($"[BF3Legacy] '{mapScript}' is a stock map; no greybox space layer.");
+            return;
+        }
+
         PhxSpaceLayerKind kind = ClassifyMap(mapScript.ToLowerInvariant());
         if (kind == PhxSpaceLayerKind.None)
         {

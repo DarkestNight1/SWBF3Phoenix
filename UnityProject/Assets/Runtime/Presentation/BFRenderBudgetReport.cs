@@ -47,6 +47,8 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         Debug.Log(sb.ToString());
     }
 
+    static readonly List<Material> MaterialScratch = new List<Material>();
+
     void ReportGeometry(StringBuilder sb)
     {
         Renderer[] renderers = FindObjectsOfType<Renderer>();
@@ -62,16 +64,29 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             if (renderer is SkinnedMeshRenderer) ++skinned;
             if (renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) ++shadowCasters;
 
-            Material[] shared = renderer.sharedMaterials;
-            for (int m = 0; m < shared.Length; ++m)
+            // Into a reused list rather than the sharedMaterials property,
+            // which hands back a fresh array per renderer.
+            renderer.GetSharedMaterials(MaterialScratch);
+            for (int m = 0; m < MaterialScratch.Count; ++m)
             {
-                if (shared[m] != null) materials.Add(shared[m].GetInstanceID());
+                if (MaterialScratch[m] != null) materials.Add(MaterialScratch[m].GetInstanceID());
             }
 
             MeshFilter filter = renderer.GetComponent<MeshFilter>();
             Mesh mesh = filter != null ? filter.sharedMesh
                                        : (renderer as SkinnedMeshRenderer)?.sharedMesh;
-            if (mesh != null) triangles += mesh.triangles.LongLength / 3;
+            if (mesh == null) continue;
+
+            // GetIndexCount, not the triangles array. Reading .triangles
+            // copies the whole index buffer out of the mesh - about a megabyte
+            // and a half of garbage across a map, to produce a single number -
+            // and it throws outright on any mesh the importer marked
+            // non-readable, which would make this report fail on exactly the
+            // content it exists to measure.
+            for (int sub = 0; sub < mesh.subMeshCount; ++sub)
+            {
+                triangles += (long)mesh.GetIndexCount(sub) / 3;
+            }
         }
 
         sb.Append("  renderers      ").Append(renderers.Length)
@@ -79,6 +94,10 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
           .Append(", shadow casters ").Append(shadowCasters).AppendLine(")");
         sb.Append("  unique mats    ").Append(materials.Count).AppendLine();
         sb.Append("  triangles      ").Append(triangles / 1000).AppendLine("k");
+        sb.Append("  cloth pieces   ").Append(BFClothImporter.PiecesAttached)
+          .AppendLine(" authored CLTH piece(s) attached");
+        sb.Append("  authored LODs  ").Append(ModelLoader.LODGroupsBuilt)
+          .AppendLine(" model(s) with a stock low-detail mesh");
 
         // The number that most often explains a bad frame on this content.
         // Every renderer is at least one draw call unless something batches or

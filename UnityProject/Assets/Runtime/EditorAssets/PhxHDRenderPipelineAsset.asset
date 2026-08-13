@@ -198,11 +198,11 @@ MonoBehaviour:
     materialQuality: 0
   m_RenderPipelineSettings:
     supportShadowMask: 1
-    supportSSR: 0
+    supportSSR: 1
     supportSSRTransparent: 0
     supportSSAO: 1
-    supportSSGI: 1
-    supportSubsurfaceScattering: 1
+    supportSSGI: 0
+    supportSubsurfaceScattering: 0
     sssSampleBudget:
       m_Values: 140000002800000050000000
       m_SchemaId:
@@ -217,8 +217,8 @@ MonoBehaviour:
     lightLayerName5: Light Layer 5
     lightLayerName6: Light Layer 6
     lightLayerName7: Light Layer 7
-    supportDistortion: 1
-    supportTransparentBackface: 1
+    supportDistortion: 0
+    supportTransparentBackface: 0
     supportTransparentDepthPrepass: 1
     supportTransparentDepthPostpass: 1
     colorBufferFormat: 48
@@ -257,7 +257,7 @@ MonoBehaviour:
       cookieAtlasLastValidMip: 0
       cookieTexArraySize: 1
       planarReflectionAtlasSize: 1024
-      reflectionProbeCacheSize: 64
+      reflectionProbeCacheSize: 16
       reflectionCubemapSize: 256
       reflectionCacheCompressed: 0
       reflectionProbeFormat: 74
@@ -267,10 +267,10 @@ MonoBehaviour:
         m_Bits: 0
       supportFabricConvolution: 0
       maxDirectionalLightsOnScreen: 16
-      maxPunctualLightsOnScreen: 512
-      maxAreaLightsOnScreen: 64
+      maxPunctualLightsOnScreen: 96
+      maxAreaLightsOnScreen: 1
       maxEnvLightsOnScreen: 64
-      maxDecalsOnScreen: 512
+      maxDecalsOnScreen: 128
       maxPlanarReflectionOnScreen: 16
       maxLightsPerClusterCell: 8
     hdShadowInitParams:
@@ -282,11 +282,11 @@ MonoBehaviour:
         shadowAtlasDepthBits: 32
         useDynamicViewportRescale: 1
       areaLightShadowAtlas:
-        shadowAtlasResolution: 4096
+        shadowAtlasResolution: 256
         shadowAtlasDepthBits: 32
         useDynamicViewportRescale: 1
       cachedPunctualLightShadowAtlas: 2048
-      cachedAreaLightShadowAtlas: 1024
+      cachedAreaLightShadowAtlas: 256
       shadowResolutionDirectional:
         m_Values: 00010000000200000004000000080000
         m_SchemaId:
@@ -301,7 +301,7 @@ MonoBehaviour:
           m_Id: With4Levels
       maxDirectionalShadowMapResolution: 2048
       maxPunctualShadowMapResolution: 2048
-      maxAreaShadowMapResolution: 2048
+      maxAreaShadowMapResolution: 256
       supportScreenSpaceShadows: 0
       maxScreenSpaceShadowSlots: 4
       screenSpaceShadowBufferFormat: 48

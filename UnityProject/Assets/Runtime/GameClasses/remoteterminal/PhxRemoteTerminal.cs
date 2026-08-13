@@ -166,6 +166,21 @@ public class PhxRemoteTerminal : PhxInstance<PhxRemoteTerminal.ClassProperties>,
         else ActiveEffect.Stop();
     }
 
+    /// <summary>Put a destroyed terminal back. See <see cref="IPhxDestructible.Restore"/>.</summary>
+    public void Restore()
+    {
+        if (C == null || !Destroyed) return;
+
+        Destroyed = false;
+        CurHealth.Set(C.MaxHealth.Get());
+        SetEffectPlaying(true);
+
+        // It left the registry when it died, so anything that searches for
+        // destructibles - AI target selection, objectives - would not see it
+        // again without this.
+        PhxDestructionRegistry.Register(this);
+    }
+
     public void AddDamage(float damage)
     {
         if (Destroyed) return;

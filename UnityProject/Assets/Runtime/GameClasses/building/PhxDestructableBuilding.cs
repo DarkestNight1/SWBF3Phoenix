@@ -230,4 +230,17 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
 
         CurHealth.Set(Mathf.Max(CurHealth.Get() - damage, 0f));
     }
+
+    /// <summary>Rebuild the structure. See <see cref="IPhxDestructible.Restore"/>.</summary>
+    /// <remarks>
+    /// Only health is set: Tick already watches for health crossing back above
+    /// the rebuild threshold and swaps the model, collision and effects there.
+    /// Doing that work here as well would run it twice on the same frame.
+    /// </remarks>
+    public void Restore()
+    {
+        if (C == null) return;
+
+        CurHealth.Set(C.MaxHealth.Get());
+    }
 }

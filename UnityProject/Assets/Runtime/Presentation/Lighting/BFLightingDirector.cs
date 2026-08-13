@@ -6,15 +6,34 @@ using UnityEngine.Rendering.HighDefinition;
 /// Applies the map's <see cref="BFEnvironmentLightingProfile"/> to HDRP.
 /// </summary>
 /// <remarks>
-/// Sits at volume priority 120, above <c>PhxModernLighting</c> (100, generic
-/// modernization) and <c>PhxMapAtmosphere</c> (110, the map's own authored
-/// fog and sun). The order is deliberate and is the whole "stock data, modern
-/// interpretation" principle expressed as a number: the authored values decide
-/// *what* the environment is, and this decides *how it is rendered*.
+/// Sits at volume priority 120, above <c>PhxModernLighting</c> (100).
 ///
-/// Where the two overlap - fog distance, sun angle - the profile defers to the
-/// authored value unless it declares otherwise, which only the environments
-/// with no meaningful authored sky do (interiors, space).
+/// <para><b>Ownership rules.</b> Four separate regressions in this layer had
+/// one shape: a system read the source data correctly, and a later
+/// "enhancement" overwrote it with a generic rule. Fog colour, sun colour, sun
+/// shadows and skydome shadow casting were each lost that way. Each system
+/// looked reasonable alone; together they discarded the map. Volume priority
+/// does not save you either - a direct property write on a Light or Renderer
+/// is not arbitrated by priority at all, so two writers resolve by whichever
+/// component happened to be constructed first.</para>
+///
+/// <list type="number">
+/// <item><b>One writer per parameter.</b> Fog, sun colour, sun angle, sun
+/// shadows, exposure, AO, contact shadows, micro shadows and SSR are written
+/// here and nowhere else. <c>PhxModernLighting</c> owns the static stack -
+/// tonemapping, bloom, colour grading. <c>PhxMapAtmosphere</c> owns nothing
+/// and only reports.</item>
+///
+/// <item><b>Source data outranks profile data.</b> Where a .lgt or .sky states
+/// a value it wins, and the profile fills only what the map left unsaid. A
+/// profile is a fallback and an interpretation, never a correction.</item>
+///
+/// <item><b>Enhancement passes may only reduce, never promote.</b> A budget
+/// takes shadow casters away; it does not hand them out. This is what
+/// <c>BFProbeManagers</c> violated when it re-enabled shadow casting on the
+/// skydome because the dome was large - the one case where "big" means
+/// backdrop rather than scenery.</item>
+/// </list>
 /// </remarks>
 public class BFLightingDirector : MonoBehaviour
 {
@@ -37,6 +56,32 @@ public class BFLightingDirector : MonoBehaviour
     Light Sun;
     HDAdditionalLightData SunData;
     float SunBaselineIntensity;
+
+    /// <summary>
+    /// Stops of adaptation allowed either side of the map's own exposure.
+    /// </summary>
+    /// <remarks>
+    /// Enough that moving between shade and open ground is comfortable rather
+    /// than a hard clip, small enough that the difference between them is
+    /// still visible - which is the whole point of the level being lit that
+    /// way. SWBF2 itself had no adaptation at all.
+    /// </remarks>
+    /// <remarks>
+    /// Asymmetric, because the sun is the brightest thing in the scene and
+    /// almost nothing in frame is as bright as it. A band centred on the sun's
+    /// own EV exposes correctly for a surface facing it directly and leaves
+    /// everything else underexposed - which on Kashyyyk, where the fight
+    /// happens under a canopy several stops down from open sky, means a black
+    /// forest floor. Room to open up is what a shaded scene needs; room to
+    /// stop down further than the sun is what nothing needs.
+    /// </remarks>
+    const float ExposureAdaptationStops = 1.5f;
+    const float ExposureOpenUpStops = 4f;
+
+    /// <summary>
+    /// Ceiling on fog albedo. Below 1 so fog always absorbs something.
+    /// </summary>
+    const float MaxFogAlbedo = 0.75f;
 
     /// <summary>The profile in force, for anything that needs to read it.</summary>
     public static BFEnvironmentLightingProfile Active { get; private set; } =
@@ -105,14 +150,22 @@ public class BFLightingDirector : MonoBehaviour
         Debug.Log($"[BFPresentation] Lighting profile '{Active.Name}' for '{worldName}': " +
                   $"sun {SunBaselineIntensity:F0} x{Active.SunIntensityScale:F2} = " +
                   $"{(SunData != null ? SunData.intensity : 0f):F0} lux, " +
-                  $"ambient x{Active.AmbientIntensity:F2}, EV {Active.ExposureCompensation:+0.00;-0.00;0}, " +
+                  $"ambient x{Active.AmbientIntensity:F2}, " +
+                  $"exposure EV {Exposure.limitMin.value:F1}..{Exposure.limitMax.value:F1} " +
+                  $"({Active.ExposureCompensation:+0.00;-0.00;0} bias), " +
                   $"fog {(Fog.enabled.value ? Fog.meanFreePath.value.ToString("F0") + "m" : "off")}, " +
                   $"dominant surface {Active.DominantSurface}.");
     }
 
     void ApplySky(BFEnvironmentLightingProfile p)
     {
-        switch (p.Sky)
+        // The map may have painted its own sky. Measured at load rather than
+        // authored, because whether a dome is scenery or the actual sky is a
+        // property of the content, not of a profile someone wrote by hand.
+        BFEnvironmentLightingProfile.BFSkyKind kind =
+            BFSkydomeReconciler.Evaluate(p) ?? p.Sky;
+
+        switch (kind)
         {
             case BFEnvironmentLightingProfile.BFSkyKind.PhysicallyBased:
                 VisualEnvironment.skyType.Override((int)SkyType.PhysicallyBased);
@@ -140,7 +193,22 @@ public class BFLightingDirector : MonoBehaviour
                 GradientSky.middle.Override(new Color(0.008f, 0.01f, 0.018f));
                 GradientSky.bottom.Override(new Color(0.005f, 0.006f, 0.012f));
                 break;
+
+            case BFEnvironmentLightingProfile.BFSkyKind.AuthoredDome:
+                // The dome is what the player sees, so this gradient exists
+                // only to supply ambient and to fill any gap the dome geometry
+                // leaves. Keyed off the map's own fog colour, which the artist
+                // chose to match the horizon they painted - so the ambient
+                // agrees with the sky instead of simulating a different one.
+                Color domeAmbient = BFSkydomeReconciler.GetDomeAmbient(p);
+                VisualEnvironment.skyType.Override((int)SkyType.Gradient);
+                GradientSky.top.Override(domeAmbient * 0.9f);
+                GradientSky.middle.Override(domeAmbient);
+                GradientSky.bottom.Override(Color.Lerp(domeAmbient, p.PlanetaryGroundTint, 0.6f));
+                break;
         }
+
+        Debug.Log($"[BFLightingDirector] Sky: {kind} - {BFSkydomeReconciler.LastDecision}");
     }
 
     /// <summary>
@@ -177,11 +245,48 @@ public class BFLightingDirector : MonoBehaviour
         }
 
         Fog.enabled.Override(true);
-        Fog.colorMode.Override(FogColorMode.SkyColor);
+
+        // The map's own fog colour, when it has one.
+        //
+        // Every .sky states a FogColor, and it is one of the strongest
+        // identifiers a level has - Kashyyyk's green haze, Kamino's grey
+        // squall, Geonosis' dust. Overriding colorMode to SkyColor discarded
+        // all of it and replaced every map's fog with a tint of its own sky,
+        // which is why fogged maps all read the same washed-out way. Worse,
+        // PhxMapAtmosphere had already read the authored colour and logged it,
+        // so the console said the right thing while a higher-priority volume
+        // quietly replaced it.
+        bool authoredColor = SWBFSkyProperties.HasSkyInfo;
+        if (authoredColor)
+        {
+            Fog.colorMode.Override(FogColorMode.ConstantColor);
+            Fog.color.Override(SWBFSkyProperties.FogColor);
+        }
+        else
+        {
+            Fog.colorMode.Override(FogColorMode.SkyColor);
+        }
+
+        // A .sky states fog as a linear near/far pair, which is a different
+        // quantity from HDRP's mean free path and cannot be substituted for it.
+        //
+        // Linear fog is clear until `near` and opaque at `far`. Mean free path
+        // is the distance over which transmittance falls to 1/e, accumulating
+        // from the camera with no clear zone at all. Passing `far` straight in
+        // - Kashyyyk authors (90, 450) - therefore put haze on everything from
+        // the lens outward, including the ninety metres the author deliberately
+        // left clear, and left the far end thinner than intended besides.
+        //
+        // The span between the two is the distance over which the author
+        // wanted fog to build, so that is what the extinction distance is
+        // derived from.
         Fog.meanFreePath.Override(authored && p.PreferAuthoredFog
-            ? Mathf.Max(20f, SWBFSkyProperties.FogRange.y)
+            ? Mathf.Max(20f, SWBFSkyProperties.FogRange.y - SWBFSkyProperties.FogRange.x)
             : p.FogMeanFreePath);
-        Fog.tint.Override(p.FogTint);
+        // Tint multiplies the fog colour, so it only applies where the colour
+        // is ours to choose. Applied on top of an authored colour it would
+        // shift the very thing the authored value exists to state.
+        Fog.tint.Override(authoredColor ? Color.white : p.FogTint);
         Fog.baseHeight.Override(0f);
         Fog.maximumHeight.Override(p.FogMaximumHeight);
 
@@ -192,16 +297,57 @@ public class BFLightingDirector : MonoBehaviour
         // rather than absorbs, so it belongs near white - the tint carries the
         // colour. Driving it to half grey, as this first did, turned every
         // fogged map into a light sink and was the other half of the darkness.
+        // Capped below 1, because albedo 1 is a medium that scatters
+        // everything and absorbs nothing - fog that only ever adds light.
+        // Kashyyyk's 1.5x multiplier drove 0.85 * 1.5 past the clamp to
+        // exactly white, so its forest haze became a sky-bright emitter
+        // filling the frame, and auto-exposure metered that and crushed the
+        // forest floor beneath it to black. Real fog takes light out of a
+        // scene as well as spreading it around.
         float scatter = Mathf.Clamp(p.VolumetricLightingMultiplier, 0.5f, 2f);
-        Fog.albedo.Override(Color.Lerp(Color.white, p.FogTint, 0.5f) * Mathf.Clamp01(0.85f * scatter));
+        float albedo = Mathf.Min(0.85f * scatter, MaxFogAlbedo);
+        Fog.albedo.Override(Color.Lerp(Color.white, p.FogTint, 0.5f) * albedo);
         Fog.globalLightProbeDimmer.Override(1f);
     }
 
+    /// <summary>
+    /// Anchor exposure to how bright this map's own key light actually is.
+    /// </summary>
+    /// <remarks>
+    /// A fixed exposure band cannot serve the whole game. Direct sunlight sits
+    /// near EV 15 and a lit interior near EV 8, so any single window either
+    /// blows out Tatooine or leaves a Coruscant corridor black - which is what
+    /// a hand-picked band did, in both directions on different maps.
+    ///
+    /// The map already states the answer. The sun's intensity is in lux
+    /// straight off the .lgt, and EV100 for a given illuminance is
+    /// <c>log2(E / 2.5)</c> - so the level's own key light names the exposure
+    /// its author was lighting for. Adaptation is then allowed only a narrow
+    /// band either side of that, which is what keeps a doorway darker than the
+    /// plaza instead of re-metering until both look the same.
+    ///
+    /// Falls back to the profile's declared limits when there is no sun, which
+    /// is the case for interiors and space maps.
+    /// </remarks>
     void ApplyExposure(BFEnvironmentLightingProfile p)
     {
         Exposure.mode.Override(ExposureMode.Automatic);
-        Exposure.limitMin.Override(p.ExposureLimits.x);
-        Exposure.limitMax.Override(p.ExposureLimits.y);
+
+        float keyLux = SunData != null && SunData.gameObject.activeInHierarchy
+            ? SunData.intensity
+            : 0f;
+
+        if (keyLux > 1f)
+        {
+            float ev = Mathf.Log(keyLux / 2.5f, 2f);
+            Exposure.limitMin.Override(ev - ExposureOpenUpStops);
+            Exposure.limitMax.Override(ev + ExposureAdaptationStops);
+        }
+        else
+        {
+            Exposure.limitMin.Override(p.ExposureLimits.x);
+            Exposure.limitMax.Override(p.ExposureLimits.y);
+        }
 
         // The per-map value and the user's own bias compose: a player who has
         // dialled the whole game brighter should still see Hoth pulled down
@@ -358,7 +504,12 @@ public class BFLightingDirector : MonoBehaviour
 
         SunData.EnableColorTemperature(false);
         SunData.angularDiameter = p.SunAngularDiameter;
-        SunData.EnableShadows(true);
+
+        // Whether the sun casts is the importer's decision, taken from the
+        // .lgt's own CastShadow field - only 53 lights in the whole game carry
+        // it, so it is a deliberate statement. Forcing it on here, as this did,
+        // silently overrode that for every map: the one directional the
+        // director happened to pick up always cast, whatever the level said.
         SunData.shadowUpdateMode = ShadowUpdateMode.EveryFrame;
         SunData.shadowNearPlane = 0.1f;
 
@@ -372,13 +523,40 @@ public class BFLightingDirector : MonoBehaviour
         // asks. A scale of 0 means "this environment has no meaningful sun" -
         // an interior, a hangar - and there the map's own fixtures are the
         // whole lighting design, so touching the directional at all is wrong.
+        // Time of day folds in here, as a grade on the authored sun, because
+        // this is the single writer. PhxWeatherSystem only states which time
+        // of day its map asked for - it used to rescale every directional
+        // light itself, in place and without a baseline, which compounded
+        // against whatever this had already applied.
+        PhxWeatherSystem.GetTimeOfDayGrade(out float todScale, out Color todTint, out float todWeight);
+
         if (p.SunIntensityScale > 0f && SunBaselineIntensity > 0f)
         {
-            SunData.intensity = SunBaselineIntensity * p.SunIntensityScale;
+            SunData.intensity = SunBaselineIntensity * p.SunIntensityScale * todScale;
         }
 
-        Sun.color = p.SunColor;
-        Sun.shadows = LightShadows.Soft;
+        // The map's own sun colour wins, exactly as its fog colour does.
+        //
+        // This was the third parameter in the stack with two owners, and the
+        // worst-behaved of them: BFLightingDirector wrote the profile's colour
+        // and PhxMapAtmosphere wrote the .sky's, both as direct property
+        // assignments on the Light rather than volume overrides. Volume
+        // priority does not arbitrate that - whichever OnMapLoaded handler ran
+        // last simply won, and the order depends on which host component was
+        // constructed first. The sun's colour was therefore decided by
+        // component construction order.
+        Color sunColor = SWBFSkyProperties.HasSunInfo &&
+                         SWBFSkyProperties.SunColor.maxColorComponent > 0f
+            ? SWBFSkyProperties.SunColor
+            : p.SunColor;
+
+        Sun.color = todWeight > 0f ? Color.Lerp(sunColor, todTint, todWeight) : sunColor;
+
+        // Filtering quality only, and only where shadows are already on.
+        // Assigning Soft unconditionally enables them, which would put back
+        // exactly the override removed above - the importer's reading of the
+        // .lgt's CastShadow field is the decision, and this is a promotion.
+        if (Sun.shadows != LightShadows.None) Sun.shadows = LightShadows.Soft;
 
         // The authored angle is the designer's; only override it where the map
         // cannot have meant one (interiors, space).

@@ -47,6 +47,18 @@ public interface IPhxDestructible
     bool IsDestroyed { get; }
 
     void AddDamage(float damage);
+
+    /// <summary>
+    /// Return to full health, undoing a destruction.
+    /// </summary>
+    /// <remarks>
+    /// Missions call this through RespawnObject when a later phase needs an
+    /// object the previous phase was allowed to level - a shield generator, a
+    /// bridge, a turret the defenders are supposed to find intact. It restores
+    /// the existing instance rather than replacing it so that object pointers
+    /// the script already holds, and any marker or region membership, survive.
+    /// </remarks>
+    void Restore();
 }
 
 /// <summary>

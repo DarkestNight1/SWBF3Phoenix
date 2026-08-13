@@ -90,18 +90,25 @@ public class PhxGraphicsEnhancer : MonoBehaviour
             v.smoothness.Override(0.5f);
         }, "vignette");
 
-        TryAdd(() =>
+        // Lens artifacts, off unless asked for - see Config.LensSimulation.
+        // Chromatic aberration in particular is clearly visible as red/cyan
+        // fringing wherever a bright edge meets a dark one, which on a map of
+        // pale pillars against shadow is most of the frame.
+        if (PhxBF3.Config.LensSimulation)
         {
-            ChromaticAberration ca = PostProfile.Add<ChromaticAberration>(true);
-            ca.intensity.Override(0.08f);          // barely-there lens realism
-        }, "chromatic aberration");
+            TryAdd(() =>
+            {
+                ChromaticAberration ca = PostProfile.Add<ChromaticAberration>(true);
+                ca.intensity.Override(0.08f);
+            }, "chromatic aberration");
 
-        TryAdd(() =>
-        {
-            FilmGrain fg = PostProfile.Add<FilmGrain>(true);
-            fg.type.Override(FilmGrainLookup.Thin1);
-            fg.intensity.Override(0.12f);
-        }, "film grain");
+            TryAdd(() =>
+            {
+                FilmGrain fg = PostProfile.Add<FilmGrain>(true);
+                fg.type.Override(FilmGrainLookup.Thin1);
+                fg.intensity.Override(0.12f);
+            }, "film grain");
+        }
 
         // NOTE: no PhysicallyBasedSky / VisualEnvironment override here.
         //

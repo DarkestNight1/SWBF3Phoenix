@@ -317,6 +317,23 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         }
     }
 
+    /// <summary>
+    /// Nothing to restore: a destroyed vehicle's wreck is removed.
+    /// </summary>
+    /// <remarks>
+    /// Missions that want a vehicle back use the map's own vehicle spawner,
+    /// which builds a fresh one at a spawn point with a fresh set of seats.
+    /// Reviving this instance would produce a vehicle whose chunks have
+    /// already been thrown and whose occupants were ejected.
+    /// </remarks>
+    public void Restore()
+    {
+        if (!IsDestroyed) return;
+
+        Debug.LogWarning($"[Lua] RespawnObject on vehicle '{name}', which was removed " +
+                         "when it was destroyed. Use the map's vehicle spawner instead.");
+    }
+
     protected virtual void OnVehicleDestroyed()
     {
         if (IsDestroyed) return;

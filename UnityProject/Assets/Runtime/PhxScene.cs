@@ -90,6 +90,16 @@ public class PhxScene
         PhxComboLoader.Reset();
         PhxAIDirectives.Reset();
 
+        // The bus holds its listener lists in statics, which outlive a match -
+        // in a player build they outlive everything short of the process. A
+        // listener registered last match is a closure over last match's
+        // objects: it keeps them alive, and it gets invoked with destroyed
+        // Unity references the moment the same event fires again. Nothing
+        // subscribes yet, so this is currently free; it stops being free the
+        // first time something does, and that is a failure which would look
+        // like a bug in whatever subscribed rather than one here.
+        BFEventBus.Reset();
+
         Animator = new PhxSceneAnimator();
     }
 

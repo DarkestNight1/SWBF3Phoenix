@@ -1,0 +1,358 @@
+From e521dda1898587cfa19f0e51689a502e9dbe880b Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 10:06:41 -0400
+Subject: [PATCH 1/2] Phoenix runtime fixes to the LVL loaders
+
+Applied while debugging SWBF3Phoenix against a real BF2 install:
+
+- EffectsLoader: match MinMaxCurve modes across x/y/z of the velocity
+  module. Unity rejects a vector module whose axes mix constant and
+  curve modes and silently drops the velocity entirely, which is the
+  source of the "Particle Velocity curves must all be in the same
+  mode" spam and of effects playing with no motion.
+- MaterialLoader: fall back to the default lit material, with an
+  explicit error, when the terrain material has no shader. A null
+  shader renders as solid magenta with nothing in the log to say why.
+- ModelLoader: report zero-filled collision primitives once per model
+  at Log level instead of warning per primitive.
+- TextureLoader: do not warn for the "noIcon" sentinel, which is BF2's
+  marker for "deliberately has no icon" rather than a missing asset.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ LVLImport/Loaders/EffectsLoader.cs  | 92 +++++++++++++++++++++++++++++
+ LVLImport/Loaders/MaterialLoader.cs | 42 +++++++++++++
+ LVLImport/Loaders/ModelLoader.cs    | 17 +++++-
+ LVLImport/Loaders/TextureLoader.cs  |  6 +-
+ 4 files changed, 154 insertions(+), 3 deletions(-)
+
+diff --git a/LVLImport/Loaders/EffectsLoader.cs b/LVLImport/Loaders/EffectsLoader.cs
+index 3b061dd..3069419 100644
+--- a/LVLImport/Loaders/EffectsLoader.cs
++++ b/LVLImport/Loaders/EffectsLoader.cs
+@@ -334,6 +334,14 @@ public class EffectsLoader : Loader {
+         if (!HasEmptySpawner || HasVelTransformation)
+         {
+             ParticleSystem.MinMaxCurve[] VelCurves = ExtractVelocityOverLifetimeCurves(scEmitter, out ParticleSystem.MinMaxCurve scaleCurveOut);
++
++            // Unity requires x/y/z of a vector module to share one MinMaxCurve
++            // mode. An effect whose axes mix constants and curves - very common
++            // in the stock data - is rejected wholesale with "Particle Velocity
++            // curves must all be in the same mode" and silently loses its
++            // velocity, which is why the log fills with that warning.
++            MatchCurveModes(VelCurves);
++
+             velModule.enabled = true;
+             velModule.x = VelCurves[0];
+             velModule.y = VelCurves[1];
+@@ -714,6 +722,90 @@ public class EffectsLoader : Loader {
+     }
+ 
+ 
++    /// <summary>
++    /// Promote a set of MinMaxCurves to a single shared mode, which Unity
++    /// requires for the x/y/z of a vector particle module. Curve modes are
++    /// strictly more expressive than constant ones, so promoting never loses
++    /// data: a constant becomes a flat curve of the same value.
++    /// </summary>
++    static void MatchCurveModes(ParticleSystem.MinMaxCurve[] curves)
++    {
++        if (curves == null || curves.Length < 2) return;
++
++        bool anyCurve = false;
++        bool anyTwoSided = false;
++        for (int i = 0; i < curves.Length; ++i)
++        {
++            ParticleSystemCurveMode m = curves[i].mode;
++            anyCurve |= m == ParticleSystemCurveMode.Curve || m == ParticleSystemCurveMode.TwoCurves;
++            anyTwoSided |= m == ParticleSystemCurveMode.TwoCurves || m == ParticleSystemCurveMode.TwoConstants;
++        }
++
++        // Already uniform - leave the authored curves untouched.
++        ParticleSystemCurveMode target;
++        if (anyCurve)
++        {
++            target = anyTwoSided ? ParticleSystemCurveMode.TwoCurves : ParticleSystemCurveMode.Curve;
++        }
++        else
++        {
++            target = anyTwoSided ? ParticleSystemCurveMode.TwoConstants : ParticleSystemCurveMode.Constant;
++        }
++
++        for (int i = 0; i < curves.Length; ++i)
++        {
++            if (curves[i].mode != target)
++            {
++                curves[i] = ConvertCurve(curves[i], target);
++            }
++        }
++    }
++
++    static ParticleSystem.MinMaxCurve ConvertCurve(ParticleSystem.MinMaxCurve c, ParticleSystemCurveMode target)
++    {
++        // Constant modes carry their values in constantMin/constantMax; curve
++        // modes carry a normalized curve scaled by curveMultiplier. Read both
++        // ends of the source in whichever representation it uses, then rebuild.
++        float lo, hi;
++        AnimationCurve loCurve, hiCurve;
++
++        switch (c.mode)
++        {
++            case ParticleSystemCurveMode.Constant:
++                lo = hi = c.constant;
++                loCurve = hiCurve = AnimationCurve.Constant(0f, 1f, 1f);
++                break;
++            case ParticleSystemCurveMode.TwoConstants:
++                lo = c.constantMin;
++                hi = c.constantMax;
++                loCurve = AnimationCurve.Constant(0f, 1f, 1f);
++                hiCurve = AnimationCurve.Constant(0f, 1f, 1f);
++                break;
++            case ParticleSystemCurveMode.Curve:
++                lo = hi = c.curveMultiplier;
++                loCurve = hiCurve = c.curve;
++                break;
++            default: // TwoCurves
++                lo = hi = c.curveMultiplier;
++                loCurve = c.curveMin;
++                hiCurve = c.curveMax;
++                break;
++        }
++
++        switch (target)
++        {
++            case ParticleSystemCurveMode.Constant:
++                return new ParticleSystem.MinMaxCurve(hi);
++            case ParticleSystemCurveMode.TwoConstants:
++                return new ParticleSystem.MinMaxCurve(lo, hi);
++            case ParticleSystemCurveMode.Curve:
++                return new ParticleSystem.MinMaxCurve(hi, hiCurve);
++            default: // TwoCurves
++                return new ParticleSystem.MinMaxCurve(Mathf.Max(Mathf.Abs(lo), Mathf.Abs(hi)), loCurve, hiCurve);
++        }
++    }
++
++
+     // Must adapt for circles...
+     bool HasStartingVelocity(Scope scSpawner)
+     {
+diff --git a/LVLImport/Loaders/MaterialLoader.cs b/LVLImport/Loaders/MaterialLoader.cs
+index 5abb2db..abad3cf 100644
+--- a/LVLImport/Loaders/MaterialLoader.cs
++++ b/LVLImport/Loaders/MaterialLoader.cs
+@@ -53,6 +53,20 @@ public class MaterialLoader : Loader
+             {
+                 _DefaultTerrainMaterial = new UMaterial(Shader.Find(DefaultTerrainSTDShader));
+             }
++
++            // A missing Resources entry, or a terrain shadergraph that failed
++            // to compile, yields a material with no shader - which Unity draws
++            // as solid magenta. That looked like a texturing bug on the ground
++            // of every outdoor map with no hint as to the cause, so say it
++            // plainly and fall back to the lit material the models already use.
++            if (_DefaultTerrainMaterial == null || _DefaultTerrainMaterial.shader == null)
++            {
++                Debug.LogError(
++                    "Terrain material unavailable (missing Resources asset or the terrain " +
++                    "shader failed to compile) - terrain would render magenta. Falling back " +
++                    "to the default lit material; terrain layer blending will be missing.");
++                _DefaultTerrainMaterial = new UMaterial(GetDefaultMaterial());
++            }
+         }
+         return _DefaultTerrainMaterial;
+     }
+@@ -139,6 +153,23 @@ public class MaterialLoader : Loader
+                     {
+                         material = new UMaterial(GetDefaultTransparentMaterial());
+ 
++                        // A material can carry Glow AND Transparent together -
++                        // force fields, shield bubbles and holograms all do.
++                        // The branch above deliberately excludes those (a glow
++                        // map lives in the alpha channel, which transparency
++                        // also wants), but dropping the glow entirely left them
++                        // as near-invisible sheets of glass. Drive the emissive
++                        // from the colour map instead of the alpha so both
++                        // effects survive.
++                        if (matFlags.HasFlag(EMaterialFlags.Glow) && importedTex != null)
++                        {
++                            material.EnableKeyword("_EMISSIVE_MAPPING_BASE");
++                            material.EnableKeyword("_EMISSIVE_COLOR_MAP");
++                            material.SetTexture("_EmissiveColorMap", importedTex);
++                            material.SetColor("_EmissiveColor", Color.white * 6.0f);
++                            material.SetFloat("_EmissiveExposureWeight", 0.0f);
++                        }
++
+                         //material.SetFloat("_AlphaCutoffEnable", 1.0f);
+                         //material.SetFloat("_SurfaceType", 1.0f);
+                         //material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+@@ -167,7 +198,18 @@ public class MaterialLoader : Loader
+ 
+                     if (matFlags.HasFlag(EMaterialFlags.Doublesided))
+                     {
++                        // _DoubleSidedEnable on its own only tells the HDRP
++                        // material inspector what to draw; the shader still
++                        // culls backfaces until the keyword and cull modes are
++                        // set too. Single-sided force fields, foliage cards and
++                        // banners were therefore invisible from one side.
+                         material.SetFloat("_DoubleSidedEnable", 1.0f);
++                        material.EnableKeyword("_DOUBLESIDED_ON");
++                        material.SetFloat("_CullMode", (float)UnityEngine.Rendering.CullMode.Off);
++                        material.SetFloat("_CullModeForward", (float)UnityEngine.Rendering.CullMode.Off);
++                        // Mirror matches the original renderer, which lit both
++                        // faces from the same normal rather than flipping it.
++                        material.SetFloat("_DoubleSidedNormalMode", 1.0f);
+                     }
+ 
+                     material.SetFloat("_Metallic", 0.0f);
+diff --git a/LVLImport/Loaders/ModelLoader.cs b/LVLImport/Loaders/ModelLoader.cs
+index 3eaf1d1..dc09125 100644
+--- a/LVLImport/Loaders/ModelLoader.cs
++++ b/LVLImport/Loaders/ModelLoader.cs
+@@ -28,6 +28,10 @@ public class ModelLoader : Loader {
+     Dictionary<string, SWBFModel> ModelMappingDB = new Dictionary<string, SWBFModel>();
+     Dictionary<string, GameObject> ModelDB = new Dictionary<string, GameObject>();
+ 
++    // Models already reported for having zero-filled collision primitives, so
++    // the note is made once rather than once per primitive.
++    readonly HashSet<string> ReportedUnknownCollision = new HashSet<string>();
++
+ 
+     GameObject ModelDBRoot = new GameObject("ModelDBRoot");
+ 
+@@ -499,10 +503,19 @@ public class ModelLoader : Loader {
+ 
+                     break;
+                 
+-                // This happens, not sure what to make of it, but 
++                // This happens, not sure what to make of it, but
+                 // all prims of this type have zeroed fields.
++                //
++                // Skipping them is correct - there is no geometry to build -
++                // so this is not a defect, just something to note. It used to
++                // warn per primitive, which put hundreds of identical lines in
++                // the log and buried the messages that do matter; report each
++                // model once and at Log level instead.
+                 default:
+-                    Debug.LogWarning(model.Name + ": Unknown collision type encountered");
++                    if (ReportedUnknownCollision.Add(model.Name))
++                    {
++                        Debug.Log($"{model.Name}: collision primitive of an unhandled (zero-filled) type, skipped");
++                    }
+                     break;
+             }
+         }
+diff --git a/LVLImport/Loaders/TextureLoader.cs b/LVLImport/Loaders/TextureLoader.cs
+index 8ff9d9e..5fe4cdd 100644
+--- a/LVLImport/Loaders/TextureLoader.cs
++++ b/LVLImport/Loaders/TextureLoader.cs
+@@ -63,7 +63,11 @@ public class TextureLoader : Loader
+             texDataBase[name] = newTexture;
+             return newTexture;
+         }
+-        else if (printError)
++        // "noIcon" is BF2's sentinel for a class that deliberately has no icon,
++        // not a missing asset, so warning about it is pure noise. Everything
++        // else that fails here is genuinely absent from the loaded lvls -
++        // usually mod content whose data files were never shipped.
++        else if (printError && !string.Equals(name, "noIcon", StringComparison.OrdinalIgnoreCase))
+         {
+             Debug.LogWarning($"Texture '{name}' failed to load!");
+         }
+-- 
+2.55.0.windows.3
+
+
+From 06006d06e2137e8f003d12d5bc1d3403c95e566a Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 22:30:47 -0400
+Subject: [PATCH 2/2] Repair the terrain material's dangling shader reference
+
+HDRPTerrain.mat pointed at shader GUID 24be0fd07876c8c428ffc50674bd9dc7, which
+exists nowhere in the project - not in Assets, not in the HDRP package. The
+terrain shadergraph is c4323b53411a5aa42bb4148d9e652b56. With the reference
+unresolved, Unity substitutes its error shader and every outdoor map renders
+magenta ground.
+
+Also harden the fallback in MaterialLoader. Testing shader == null does not
+catch this case: an unresolved reference yields Hidden/InternalErrorShader, not
+null, so the previous guard never fired and nothing was logged. Check for the
+error shader by name and fall back to the lit material with an explicit
+message.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ .../Resources/HDRPTerrain.mat                 |  2 +-
+ LVLImport/Loaders/MaterialLoader.cs           | 36 ++++++++++++++-----
+ 2 files changed, 28 insertions(+), 10 deletions(-)
+
+diff --git a/LVLImport/ConversionAssets/Resources/HDRPTerrain.mat b/LVLImport/ConversionAssets/Resources/HDRPTerrain.mat
+index 5af8f96..b665737 100644
+--- a/LVLImport/ConversionAssets/Resources/HDRPTerrain.mat
++++ b/LVLImport/ConversionAssets/Resources/HDRPTerrain.mat
+@@ -8,7 +8,7 @@ Material:
+   m_PrefabInstance: {fileID: 0}
+   m_PrefabAsset: {fileID: 0}
+   m_Name: HDRPTerrain
+-  m_Shader: {fileID: -6465566751694194690, guid: 24be0fd07876c8c428ffc50674bd9dc7, type: 3}
++  m_Shader: {fileID: -6465566751694194690, guid: c4323b53411a5aa42bb4148d9e652b56, type: 3}
+   m_ShaderKeywords: _DISABLE_SSR_TRANSPARENT _NORMALMAP_TANGENT_SPACE
+   m_LightmapFlags: 4
+   m_EnableInstancingVariants: 0
+diff --git a/LVLImport/Loaders/MaterialLoader.cs b/LVLImport/Loaders/MaterialLoader.cs
+index abad3cf..1e688a7 100644
+--- a/LVLImport/Loaders/MaterialLoader.cs
++++ b/LVLImport/Loaders/MaterialLoader.cs
+@@ -54,23 +54,41 @@ public class MaterialLoader : Loader
+                 _DefaultTerrainMaterial = new UMaterial(Shader.Find(DefaultTerrainSTDShader));
+             }
+ 
+-            // A missing Resources entry, or a terrain shadergraph that failed
+-            // to compile, yields a material with no shader - which Unity draws
+-            // as solid magenta. That looked like a texturing bug on the ground
+-            // of every outdoor map with no hint as to the cause, so say it
+-            // plainly and fall back to the lit material the models already use.
+-            if (_DefaultTerrainMaterial == null || _DefaultTerrainMaterial.shader == null)
++            // Terrain renders magenta when the material's shader cannot be
++            // resolved. Testing for a null shader is NOT enough and was the
++            // reason an earlier version of this guard never fired: when a
++            // material references a shader GUID that no asset provides, Unity
++            // substitutes Hidden/InternalErrorShader rather than leaving the
++            // reference null. That is exactly what happened here - the terrain
++            // material pointed at a shader GUID present nowhere in the project
++            // - and it renders as the familiar magenta with nothing logged.
++            if (!IsUsable(_DefaultTerrainMaterial))
+             {
+                 Debug.LogError(
+-                    "Terrain material unavailable (missing Resources asset or the terrain " +
+-                    "shader failed to compile) - terrain would render magenta. Falling back " +
+-                    "to the default lit material; terrain layer blending will be missing.");
++                    "Terrain material has no usable shader (unresolved shader reference, or " +
++                    "the terrain shadergraph failed to compile) - terrain would render " +
++                    "magenta. Falling back to the default lit material; terrain layer " +
++                    "blending will be missing.");
+                 _DefaultTerrainMaterial = new UMaterial(GetDefaultMaterial());
+             }
+         }
+         return _DefaultTerrainMaterial;
+     }
+ 
++    /// <summary>
++    /// Whether a material will actually render, rather than showing Unity's
++    /// magenta error colour. Covers the three distinct failures: the asset
++    /// itself missing, a null shader, and - the one that is easy to miss - an
++    /// unresolved shader reference, which Unity fills in with
++    /// Hidden/InternalErrorShader instead of null.
++    /// </summary>
++    static bool IsUsable(UMaterial mat)
++    {
++        return mat != null
++            && mat.shader != null
++            && mat.shader.name != "Hidden/InternalErrorShader";
++    }
++
+     UMaterial GetDefaultTransparentMaterial()
+     {
+         if (_DefaultHDRPTransparentMaterial == null)
+-- 
+2.55.0.windows.3
+

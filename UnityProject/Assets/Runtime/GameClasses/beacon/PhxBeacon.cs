@@ -106,6 +106,22 @@ public class PhxBeacon : PhxInstance<PhxBeacon.ClassProperties>,
         SCENE?.DestroyInstance(this);
     }
 
+    /// <summary>
+    /// Nothing to restore: a finished beacon destroys its own instance.
+    /// </summary>
+    /// <remarks>
+    /// A beacon is a timed call-in, not a fixture - it expires or is shot down
+    /// and DestroyInstance follows either way, so there is no object left to
+    /// bring back. A mission that wants another one calls it in again.
+    /// </remarks>
+    public void Restore()
+    {
+        if (!Finished) return;
+
+        Debug.LogWarning($"[Lua] RespawnObject on beacon '{name}', which no longer " +
+                         "exists. Call in a new beacon instead.");
+    }
+
     public void AddDamage(float damage)
     {
         if (Finished) return;

@@ -42,6 +42,36 @@ public class PhxBF3AIController : PhxAIController
 
     // combat memory
     IPhxControlableInstance TargetPawn;
+
+    /// <summary>
+    /// Whether this soldier currently has a live target. Exposed for the squad
+    /// layer, which picks a formation from whether the squad is fighting or
+    /// moving; goes through GetInstance() so a destroyed pawn reads as false.
+    /// </summary>
+    public bool HasVisibleTarget => TargetPawn != null && TargetPawn.GetInstance() != null;
+
+    /// <summary>Team of the current target, or 0 when there isn't one.</summary>
+    public int GetTargetTeam()
+    {
+        // Team is a PhxProp<int>, so read it through Get() rather than relying
+        // on an implicit conversion unifying with a literal in a ternary.
+        PhxInstance inst = TargetPawn?.GetInstance();
+        if (inst == null) return 0;
+        return inst.Team.Get();
+    }
+
+    /// <summary>Where this soldier's current target is, if it has one.</summary>
+    public bool TryGetTargetPosition(out Vector3 position)
+    {
+        PhxInstance inst = TargetPawn?.GetInstance();
+        if (inst == null)
+        {
+            position = Vector3.zero;
+            return false;
+        }
+        position = inst.transform.position;
+        return true;
+    }
     PhxCapitalShipSubsystem TargetSubsystem;
     float ReactionTimer;
     float BurstTimer;
@@ -332,6 +362,48 @@ public class PhxBF3AIController : PhxAIController
         // ~2.5s plant-and-jump loop at the first ledge/slope.
         ApplyLedgeGuard();
         TickStuckRecovery(deltaTime);
+
+        TickActionAnimation();
+    }
+
+    // Last intent published. Only a change is worth acting on.
+    BFAIAction LastAnimAction = (BFAIAction)(-1);
+    bool HaveAnimAction;
+
+    /// <summary>What this soldier has most recently decided to do.</summary>
+    public BFAIAction CurrentAction => HaveAnimAction ? LastAnimAction : BFAIAction.HoldPosition;
+
+    /// <summary>
+    /// Publish what this soldier is doing as a <see cref="BFAIAction"/>.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately does NOT play a clip. PhxSoldier writes animator layer 0
+    /// every frame from its locomotion state, so anything else writing layer 0
+    /// is either overwritten within a frame or wins briefly and stutters. An
+    /// earlier version of this called BFAIActionAnimation.Play here and did
+    /// exactly that.
+    ///
+    /// The vocabulary is still worth publishing: it is what a HUD, the squad
+    /// layer or the director can read to know intent without reaching into a
+    /// private state machine. Turning it back into animation needs layer
+    /// arbitration - somebody has to own layer 0 and take requests - which is a
+    /// change to PhxSoldier's locomotion code, not a flag.
+    /// </remarks>
+    void TickActionAnimation()
+    {
+        if (!(Pawn is PhxSoldier soldier) || soldier.IsInVehicle) return;
+
+        BFAIAction action = BFAIActionAnimation.FromControllerState(
+            State.ToString(),
+            HasVisibleTarget,
+            Reload,
+            soldier.HealthFraction < 0.3f,
+            Crouch);
+
+        if (HaveAnimAction && action == LastAnimAction) return;
+
+        LastAnimAction = action;
+        HaveAnimAction = true;
     }
 
     // Maximum drop an AI will willingly walk into. Anything deeper is treated
@@ -1602,6 +1674,15 @@ public class PhxBF3AIController : PhxAIController
                 ReportNavAttempt(routed);
             }
 
+            // String-pulling. A* returns hub centres, and following them
+            // literally makes a soldier dogleg to the middle of every node on
+            // the way - the "walking the graph" look, worst in the open where
+            // the detour is longest and least necessary. Skipping to the
+            // furthest waypoint we can actually see straightens the route
+            // without discarding it: anything not in line of sight is still
+            // walked hub by hub.
+            SmoothNavPath();
+
             if (NavIndex < NavPath.Count)
             {
                 Vector3 waypoint = NavPath[NavIndex];
@@ -1643,6 +1724,75 @@ public class PhxBF3AIController : PhxAIController
     static int NavAttempts;
     static int NavSuccesses;
     static float NavReportTime;
+
+
+    // How far ahead string-pulling looks. Bounded because each candidate costs
+    // a cast, and because skipping too far on a long path starts cutting
+    // corners the graph included for a reason.
+    const int MaxSmoothLookahead = 4;
+
+    // Checked at walking pace, not per frame: the answer changes only as fast
+    // as the soldier moves, and 128 units each casting several capsules every
+    // frame is not affordable.
+    float SmoothTimer;
+
+    /// <summary>
+    /// Advance <c>NavIndex</c> past any waypoints we have a clear walk to.
+    /// </summary>
+    void SmoothNavPath()
+    {
+        SmoothTimer -= Time.deltaTime;
+        if (SmoothTimer > 0f) return;
+        SmoothTimer = 0.25f;
+
+        if (NavPath.Count == 0 || NavIndex >= NavPath.Count - 1) return;
+
+        Vector3 self = PawnPosition();
+        int limit = Mathf.Min(NavIndex + MaxSmoothLookahead, NavPath.Count - 1);
+
+        // Walk back from the furthest candidate: the first reachable one is the
+        // best one, which makes every earlier check unnecessary.
+        for (int i = limit; i > NavIndex; --i)
+        {
+            if (HasClearWalk(self, NavPath[i]))
+            {
+                NavIndex = i;
+                return;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether a soldier-sized body can travel between two points unobstructed.
+    /// </summary>
+    /// <remarks>
+    /// A sphere cast rather than a ray, so the clearance test matches the body
+    /// that has to fit through it - a ray finds a gap between two crates that
+    /// the soldier then wedges itself in.
+    ///
+    /// SoldierGround for the same reason the whiskers use it: the default layers
+    /// include ordnance-only and vehicle-only collision meshes a soldier walks
+    /// straight through, and treating those as walls would make string-pulling
+    /// refuse every shortcut that actually exists. Soldiers are excluded
+    /// deliberately - a friendly on the line is a moving obstacle, not a reason
+    /// to keep the dogleg.
+    /// </remarks>
+    bool HasClearWalk(Vector3 from, Vector3 to)
+    {
+        Vector3 a = from + Vector3.up * 0.9f;
+        Vector3 b = to + Vector3.up * 0.9f;
+
+        Vector3 delta = b - a;
+        float dist = delta.magnitude;
+        if (dist < 0.01f) return true;
+
+        // Slightly under the soldier's own radius so a doorway exactly wide
+        // enough still reads as passable.
+        const float probeRadius = 0.35f;
+
+        return !Physics.SphereCast(a, probeRadius, delta / dist, out _, dist,
+                                   PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore);
+    }
 
     static void ReportNavAttempt(bool routed)
     {
@@ -1948,6 +2098,15 @@ public class PhxBF3AIController : PhxAIController
     // Once per class, not per soldier - a whole team of the same broken class
     // would otherwise bury the console.
     static readonly HashSet<string> ReportedWeaponless = new HashSet<string>();
+
+    /// <summary>
+    /// Forget which classes have already been reported. Called on map change:
+    /// a warning suppressed on one map must not stay suppressed on the next.
+    /// </summary>
+    public static void ResetDiagnostics()
+    {
+        ReportedWeaponless.Clear();
+    }
 
     void ReportWeaponless()
     {

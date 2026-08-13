@@ -689,6 +689,16 @@ public class PhxEnvironment
         {
             handle = EnvCon.AddLevel(absPath, subLVLs);
 
+            // Index any cloth this file carries while its path is in hand.
+            //
+            // CLTH has no handler in LibSWBF2 at all, so it never arrives
+            // through EnvCon and has to be read from the file directly. This
+            // is the one place every .lvl passes through with an absolute
+            // path, which makes it the only place that can. Keyed by owning
+            // model, so ModelLoader can look cloth up later without knowing
+            // which file it came from.
+            BFClothImporter.Scan(absPath.ToString());
+
             Loading.Add(new LVL
             {
                 Handle = handle,

@@ -297,6 +297,20 @@ public class PhxBF3Config
     public bool GraphicsEnhancements = true;
 
     /// <summary>
+    /// Simulated camera-lens artifacts: chromatic aberration and film grain.
+    /// </summary>
+    /// <remarks>
+    /// Off, because these are the one part of the modern stack that makes the
+    /// image worse rather than better here. They do not improve how the map is
+    /// lit or shaded - they add colour fringing to every high-contrast edge and
+    /// noise over the whole frame, both of which read as rendering faults
+    /// against stock art that never had them. Everything else in the stack
+    /// (AO, SSR, volumetrics, bloom, TAA) interprets the map's own data and
+    /// stays on.
+    /// </remarks>
+    public bool LensSimulation = false;
+
+    /// <summary>
     /// Scales the smoothness imported from each material's authored specular
     /// exponent. 1 uses the converted value as-is; lower it if surfaces read
     /// too glossy, 0 restores the old fully-matte look.
@@ -310,11 +324,29 @@ public class PhxBF3Config
     public float NormalMapStrength = 1.0f;
 
     /// <summary>
-    /// Re-compress imported world textures to DXT on upload. The source is
-    /// already DXT in the .lvl but arrives uncompressed, so this reclaims
-    /// several times their VRAM. Turn off to compare quality.
+    /// Re-compress imported world textures to DXT on upload.
     /// </summary>
-    public bool CompressTextures = true;
+    /// <remarks>
+    /// Off, because it costs image quality twice over.
+    ///
+    /// The source in the .lvl is already DXT, which is a lossy block codec.
+    /// LibSWBF2 hands it back as RGBA - decompressed - and this then
+    /// compressed it to DXT again. Re-quantising blocks that were already
+    /// quantised is a second generation of loss, and it lands hardest on the
+    /// fine detail DXT handles worst: insignia, panel lines, faces. That is
+    /// why characters read soft and slightly mushy up close.
+    ///
+    /// The memory it reclaimed was real but is not where this project's VRAM
+    /// goes. The pipeline asset currently allocates a 4096x4096 decal atlas, a
+    /// 4096x4096 shadow atlas for area lights in a game that has none, and 64
+    /// uncompressed reflection probes - each larger than the whole saving.
+    ///
+    /// The right fix is to upload the source's own DXT blocks untouched,
+    /// which is both lossless relative to the original and the same memory as
+    /// re-compressing. It needs LibSWBF2's ETextureFormat exported through the
+    /// C API - it exists natively, in Types/Enums.h, but no wrapper reaches it.
+    /// </remarks>
+    public bool CompressTextures = false;
 
     // Runtime texture upscaling of the original game's textures
     public bool UpscaleTextures = true;

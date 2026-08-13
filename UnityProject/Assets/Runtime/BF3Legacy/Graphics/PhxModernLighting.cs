@@ -20,6 +20,25 @@ public class PhxModernLighting : MonoBehaviour
     Volume Volume;
     VolumeProfile Profile;
 
+    /// <summary>
+    /// Bounds on automatic exposure, in EV100.
+    /// </summary>
+    /// <remarks>
+    /// A backstop spanning night interior to open desert, not a look. The
+    /// per-map band that actually shapes the image is set by
+    /// BFLightingDirector from the map's own sun. Anything narrower here would
+    /// clip one end of the game: direct sun sits near EV 15 and a lit interior
+    /// near EV 8, so a single tight window blows out one or blackens the other.
+    /// </remarks>
+    const float ExposureLimitMin = 5f;
+    const float ExposureLimitMax = 16f;
+
+    // No SSR constant here. Screen-space reflections moved to
+    // BFLightingDirector when ownership was split - see
+    // BFEnvironmentLightingProfile.ReflectionMinSmoothness, which carries the
+    // same reasoning about clearing the smoothness detail band. Leaving a
+    // second copy of the threshold behind is how the two drift apart.
+
     void Start()
     {
         Profile = ScriptableObject.CreateInstance<VolumeProfile>();
@@ -29,13 +48,39 @@ public class PhxModernLighting : MonoBehaviour
         Tonemapping tonemap = Profile.Add<Tonemapping>(true);
         tonemap.mode.Override(TonemappingMode.ACES);
 
-        // --- Automatic eye adaption ---
+        // --- Eye adaption, deliberately on a short leash ---
+        //
+        // This was a sixteen-stop automatic range (-2 to 14). SWBF2 renders at
+        // a fixed exposure, so nothing in a stock map is authored expecting the
+        // camera to re-meter: an interior is meant to read as darker than the
+        // plaza outside it, and a bright surface is meant to stay bright.
+        //
+        // With the wide range the opposite happened. Stepping into shade let
+        // exposure climb until the pale stone blew out to flat white while the
+        // shadowed geometry stayed black - the crushed-blacks-against-clipped-
+        // highlights look, produced by the camera rather than by the lighting.
+        //
+        // Ownership is split by parameter, not by component: this sets the
+        // mode, the adaptation speeds, the metering and a deliberately wide
+        // pair of limits, and BFLightingDirector narrows the limits per map
+        // from that map's own key light. Nothing is written twice, so the
+        // wide values here are only ever seen on a map with no sun to derive
+        // a band from.
         Exposure exposure = Profile.Add<Exposure>(true);
         exposure.mode.Override(ExposureMode.Automatic);
-        exposure.limitMin.Override(-2f);
-        exposure.limitMax.Override(14f);
-        exposure.adaptationSpeedDarkToLight.Override(3f);
-        exposure.adaptationSpeedLightToDark.Override(1.5f);
+        exposure.limitMin.Override(ExposureLimitMin);
+        exposure.limitMax.Override(ExposureLimitMax);
+
+        // Slow, and slower still going the other way: a fast adaptation is
+        // exactly what makes the change visible as a change.
+        exposure.adaptationSpeedDarkToLight.Override(1.2f);
+        exposure.adaptationSpeedLightToDark.Override(0.8f);
+
+        // Metering the centre rather than the whole frame. A third-person
+        // camera puts a lot of sky or a lot of ground at the edges depending
+        // on where the player is looking, and full-frame metering turns that
+        // into a brightness swing every time they move the mouse.
+        exposure.meteringMode.Override(MeteringMode.CenterWeighted);
 
         // Auto-exposure meters the whole frame, so a level that is mostly bright
         // ground (Mygeeto snow, Polis Massa interiors) drags the average up and
@@ -43,30 +88,21 @@ public class PhxModernLighting : MonoBehaviour
         // that would wreck the dark maps.
         exposure.compensation.Override(PhxBF3.Config.ExposureCompensation);
 
-        // --- Ambient occlusion: grounds objects, key for greebled SW surfaces ---
-        AmbientOcclusion ao = Profile.Add<AmbientOcclusion>(true);
-        ao.intensity.Override(1.2f);
-        ao.radius.Override(1.5f);
-
-        // --- Screen space reflections for polished floors/ship hulls ---
-        ScreenSpaceReflection ssr = Profile.Add<ScreenSpaceReflection>(true);
-        ssr.enabled.Override(true);
-        // minSmoothness/smoothnessFadeStart are plain quality-aware properties on
-        // ScreenSpaceReflection (HDRP 10.7), not VolumeParameter<T> - Add<T>(true)
-        // above already marks every parameter overridden, so a direct assignment
-        // is the correct (and only) way to set this one.
-        ssr.minSmoothness = 0.6f;
-
-        // --- Contact shadows: small-scale grounding detail ---
-        ContactShadows contactShadows = Profile.Add<ContactShadows>(true);
-        contactShadows.enable.Override(true);
-        contactShadows.length.Override(0.6f);
-        contactShadows.opacity.Override(0.8f);
-
-        // --- Micro shadows from normal maps ---
-        MicroShadowing microShadows = Profile.Add<MicroShadowing>(true);
-        microShadows.enable.Override(true);
-        microShadows.opacity.Override(0.6f);
+        // Ambient occlusion, contact shadows, micro shadows and screen-space
+        // reflections are NOT set here.
+        //
+        // BFLightingDirector sets all four, per map, from the map's own
+        // lighting profile, on a volume at priority 120. Setting them here as
+        // well made every one of them a two-owner parameter: a value tuned in
+        // one file was silently half-replaced by the other, depending on which
+        // parameters each happened to override, and neither file read as
+        // wrong on its own. That is what made the look untunable - a change
+        // would land, be partially masked, and the result would look like the
+        // change had simply not worked.
+        //
+        // This volume is now the static baseline - tonemapping, bloom, colour
+        // grading, the things that do not vary by map - and the director owns
+        // everything that does.
 
         // --- Restrained modern bloom (the 2005 renderer over-bloomed heavily) ---
         Bloom bloom = Profile.Add<Bloom>(true);

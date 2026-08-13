@@ -51,6 +51,16 @@ public class PhxAIDirector : MonoBehaviour
         // "audible"/dangerous to the first AI to spawn on the next one.
         PhxAIPerception.Reset();
         PhxAIDanger.Reset();
+
+        // Per-class warnings are suppressed after their first report. Statics
+        // outlive a match, so without clearing this a problem reported on one
+        // map stays silent for the rest of the session - including on maps
+        // where it is a different problem.
+        PhxBF3AIController.ResetDiagnostics();
+
+        // Region names are per map, so last map's threat picture is not merely
+        // stale here - it is about regions that no longer exist.
+        BFSquadSystem.Reset();
     }
 
     public static PhxAISkillProfile GetSkillProfile()
@@ -173,6 +183,7 @@ public class PhxAIDirector : MonoBehaviour
 
         // rebuild squads per team
         Squads.Clear();
+        BFSquadSystem.ClearSquads();
         Dictionary<int, List<PhxBF3AIController>> perTeam = new Dictionary<int, List<PhxBF3AIController>>();
         foreach (PhxBF3AIController c in Controllers)
         {
@@ -187,6 +198,25 @@ public class PhxAIDirector : MonoBehaviour
         foreach (KeyValuePair<int, List<PhxBF3AIController>> kv in perTeam)
         {
             AssignTeamSquads(kv.Key, kv.Value, posts);
+        }
+
+        // Elect leaders, choose formations and age the threat picture. Runs on
+        // the replan cadence rather than per frame: none of it changes faster
+        // than the grouping it describes.
+        BFSquadSystem.Tick();
+
+        // Feed the region memory from what the squads can currently see. This
+        // is the point where an authored region stops being level-designer
+        // annotation the AI ignores and becomes something it reasons about.
+        foreach (PhxBF3AIController c in Controllers)
+        {
+            if (c == null || !c.HasVisibleTarget) continue;
+            if (!c.TryGetTargetPosition(out Vector3 seenAt)) continue;
+
+            PhxInstance self = c.Pawn?.GetInstance();
+            if (self == null) continue;
+
+            BFSquadSystem.NoteContact(self.Team.Get(), seenAt, c.GetTargetTeam());
         }
     }
 
@@ -295,6 +325,14 @@ public class PhxAIDirector : MonoBehaviour
             PhxSquad squad = new PhxSquad();
             squad.Members.AddRange(grouped[s]);
             Squads.Add(squad);
+
+            // Mirror the grouping into BFSquadSystem, which is what owns
+            // leader, formation and the team's region threat picture. Kept as
+            // a parallel view rather than a replacement: this director's own
+            // squad logic works, and the tactical layer is advisory on top of
+            // it rather than a rewrite of it.
+            BFSquad tactical = BFSquadSystem.Create(team);
+            tactical.Members.AddRange(grouped[s]);
 
             // Let members talk to each other (Stage 2 contact reports).
             foreach (PhxBF3AIController member in squad.Members)

@@ -123,6 +123,64 @@ public class PhxFlyer : PhxVehicle
 
     float RealLandedHeight;
 
+    /// <summary>
+    /// Leave the ground under the takeoff animation, whoever asked.
+    /// </summary>
+    /// <remarks>
+    /// A pilot pressing jump and a mission script calling EntityFlyerTakeOff
+    /// are the same event as far as the flyer is concerned, so they share this
+    /// rather than the script poking the state machine from outside - the
+    /// animation, the thrust effects and the timer have to move together or
+    /// the flyer rises with no exhaust and snaps to Flying early.
+    /// </remarks>
+    public void BeginTakeOff()
+    {
+        if (F == null || CurrentState != PhxFlyerState.Grounded) return;
+
+        TakeoffTime = F.TakeoffTime;
+        TakeoffTimer = TakeoffTime;
+
+        if (TakeOffPlayer.IsValid())
+        {
+            TakeOffPlayer.SetPlaybackSpeed(1f);
+            TakeOffPlayer.Play();
+        }
+
+        CurrentState = PhxFlyerState.TakingOff;
+
+        foreach (PhxEffect ThrustEff in ThrustEffects)
+        {
+            ThrustEff.SetLooping(true);
+            ThrustEff.Play();
+        }
+    }
+
+    /// <summary>
+    /// Start the match parked, rather than airborne at the spawn point.
+    /// </summary>
+    /// <remarks>
+    /// Instances default to Grounded already, so the state is not the point -
+    /// the height is. Init lifts a flyer by its landed height so it rests on
+    /// its gear, and a mission that declares a flyer landed after that has
+    /// happened wants it back on the ground, not floating at gear height above
+    /// wherever it was placed.
+    /// </remarks>
+    public void InitAsLanded()
+    {
+        CurrentState = PhxFlyerState.Grounded;
+
+        if (Body != null)
+        {
+            Body.velocity = Vector3.zero;
+            Body.angularVelocity = Vector3.zero;
+        }
+
+        foreach (PhxEffect ThrustEff in ThrustEffects)
+        {
+            ThrustEff.Stop();
+        }
+    }
+
     public override void Init()
     {
         base.Init();
@@ -323,23 +381,7 @@ public class PhxFlyer : PhxVehicle
             if (DriverController.Jump)
             {
                 DriverController.Jump = false;
-
-                TakeoffTime = F.TakeoffTime;  
-                TakeoffTimer = TakeoffTime;
-
-                if (TakeOffPlayer.IsValid())
-                {
-                    TakeOffPlayer.SetPlaybackSpeed(1f);
-                    TakeOffPlayer.Play();                    
-                }
-
-                CurrentState = PhxFlyerState.TakingOff;
-
-                foreach (PhxEffect ThrustEff in ThrustEffects)
-                {
-                    ThrustEff.SetLooping(true);
-                    ThrustEff.Play();
-                } 
+                BeginTakeOff();
             }
         }
         else if (CurrentState == PhxFlyerState.TakingOff)

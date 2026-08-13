@@ -169,6 +169,24 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
         SCENE?.DestroyInstance(this);
     }
 
+    /// <summary>
+    /// Nothing to restore: a detonated mine destroys its own instance.
+    /// </summary>
+    /// <remarks>
+    /// Detonate calls DestroyInstance, so by the time anything could ask for a
+    /// restore the object is gone and the pointer a script held is stale.
+    /// Re-arming would mean spawning a fresh mine, which is a different thing
+    /// with a different owner - so this reports rather than silently doing
+    /// nothing, and a mission that wants a minefield back lays one.
+    /// </remarks>
+    public void Restore()
+    {
+        if (!Detonated) return;
+
+        Debug.LogWarning($"[Lua] RespawnObject on mine '{name}', which was destroyed " +
+                         "when it detonated. Spawn a new mine instead.");
+    }
+
     public void AddDamage(float damage)
     {
         if (Detonated) return;

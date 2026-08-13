@@ -40,6 +40,12 @@ public sealed class BFLightBudget : MonoBehaviour
     }
 
     readonly List<Managed> Punctual = new List<Managed>();
+
+    /// <summary>
+    /// Instance ids already accounted for, so a rescan cannot re-derive an
+    /// authored intent from this budget's own current decision.
+    /// </summary>
+    readonly HashSet<int> Registered = new HashSet<int>();
     float RescanTimer;
     float RebalanceTimer;
 
@@ -64,9 +70,21 @@ public sealed class BFLightBudget : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Pick up lights the scene has that the budget does not know about yet.
+    /// </summary>
+    /// <remarks>
+    /// Additive on purpose. The importer registers each light with the intent
+    /// its .lgt authored, and that is the only place the intent exists -
+    /// rebuilding the list from scratch would have to infer it from
+    /// <c>light.shadows</c>, which by then is this budget's own last decision.
+    /// A light switched off to stay inside the budget would come back
+    /// recorded as never having wanted a shadow, and could never earn one
+    /// again however close the player walked.
+    /// </remarks>
     void Rescan()
     {
-        Punctual.Clear();
+        PruneDestroyed();
 
         Light[] lights = FindObjectsOfType<Light>();
         for (int i = 0; i < lights.Length; ++i)
@@ -77,12 +95,15 @@ public sealed class BFLightBudget : MonoBehaviour
             HDAdditionalLightData data = light.GetComponent<HDAdditionalLightData>();
             if (data == null) continue;
 
+            if (Registered.Contains(data.GetInstanceID())) continue;
+
             Punctual.Add(new Managed
             {
                 Light = light,
                 Data = data,
                 WantsShadows = light.shadows != LightShadows.None,
             });
+            Registered.Add(data.GetInstanceID());
 
             ApplyVolumetricPolicy(data, light);
         }
@@ -117,6 +138,17 @@ public sealed class BFLightBudget : MonoBehaviour
         float minChannel = Mathf.Min(c.r, Mathf.Min(c.g, c.b));
         bool saturated = maxChannel > 0.01f && (maxChannel - minChannel) / maxChannel > 0.35f;
 
+        // Only ever takes the contribution away.
+        //
+        // A light already excluded from volumetrics was excluded deliberately
+        // - BFLocalLightPolicy switches practicals off so a team-coloured
+        // command post cannot fog a whole interior in its own colour, and the
+        // importer switches off anything too small to make a visible shaft.
+        // Recomputing from range and saturation here would hand it back to any
+        // light that happened to pass those tests, undoing the decision that
+        // was made with more context than this has.
+        if (!data.affectsVolumetric) return;
+
         data.affectsVolumetric = worthIt && !saturated && BFPresentationQuality.Volumetrics;
     }
 
@@ -141,7 +173,10 @@ public sealed class BFLightBudget : MonoBehaviour
     {
         for (int i = Punctual.Count - 1; i >= 0; --i)
         {
-            if (Punctual[i].Light == null) Punctual.RemoveAt(i);
+            if (Punctual[i].Light != null) continue;
+
+            if (Punctual[i].Data != null) Registered.Remove(Punctual[i].Data.GetInstanceID());
+            Punctual.RemoveAt(i);
         }
     }
 
@@ -209,6 +244,7 @@ public sealed class BFLightBudget : MonoBehaviour
         }
 
         Instance.Punctual.Add(new Managed { Light = light, Data = data, WantsShadows = wantsShadows });
+        Instance.Registered.Add(data.GetInstanceID());
         ApplyVolumetricPolicy(data, light);
     }
 }

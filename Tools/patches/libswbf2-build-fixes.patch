@@ -1,0 +1,578 @@
+From 7c3bfd3f92e7deed3dd4d42db8fe58738b38bdf1 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 10:10:28 -0400
+Subject: [PATCH 1/4] Build fixes: missing includes, and static CRT on MSVC
+
+- Hashing.h: include <string>. InternalHelpers.cpp: include <algorithm>.
+  Both are used but were relying on transitive includes that do not hold
+  on every standard library implementation, so the build fails outright
+  on some toolchains.
+
+- CMakeLists: link the MSVC runtime statically (/MT).
+
+  CMake defaults to /MD, which leaves LibSWBF2.dll load-time dependent on
+  MSVCP140.dll and VCRUNTIME140.dll. Those ship with the Visual C++
+  redistributable rather than with Windows, so on a machine that has never
+  had Visual Studio installed the DLL cannot be loaded, and .NET reports
+  that as a bare DllNotFoundException naming LibSWBF2 - never naming the
+  runtime DLL that is actually absent.
+
+  This matches the DllNotFoundException reported by the importer's Windows
+  users: immediate, Windows-only, and resolved by installing the Windows
+  SDK or Visual Studio, both of which merely install the redistributable
+  as a side effect.
+
+  CMAKE_MSVC_RUNTIME_LIBRARY is set before add_subdirectory so the bundled
+  fmt and glm targets use the same runtime; mixing /MT and /MD in a single
+  link is a hard error (LNK2038).
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ LibSWBF2/CMakeLists.txt      | 33 +++++++++++++++++++++++++++++++++
+ LibSWBF2/Hashing.h           |  1 +
+ LibSWBF2/InternalHelpers.cpp |  1 +
+ 3 files changed, 35 insertions(+)
+
+diff --git a/LibSWBF2/CMakeLists.txt b/LibSWBF2/CMakeLists.txt
+index 8d4ee37..e4d08a9 100755
+--- a/LibSWBF2/CMakeLists.txt
++++ b/LibSWBF2/CMakeLists.txt
+@@ -1,6 +1,9 @@
+ cmake_minimum_required(VERSION 3.16)
+ cmake_policy(SET CMP0079 NEW)
+ 
++# Required for MSVC_RUNTIME_LIBRARY below to be honored rather than ignored.
++cmake_policy(SET CMP0091 NEW)
++
+ project(LibSWBF2_Project)
+ 
+ # Use folders for generators that supports them (VS, XCode, ...)
+@@ -13,6 +16,15 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
+ # produce relative code adresses, necessary for shared libs
+ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+ 
++# Link the C++ runtime statically on MSVC. See the detailed note in the
++# if(MSVC) block below for why. This has to be set as a variable up here,
++# before the add_subdirectory calls, so that the bundled fmt/glm targets are
++# built against the same runtime - mixing /MT and /MD in one link is a hard
++# error (LNK2038), not a warning.
++if(MSVC)
++  set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
++endif()
++
+ add_library(LibSWBF2 SHARED)
+ 
+ set(GLM_DIR "${PROJECT_SOURCE_DIR}/../ThirdParty/glm")
+@@ -45,6 +57,27 @@ endif(UNIX)
+ if(MSVC)
+   # Enable multi processor compilation for VS projects
+   target_compile_options(LibSWBF2 PRIVATE "/MP")
++
++  # Link the C++ runtime statically.
++  #
++  # CMake's default on MSVC is /MD, which makes LibSWBF2.dll load-time
++  # dependent on MSVCP140.dll, VCRUNTIME140.dll and friends. Those ship with
++  # the Visual C++ redistributable, not with Windows, so on a machine that has
++  # never had Visual Studio installed LoadLibrary fails - and .NET surfaces
++  # that failure as a bare DllNotFoundException naming LibSWBF2, with no
++  # mention of the runtime DLL that is actually missing.
++  #
++  # That matches the reported symptoms exactly: Windows-only, immediate, and
++  # "fixed" by installing the Windows SDK or Visual Studio - both of which
++  # simply drop the redistributable onto the machine as a side effect.
++  #
++  # /MT folds the runtime into the DLL, so it loads on a clean Windows box
++  # with no SDK, no Visual Studio and no redistributable. The cost is a
++  # slightly larger binary.
++  #
++  # The runtime itself is selected by CMAKE_MSVC_RUNTIME_LIBRARY near the top
++  # of this file, which must be set before add_subdirectory so fmt and glm
++  # agree with us.
+ endif()
+ 
+ # Just for folder display in generated project
+diff --git a/LibSWBF2/Hashing.h b/LibSWBF2/Hashing.h
+index 8be9c2e..608bc27 100755
+--- a/LibSWBF2/Hashing.h
++++ b/LibSWBF2/Hashing.h
+@@ -1,6 +1,7 @@
+ #pragma once
+ #include "Types/LibString.h"
+ #include <unordered_map>
++#include <string>
+ #include <string_view>
+ 
+ namespace LibSWBF2
+diff --git a/LibSWBF2/InternalHelpers.cpp b/LibSWBF2/InternalHelpers.cpp
+index 9d0cd38..91006d9 100755
+--- a/LibSWBF2/InternalHelpers.cpp
++++ b/LibSWBF2/InternalHelpers.cpp
+@@ -1,6 +1,7 @@
+ #include "pch.h"
+ #include "InternalHelpers.h"
+ #include "Logging/Logger.h"
++#include <algorithm>
+ 
+ namespace LibSWBF2
+ {
+-- 
+2.55.0.windows.3
+
+
+From 07dc1ae98beb23462f172124b9896d29fbc6d711 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 10:17:09 -0400
+Subject: [PATCH 2/4] tex_/BODY: recover surface dimensions instead of
+ discarding textures
+
+The guard here rejected any BODY whose data exceeded width*height*4 and
+skipped the image, logging "Suspicious image size". It was wrong twice
+over:
+
+- 4 bytes per pixel is only correct for the 32-bit formats. R5G6B5 is
+  two bytes per pixel and the DXT formats are block compressed, so the
+  bound bears no relation to the real surface size.
+
+- It compared against dimensions that had already been divided by the
+  declared mip level, and that level is not reliable - geo1.lvl carries
+  a 512x256 image claiming mip level 9, which collapses the dimensions
+  to the 2x2 floor and makes every real surface look oversized.
+
+Replace the heuristic with an exact per-format surface size, and when it
+disagrees with the data, walk the mip chain of the full-size image and
+adopt the level whose size matches exactly, preferring the declared
+level when several match.
+
+This fixes the dimensions as well as the presence of the texture, which
+matters for more than fidelity: CrossPlatImage::ToRGBA decodes
+width*height pixels out of the buffer, so dimensions too large for the
+data read past the allocation.
+
+Only genuinely inconsistent data is skipped now, and the warning says
+what size was expected for which format so the case can be diagnosed.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ LibSWBF2/Chunks/LVL/tex_/BODY.cpp | 103 +++++++++++++++++++++++++++---
+ 1 file changed, 95 insertions(+), 8 deletions(-)
+
+diff --git a/LibSWBF2/Chunks/LVL/tex_/BODY.cpp b/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
+index 3f630d7..943b27d 100755
+--- a/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
++++ b/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
+@@ -24,6 +24,44 @@ namespace LibSWBF2::Chunks::LVL::LVL_texture
+         THROW("Not implemented!");
+     }
+ 
++    // Bytes one surface of the given format occupies at the given dimensions.
++    // Block compressed formats round up to whole 4x4 blocks; everything else
++    // is a straight bytes-per-pixel product. Returns 0 for formats we cannot
++    // size, which callers must treat as "unknown" rather than "empty".
++    static size_t ExpectedSurfaceSize(D3DFORMAT format, size_t width, size_t height)
++    {
++        const size_t blocksW = (width  + 3) / 4;
++        const size_t blocksH = (height + 3) / 4;
++
++        switch (format)
++        {
++            case D3DFMT_DXT1:
++                return blocksW * blocksH * 8;
++
++            case D3DFMT_DXT2:
++            case D3DFMT_DXT3:
++            case D3DFMT_DXT4:
++            case D3DFMT_DXT5:
++                return blocksW * blocksH * 16;
++
++            case D3DFMT_L8:
++            case D3DFMT_A4L4:
++                return width * height;
++
++            case D3DFMT_R5G6B5:
++            case D3DFMT_A8L8:
++            case D3DFMT_L16:
++                return width * height * 2;
++
++            case D3DFMT_A8R8G8B8:
++            case D3DFMT_R8G8B8A8:
++                return width * height * 4;
++
++            default:
++                return 0;
++        }
++    }
++
+     void BODY::ReadFromStream(FileReader& stream)
+     {
+         BaseChunk::ReadFromStream(stream);
+@@ -61,15 +99,64 @@ namespace LibSWBF2::Chunks::LVL::LVL_texture
+         size_t dataSize = GetDataSize();
+         D3DFORMAT d3dFormat = fmt->p_Info->m_Format;
+ 
+-        // it seems like sometimes (in core.lvl) the specified image size
+-        // is far smaller than the actual BODY data size... So just do a quick
+-        // sanity check here before allocating and performing a memcpy
+-        if (dataSize > width * height * 4)
++        // The declared mip level cannot always be trusted - e.g. geo1.lvl
++        // carries a 512x256 image claiming a mip level of 9 - and dividing by
++        // it produces dimensions far smaller than the surface actually stored
++        // here. The old check compared dataSize against width*height*4 and
++        // discarded anything larger, which threw away perfectly good textures
++        // on two counts: 4 bytes per pixel is only correct for the 32-bit
++        // formats (R5G6B5 is 2, the DXT formats are block compressed), and the
++        // comparison ran against the already mip-divided dimensions.
++        //
++        // Rather than guess, derive the dimensions from the data: walk the mip
++        // chain of the full-size image and take the level whose surface size
++        // matches dataSize exactly, preferring the level the chunk declared
++        // when several match (tiny mips share a minimum block size). This
++        // fixes the dimensions as a side effect, which matters beyond the
++        // texture being present at all: ToRGBA decodes width*height pixels out
++        // of this buffer, so dimensions too large for the data is a heap
++        // overread.
++        if (ExpectedSurfaceSize(d3dFormat, width, height) != dataSize)
+         {
+-            stream.SkipBytes(dataSize);
+-            LOG_WARN("Suspicious image size: {}! Skipping image!", dataSize);
+-            BaseChunk::EnsureEnd(stream);
+-            return;
++            const size_t declaredLevel = (size_t)lvl->p_Info->m_MipLevel;
++            bool  recovered = false;
++            size_t bestDelta = (size_t)-1;
++
++            for (size_t level = 0; level < 16; ++level)
++            {
++                size_t w = std::max((size_t)(fmt->p_Info->m_Width  >> level), (size_t)2);
++                size_t h = std::max((size_t)(fmt->p_Info->m_Height >> level), (size_t)2);
++
++                if (ExpectedSurfaceSize(d3dFormat, w, h) != dataSize)
++                {
++                    continue;
++                }
++
++                size_t delta = level > declaredLevel
++                             ? level - declaredLevel
++                             : declaredLevel - level;
++                if (delta < bestDelta)
++                {
++                    bestDelta = delta;
++                    width     = w;
++                    height    = h;
++                    recovered = true;
++                }
++            }
++
++            if (!recovered)
++            {
++                // Genuinely inconsistent: no mip level of this image, in this
++                // format, is the size of the data we were handed. Skipping is
++                // the only safe option, but say what was expected so the case
++                // can be diagnosed rather than merely noted.
++                stream.SkipBytes(dataSize);
++                LOG_WARN("Image data of {} bytes matches no mip level of a {}x{} {} texture! Skipping image!",
++                         dataSize, fmt->p_Info->m_Width, fmt->p_Info->m_Height,
++                         LibSWBF2::D3DToString(d3dFormat));
++                BaseChunk::EnsureEnd(stream);
++                return;
++            }
+         }
+ 
+         uint8_t* imageBufferPtr;
+-- 
+2.55.0.windows.3
+
+
+From d4d38e6f16355114490f0850f4e3f5785b6bdcd8 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 20:53:24 -0400
+Subject: [PATCH 3/4] Name the over-reading child chunk on a bounds violation
+
+EnsureEnd detects that a chunk read past its own end and recovers via
+ForwardToNextHeader, so the resulting data loss is silent and the warning
+says only which parent noticed - not which child was responsible. On
+sides/rep.lvl that reads as "Too many bytes read: 2331624" with nothing
+to act on.
+
+GenericBaseChunk already keeps its children, and the last one added is the
+one being read when the violation was noticed. Expose it through a virtual
+DescribeLastChild (empty on BaseChunk, which tracks no children) and include
+it in the warning.
+
+Diagnostics only - parsing behaviour is unchanged.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ LibSWBF2/Chunks/BaseChunk.cpp    | 20 +++++++++++++++++++-
+ LibSWBF2/Chunks/BaseChunk.h      |  7 +++++++
+ LibSWBF2/Chunks/GenericChunk.cpp | 16 ++++++++++++++++
+ LibSWBF2/Chunks/GenericChunk.h   |  4 ++++
+ 4 files changed, 46 insertions(+), 1 deletion(-)
+
+diff --git a/LibSWBF2/Chunks/BaseChunk.cpp b/LibSWBF2/Chunks/BaseChunk.cpp
+index e8d5119..2550768 100755
+--- a/LibSWBF2/Chunks/BaseChunk.cpp
++++ b/LibSWBF2/Chunks/BaseChunk.cpp
+@@ -124,6 +124,12 @@ namespace LibSWBF2::Chunks
+ 		return m_Header;
+ 	}
+ 
++	String BaseChunk::DescribeLastChild() const
++	{
++		// Base chunks keep no child list; GenericBaseChunk overrides this.
++		return "";
++	}
++
+ 	ChunkSize BaseChunk::GetDataSize() const
+ 	{
+ 		return m_Size;
+@@ -194,7 +200,19 @@ namespace LibSWBF2::Chunks
+ 		else if (currPos > endPos)
+ 		{
+ 			// This should NEVER happen!
+-			LOG_WARN("[{}] Ended up outside of current chunk (end is at: {:#x}, we are at: {:#x}! Too many bytes read: {} (File: {})", m_Header, endPos, currPos, currPos - endPos, stream.GetFileName());
++			//
++			// Naming the child that was last read turns "something inside this
++			// chunk over-read" into a specific chunk type to go and fix. The
++			// parser recovers via ForwardToNextHeader below, so the data loss
++			// is otherwise silent.
++			String lastChild = DescribeLastChild();
++			if (lastChild.IsEmpty())
++			{
++				lastChild = "<no child chunks read>";
++			}
++
++			LOG_WARN("[{}] Ended up outside of current chunk (end is at: {:#x}, we are at: {:#x}! Too many bytes read: {} - last child read: {} (File: {})",
++				m_Header, endPos, currPos, currPos - endPos, lastChild, stream.GetFileName());
+ 			ForwardToNextHeader(stream);
+ 		}
+ 	}
+diff --git a/LibSWBF2/Chunks/BaseChunk.h b/LibSWBF2/Chunks/BaseChunk.h
+index a0f0a96..e47b112 100755
+--- a/LibSWBF2/Chunks/BaseChunk.h
++++ b/LibSWBF2/Chunks/BaseChunk.h
+@@ -46,6 +46,13 @@ namespace LibSWBF2::Chunks
+ 		void ForwardToNextHeader(FileReader& stream);
+ 
+ 		ChunkHeader GetHeader() const;
++
++		// Names the child chunk most recently read, for diagnostics only.
++		// Empty when the chunk has no children or does not track them.
++		// Overridden by GenericBaseChunk, which keeps a child list; see
++		// EnsureEnd, where it identifies the chunk that over-read.
++		virtual String DescribeLastChild() const;
++
+ 		ChunkSize GetDataSize() const;		// just the size of the data (m_Size)
+ 		ChunkSize GetAlignedSize() const;	// size of the data, including trailing bytes, exclude header
+ 		ChunkSize GetFullSize() const;		// size of the whole chunk, including header, data and trailling bytes
+diff --git a/LibSWBF2/Chunks/GenericChunk.cpp b/LibSWBF2/Chunks/GenericChunk.cpp
+index 1a60f25..b22dee9 100755
+--- a/LibSWBF2/Chunks/GenericChunk.cpp
++++ b/LibSWBF2/Chunks/GenericChunk.cpp
+@@ -370,6 +370,22 @@ namespace LibSWBF2::Chunks
+ 		return m_Children;
+ 	}
+ 
++	String GenericBaseChunk::DescribeLastChild() const
++	{
++		if (m_Children.Size() == 0)
++		{
++			return "";
++		}
++
++		const GenericBaseChunk* last = m_Children[m_Children.Size() - 1];
++		if (last == nullptr)
++		{
++			return "";
++		}
++
++		return last->GetHeaderName();
++	}
++
+ 	String GenericBaseChunk::ToString() const
+ 	{
+ 		return "No Info";
+diff --git a/LibSWBF2/Chunks/GenericChunk.h b/LibSWBF2/Chunks/GenericChunk.h
+index f912b91..c8b52bf 100755
+--- a/LibSWBF2/Chunks/GenericChunk.h
++++ b/LibSWBF2/Chunks/GenericChunk.h
+@@ -14,6 +14,10 @@ namespace LibSWBF2::Chunks
+ 		GenericBaseChunk* GetParent() const;
+ 		const List<GenericBaseChunk*>& GetChildren() const;
+ 
++		// The last child added is the one that was being read when a bounds
++		// violation was noticed, which is what makes an overrun actionable.
++		String DescribeLastChild() const override;
++
+ 		virtual String ToString() const;
+ 
+ 	public:
+-- 
+2.55.0.windows.3
+
+
+From e984dd086a9b9cbc525bc05a96876469dd6eac2d Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Sat, 8 Aug 2026 21:18:01 -0400
+Subject: [PATCH 4/4] tex_: fix mip-1 overread, array-type free, and missing
+ pixel formats
+
+Three defects in the texture path, all found while chasing a hard crash
+during level load.
+
+1. BODY clamped mip dimensions to a 2x2 floor, but the decoders in
+   DXTexCrossPlat read width*height pixels out of the data buffer. Decoding
+   a genuine 1x1 mip as 2x2 therefore read four times its length - eight
+   bytes out of a two byte R5G6B5 surface. The heap damage only surfaced
+   later, as a fault in operator delete[] inside ~CrossPlatImage. Clamp to
+   1x1 instead: the dimension check only requires a power of two, and at
+   true dimensions every decoder reads exactly dataSize bytes.
+
+2. ToRGBA allocated its output with new uint32_t[] but stored it in
+   p_Data, a uint8_t*, which the destructor frees with delete[]. Freeing an
+   array through the wrong element type is undefined behaviour. Allocate
+   the sink as bytes and cast only for the decoders, so new[] and delete[]
+   agree, and keep m_DataLength in step with the converted buffer.
+
+3. ExpectedSurfaceSize covered only a handful of formats and returned 0 -
+   "unknown" - for the rest, so those surfaces matched no mip level and
+   were dropped. A 128x128 A4R4G4B4 texture is exactly 32768 bytes and
+   should always have matched. Cover the 1, 2, 3, 4 and 8 byte-per-pixel
+   formats explicitly.
+
+Verified with Tools/TexRepro against the stock install: core, common,
+ingame, geo1 and the rep/imp side levels decode 737 of 737 textures with
+zero skipped-image warnings, where the previous build skipped 115.
+
+Co-Authored-By: Claude Opus 5 <noreply@anthropic.com>
+---
+ LibSWBF2/Chunks/LVL/tex_/BODY.cpp   | 51 +++++++++++++++++++++++++----
+ LibSWBF2/DirectX/DXTexCrossPlat.cpp | 13 ++++++--
+ 2 files changed, 54 insertions(+), 10 deletions(-)
+
+diff --git a/LibSWBF2/Chunks/LVL/tex_/BODY.cpp b/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
+index 943b27d..4243c3b 100755
+--- a/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
++++ b/LibSWBF2/Chunks/LVL/tex_/BODY.cpp
+@@ -44,19 +44,46 @@ namespace LibSWBF2::Chunks::LVL::LVL_texture
+             case D3DFMT_DXT5:
+                 return blocksW * blocksH * 16;
+ 
++            // 1 byte per pixel
+             case D3DFMT_L8:
+             case D3DFMT_A4L4:
++            case D3DFMT_A8:
++            case D3DFMT_P8:
++            case D3DFMT_R3G3B2:
+                 return width * height;
+ 
++            // 2 bytes per pixel. A4R4G4B4 belongs here and its omission meant
++            // every texture in that format failed to match and was dropped -
++            // a 128x128 A4R4G4B4 surface is exactly 32768 bytes.
+             case D3DFMT_R5G6B5:
+             case D3DFMT_A8L8:
+             case D3DFMT_L16:
++            case D3DFMT_A4R4G4B4:
++            case D3DFMT_X4R4G4B4:
++            case D3DFMT_A1R5G5B5:
++            case D3DFMT_X1R5G5B5:
++            case D3DFMT_A8R3G3B2:
++            case D3DFMT_A8P8:
++            case D3DFMT_V8U8:
+                 return width * height * 2;
+ 
++            case D3DFMT_R8G8B8:
++                return width * height * 3;
++
++            // 4 bytes per pixel
+             case D3DFMT_A8R8G8B8:
+             case D3DFMT_R8G8B8A8:
++            case D3DFMT_X8R8G8B8:
++            case D3DFMT_A8B8G8R8:
++            case D3DFMT_X8B8G8R8:
++            case D3DFMT_A2B10G10R10:
++            case D3DFMT_A2R10G10B10:
++            case D3DFMT_G16R16:
+                 return width * height * 4;
+ 
++            case D3DFMT_A16B16G16R16:
++                return width * height * 8;
++
+             default:
+                 return 0;
+         }
+@@ -90,11 +117,21 @@ namespace LibSWBF2::Chunks::LVL::LVL_texture
+         // divide resolution by 2 for each increasing mip level
+         size_t div = (size_t)std::pow(2, lvl->p_Info->m_MipLevel);
+ 
+-        // don't go below 2x2 pixels, DirectX will crash otherwise
+-        // in e.g. geo1.lvl there's a case with a 512x256 image with
+-        // a mip level up to 9 (dafuq)
+-        width = std::max(width / div, (size_t)2);
+-        height = std::max(height / div, (size_t)2);
++        // Clamp to 1x1, NOT 2x2.
++        //
++        // The old 2x2 floor was a buffer overread waiting to happen: the
++        // decoders in DXTexCrossPlat read width*height pixels out of the data
++        // buffer, so decoding a genuine 1x1 mip as if it were 2x2 reads four
++        // times its length - eight bytes out of a two byte R5G6B5 surface. That
++        // corrupts the heap, and the damage only surfaces later as a crash in
++        // operator delete[] inside ~CrossPlatImage, which is exactly the stack
++        // captured in Crash_2026-08-08_141017477.
++        //
++        // 1x1 is safe here: CrossPlatImage's dimension check only requires a
++        // power of two, and at true dimensions every decoder reads exactly
++        // dataSize bytes.
++        width = std::max(width / div, (size_t)1);
++        height = std::max(height / div, (size_t)1);
+ 
+         size_t dataSize = GetDataSize();
+         D3DFORMAT d3dFormat = fmt->p_Info->m_Format;
+@@ -124,8 +161,8 @@ namespace LibSWBF2::Chunks::LVL::LVL_texture
+ 
+             for (size_t level = 0; level < 16; ++level)
+             {
+-                size_t w = std::max((size_t)(fmt->p_Info->m_Width  >> level), (size_t)2);
+-                size_t h = std::max((size_t)(fmt->p_Info->m_Height >> level), (size_t)2);
++                size_t w = std::max((size_t)(fmt->p_Info->m_Width  >> level), (size_t)1);
++                size_t h = std::max((size_t)(fmt->p_Info->m_Height >> level), (size_t)1);
+ 
+                 if (ExpectedSurfaceSize(d3dFormat, w, h) != dataSize)
+                 {
+diff --git a/LibSWBF2/DirectX/DXTexCrossPlat.cpp b/LibSWBF2/DirectX/DXTexCrossPlat.cpp
+index 359ebb7..d422140 100755
+--- a/LibSWBF2/DirectX/DXTexCrossPlat.cpp
++++ b/LibSWBF2/DirectX/DXTexCrossPlat.cpp
+@@ -104,7 +104,13 @@ bool CrossPlatImage::ToRGBA(){
+   if (format == D3DFMT_R8G8B8A8) return true;
+ 
+ 
+-  uint32_t* sink = new uint32_t[width * height]();
++  // Allocated as bytes, not as uint32_t, because p_Data is a uint8_t* and the
++  // destructor frees it with delete[]. Freeing a uint32_t[] through a uint8_t*
++  // - which is what happened when this was new uint32_t[] - is undefined
++  // behaviour and corrupts the heap. The decoders take a uint32_t* so the
++  // pointer is cast for them, but ownership stays a byte array throughout.
++  uint8_t* sinkBytes = new uint8_t[(size_t)width * (size_t)height * 4]();
++  uint32_t* sink = reinterpret_cast<uint32_t*>(sinkBytes);
+ 
+   switch (format){
+     case D3DFMT_R5G6B5:
+@@ -135,12 +141,13 @@ bool CrossPlatImage::ToRGBA(){
+       break;
+     default:
+       LOG_ERROR("(Shouldn't happen...) Cannot convert {} to R8_G8_B8_A8!", LibSWBF2::D3DToString(format));
+-      delete[] sink;
++      delete[] sinkBytes;
+       return false;
+   }
+ 
+   delete[] p_Data;
+-  p_Data = (uint8_t *) sink;
++  p_Data = sinkBytes;
++  m_DataLength = (size_t)width * (size_t)height * 4;
+ 
+   format = D3DFMT_R8G8B8A8;
+ 
+-- 
+2.55.0.windows.3
+

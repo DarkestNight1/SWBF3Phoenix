@@ -88,6 +88,20 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance, IP
         }
     }
 
+    /// <summary>
+    /// Bring a knocked-out subsystem back. See <see cref="IPhxDestructible.Restore"/>.
+    /// </summary>
+    /// <remarks>
+    /// Health alone: the kill side effects are one-way by design. A shield
+    /// generator's death calls IonStrike, which drops the ship's shields for
+    /// good, and restoring the generator does not undo that - the hull breach
+    /// the boarding party came through is still open.
+    /// </remarks>
+    public void Restore()
+    {
+        CurHealth = MaxHealth;
+    }
+
     void OnSubsystemKilled()
     {
         // Side effects per subsystem type. These intentionally act on the ship,

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <AssemblyName>TexRepro</AssemblyName>
+    <RootNamespace>TexRepro</RootNamespace>
+    <PlatformTarget>x64</PlatformTarget>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+  <ItemGroup>
+    <Reference Include="LibSWBF2.NET">
+      <HintPath>..\..\UnityProject\Assets\Lib\LibSWBF2.NET.dll</HintPath>
+    </Reference>
+  </ItemGroup>
+</Project>

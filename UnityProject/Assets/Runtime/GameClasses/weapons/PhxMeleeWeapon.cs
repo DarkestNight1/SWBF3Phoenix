@@ -119,6 +119,7 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
         {
             Combo = new PhxComboRunner(combo);
             Combo.OnAttackWindow += ApplyComboAttack;
+            Combo.OnMoveStarted += PlayComboAnimation;
         }
     }
 
@@ -169,6 +170,26 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
     {
         Sweep(FirePoint.position, SwingDirection, attack.Reach, attack.Arc,
               attack.Damage, attack.Push);
+    }
+
+    /// <summary>
+    /// Put the move the combo runner just entered on the wielder's rig.
+    /// </summary>
+    /// <remarks>
+    /// The state machine and the animation data have both been present all
+    /// along and were never connected: the runner knew the move, the move
+    /// knew its clip name, and nothing played it. Failure here is deliberately
+    /// quiet - a hero whose bank is missing one clip should keep fighting with
+    /// the timing intact rather than stop mid-combo.
+    /// </remarks>
+    void PlayComboAnimation(PhxComboMove move)
+    {
+        if (move == null || string.IsNullOrEmpty(move.AnimationName)) return;
+
+        PhxSoldier wielder = OwnerController?.Pawn as PhxSoldier;
+        if (wielder == null) return;
+
+        wielder.PlayOverrideAnim(C.ComboAnimationBank.Get(), move.AnimationName);
     }
 
     /// <summary>

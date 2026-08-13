@@ -223,6 +223,25 @@ public sealed class BFLightProbeManager : MonoBehaviour
 
         renderer.reflectionProbeUsage = ReflectionProbeUsage.BlendProbes;
 
+        // Never promote a renderer the importer switched off.
+        //
+        // This is a budget: it exists to take casters away, not to hand them
+        // out. Promoting was actively destructive, because the importer turns
+        // shadow casting off for a reason - the skydome is built with
+        // shadowSensitive false, and this pass then walked every renderer in
+        // the scene, saw an enormous object, and switched it back on. A dome
+        // enclosing the whole level became a shadow caster, and the sun put
+        // the inside of it across the map as one huge shadow.
+        //
+        // ShouldCastShadows only ever had a minimum size, so "big" always read
+        // as "worth casting" - the one case where the object is backdrop
+        // rather than scenery is exactly the case it got wrong.
+        if (renderer.shadowCastingMode == ShadowCastingMode.Off)
+        {
+            ++ConfiguredRenderers;
+            return;
+        }
+
         // Characters must both receive and cast; a soldier that casts no
         // shadow reads as pasted onto the scene however well he is lit.
         if (dynamic)

@@ -57,6 +57,18 @@ public class PhxGame : MonoBehaviour
     // mapluafile of the currently entered map (e.g. "cor1c_con"), null in main menu.
     // Used by BF3 Legacy to decide per-map vertical battlefront setup.
     public string CurrentMapScript { get; private set; }
+
+    /// <summary>
+    /// Whether the current map came from an addon rather than the stock game.
+    /// </summary>
+    /// <remarks>
+    /// The presentation layer needs this to keep a promise the project is
+    /// built on: stock maps look like the stock game. Enhancements that invent
+    /// content rather than interpret it - weather, a forced time of day, a
+    /// space layer over a ground map - belong to the BF3 Legacy pack and its
+    /// own maps, and must not rewrite what a stock .lgt authored.
+    /// </remarks>
+    public bool CurrentMapIsAddon { get; private set; }
     public string VersionString { get; private set; }
     public int VersionMajor { get; private set; }
     public int VersionMinor { get; private set; }
@@ -254,6 +266,7 @@ public class PhxGame : MonoBehaviour
         // via AddDownloadableContent and its shell requests that same name,
         // so the plain lookup below already succeeds for them.
         string scriptKey = mapScript.ToLower();
+        CurrentMapIsAddon = ScriptRoots.ContainsKey(scriptKey);
         if (ScriptRoots.TryGetValue(scriptKey, out PhxPath scriptRoot))
         {
             RegisteredAddons.TryGetValue(scriptKey, out string addonName);
@@ -522,6 +535,11 @@ public class PhxGame : MonoBehaviour
         RemoveLoadscreen();
         Env.GetMatch().StartMatch();
         OnMapLoaded?.Invoke();
+
+        // Headroom on the animation clip pool. Running it dry makes soldiers
+        // silently lose their clips, and nothing in the resulting errors says
+        // so - see PhxAnimationLoader.ReportClipPoolUsage.
+        PhxAnimationLoader.ReportClipPoolUsage(CurrentMapScript);
     }
 
     bool CheckStdLVLExistence(string lvlName)

@@ -225,6 +225,99 @@ public static class PhxLuaAPI
 		ENV.Execute(scriptName);
 	}
 
+	/// <summary>
+	/// Lua: ScriptCB_SndPlaySound - a one-shot interface sound.
+	/// </summary>
+	/// <remarks>
+	/// Front-end only, and deliberately routed through the UI audio path
+	/// rather than the world one: these are button clicks and screen
+	/// transitions, so they must not be positioned, occluded or affected by
+	/// whatever the camera is standing in.
+	/// </remarks>
+	public static void ScriptCB_SndPlaySound(string soundName)
+	{
+		if (string.IsNullOrEmpty(soundName)) return;
+
+		AudioClip clip = SoundLoader.Instance?.LoadSound(soundName);
+		if (clip == null) return;
+
+		PhxGame.Instance?.PlayUISound(clip);
+	}
+
+	/// <summary>
+	/// Lua: ScriptCB_GetControlMode - how the player is driving the menus.
+	/// </summary>
+	/// <remarks>
+	/// The shell branches on this to decide whether to show a cursor and
+	/// mouse-over states or a highlighted selection moved by a d-pad. Phoenix
+	/// is a PC build, so the answer is fixed until gamepad input exists;
+	/// returning the honest value beats leaving the global nil, which is what
+	/// makes the shell take the console path by accident.
+	/// </remarks>
+	public static string ScriptCB_GetControlMode()
+	{
+		return "mouse";
+	}
+
+	/// <summary>
+	/// Lua: ScriptCB_GetPausingViewport - which split-screen view opened the
+	/// pause menu. Always the first: Phoenix has one viewport.
+	/// </summary>
+	public static int ScriptCB_GetPausingViewport()
+	{
+		return 0;
+	}
+
+	/// <summary>Lua: ScriptCB_PopScreen - leave the topmost shell screen.</summary>
+	public static void ScriptCB_PopScreen()
+	{
+		ReportStub(nameof(ScriptCB_PopScreen));
+	}
+
+	/// <summary>Lua: ShowPopup - modal shell dialog.</summary>
+	public static void ShowPopup(params object[] args)
+	{
+		ReportStub(nameof(ShowPopup));
+	}
+
+	/// <summary>Lua: ShowSelectionTextPopup - modal shell dialog with choices.</summary>
+	public static void ShowSelectionTextPopup(params object[] args)
+	{
+		ReportStub(nameof(ShowSelectionTextPopup));
+	}
+
+	// Online-service and profile plumbing. These exist so the stock shell
+	// scripts run to completion rather than dying on a nil global; Phoenix has
+	// no GameSpy back end, no profiles and no memory card, and the honest
+	// answer to every one of them is "nothing pending, nothing dirty". They
+	// return rather than stub-report because the shell polls several of them
+	// every frame, which would bury the log.
+	public static bool ScriptCB_IsLoginDone() => true;
+	public static bool ScriptCB_IsCurProfileDirty() => false;
+	public static bool ScriptCB_GetMixConfigChanged() => false;
+	public static void ScriptCB_Logout() { }
+	public static void ScriptCB_MarkMemoryCard() { }
+	public static void ScriptCB_UpdateQuickmatch() { }
+	public static void ScriptCB_UpdateLeave() { }
+	public static void ScriptCB_SetAutoAcquireControllers(bool enable) { }
+	public static void ScriptCB_UpdateJoin() { }
+	public static void ScriptCB_UpdateSessionList() { }
+
+	/// <summary>
+	/// Lua: ScriptCB_GetSafeScreenInfo - the screen area safe to draw in.
+	/// </summary>
+	/// <remarks>
+	/// The console title-safe margin, which on a PC monitor is the whole
+	/// screen. Returning the full extent rather than the usual 90% inset is
+	/// the accurate answer here, and the shell lays its screens out against
+	/// whatever this reports - so an inset that exists for CRT overscan would
+	/// just leave a border on a display that never had the problem.
+	/// </remarks>
+	public static (float, float, float, float) ScriptCB_GetSafeScreenInfo()
+	{
+		return ScriptCB_GetScreenInfo();
+	}
+
 	public static bool ScriptCB_AutoNetJoin()
 	{
 		return false;
@@ -478,9 +571,33 @@ public static class PhxLuaAPI
 		PhxAIDirectives.SetSpawnAllowed(teamIdx, allow);
     }
 
-	public static void SetSpawnDelay(float unkwn1, float unkwn2)
+	/// <summary>
+	/// How long a team waits between putting AI into the world, for every team.
+	/// </summary>
+	/// <remarks>
+	/// The second argument is a spread: stock missions pass a delay and a
+	/// fraction, and the engine picks somewhere in that band each time so a
+	/// squad does not appear in lockstep. Passing the pair through rather than
+	/// keeping the delay alone is what stops six units materialising on the
+	/// same frame at a freshly captured post.
+	/// </remarks>
+	public static void SetSpawnDelay(float delay, float spread)
 	{
-		
+		for (int teamIdx = 1; teamIdx < PhxMatch.MAX_TEAMS; ++teamIdx)
+		{
+			MT.SetSpawnDelay(teamIdx, delay, spread);
+		}
+	}
+
+	/// <summary>Spawn cadence for one team - see <see cref="SetSpawnDelay"/>.</summary>
+	/// <remarks>
+	/// Missions use this to make one side trickle in while the other floods:
+	/// an assault defender spawning every two seconds against an attacker
+	/// spawning every ten is the shape of the fight, not a detail.
+	/// </remarks>
+	public static void SetSpawnDelayTeam(float delay, float spread, int teamIdx)
+	{
+		MT.SetSpawnDelay(teamIdx, delay, spread);
 	}
 
 	public static void SetHeroClass(int teamIdx, string className)
@@ -1592,6 +1709,52 @@ public static class PhxLuaAPI
 		}
 
 		PhxMusicManager.Instance?.BroadcastVoiceOver(sound, team);
+	}
+
+	/// <summary>Lua: EntityFlyerTakeOff - send a parked flyer up.</summary>
+	public static void EntityFlyerTakeOff(int? objPtr)
+	{
+		FlyerFor(objPtr)?.BeginTakeOff();
+	}
+
+	/// <summary>Lua: EntityFlyerInitAsLanded - the flyer starts parked.</summary>
+	public static void EntityFlyerInitAsLanded(int? objPtr)
+	{
+		FlyerFor(objPtr)?.InitAsLanded();
+	}
+
+	static PhxFlyer FlyerFor(int? objPtr)
+	{
+		if (!objPtr.HasValue) return null;
+		return RTS.GetInstance<PhxInstance>(objPtr.Value) as PhxFlyer;
+	}
+
+	/// <summary>
+	/// Lua: RespawnObject - put a destroyed mission object back.
+	/// </summary>
+	/// <remarks>
+	/// Missions use this on the props a phase depends on: a shield generator
+	/// the next objective needs intact, a turret that has to be there when the
+	/// defenders arrive. Reviving the existing instance rather than spawning a
+	/// replacement is what keeps the object pointer the script is holding
+	/// valid, and keeps it in whatever region and marker lists it was added to.
+	/// </remarks>
+	public static void RespawnObject(int? objPtr)
+	{
+		if (!objPtr.HasValue) return;
+
+		PhxInstance inst = RTS.GetInstance<PhxInstance>(objPtr.Value);
+		if (inst == null) return;
+
+		if (inst is IPhxDestructible destructible)
+		{
+			destructible.Restore();
+			return;
+		}
+
+		// Nothing authored destruction for it, so "respawned" just means alive
+		// and visible again.
+		inst.gameObject.SetActive(true);
 	}
 
 	/// <summary>Lua: PlayMovieWithTransition.</summary>

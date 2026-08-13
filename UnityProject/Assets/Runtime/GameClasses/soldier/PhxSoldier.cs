@@ -356,7 +356,16 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         ///////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
         string[] weapAnimBanks = new string[weaponAnimBanks.Count];
         weaponAnimBanks.CopyTo(weapAnimBanks);
-        Animator = new PhxHumanAnimator(transform, weapAnimBanks);
+        // Pose the rig at the skeleton's authored rest pose before any clip
+        // plays. Animations key only a subset of joints, and they are authored
+        // against this pose rather than the one baked into the model's bone
+        // hierarchy - the two disagree by over a unit at the pelvis and nearly
+        // 180 degrees at the upper arms, so without this the rig is in two
+        // spaces at once. Done here rather than per clip because Cra bakes
+        // FrameCount x BoneCount into one fixed buffer.
+        PhxAnimationLoader.ApplyBindPose(transform, C.SkeletonName.Get());
+
+        Animator = new PhxHumanAnimator(transform, weapAnimBanks, C.SkeletonName.Get());
 
 
         // this needs to happen after the Animator is initialized, since swicthing
@@ -690,6 +699,37 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     public override void PlayIntroAnim()
     {
         Animator.PlayIntroAnim();
+    }
+
+    /// <summary>
+    /// Play a clip from an arbitrary bank - the hook the combo state machine
+    /// uses to put a saber move on screen. Returns false when the bank has no
+    /// such clip, so the caller can leave locomotion running rather than
+    /// stalling the hero on a move that never plays.
+    /// </summary>
+    public bool PlayOverrideAnim(string bankName, string animName)
+    {
+        return Animator.PlayOverrideAnim(bankName, animName);
+    }
+
+    /// <summary>
+    /// The species half of a stock clip name - "human", "gam", "wok". Comes
+    /// from the odf's AnimationName.
+    /// </summary>
+    public string GetAnimationBankPrefix()
+    {
+        return C != null ? C.AnimationName.Get() : "human";
+    }
+
+    /// <summary>
+    /// The weapon-posture half of a stock clip name - "rifle", "pistol",
+    /// "bazooka". Falls back to rifle, which every humanoid bank has.
+    /// </summary>
+    public string GetWeaponPosture()
+    {
+        IPhxWeapon weapon = GetPrimaryWeapon();
+        string bank = weapon?.GetAnimBankName();
+        return string.IsNullOrEmpty(bank) ? "rifle" : bank;
     }
 
     void FireAnimation(bool primary)
