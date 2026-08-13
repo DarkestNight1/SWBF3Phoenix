@@ -83,6 +83,10 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
     protected float PitchAccum;
     protected float YawAccum;
 
+    // How far a seat looks for what it is aiming at. Beyond this the shot is
+    // treated as going to infinity, which is what the 30km sentinel meant.
+    protected const float AimRange = 1000f;
+
     // View position in local space
     protected Vector3 ViewPoint;
 
@@ -135,24 +139,42 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
         YawAccum = Mathf.Clamp(YawAccum, YawLimits.x, YawLimits.y);        
 
 
-        // These need work, camera behaviour is slightly off and NormalDirection 
-        // hasn't been incorporated yet.  But I'm satisfied for now.  The commented
-        // AAT and Darth D.U.C.K's tut are both incomplete and wrong in some places...
+        // Yaw was accumulated, clamped to the odf's YawLimits, and then never
+        // read by anything - so looking left or right in a vehicle seat moved
+        // neither the camera nor the aim. Only pitch worked. It is applied
+        // about the vehicle's up axis, before pitch, so the two compose the way
+        // a turret ring and elevation do.
+        Quaternion look = Quaternion.Euler(PitchAccum, YawAccum, 0f);
+
+        // TrackOffset is authored behind the track centre; the importer's
+        // handedness flip is on X, not Z.
         Vector3 CameraOffset = TrackOffset;
-        CameraOffset.z *= -1f;
+        CameraOffset.x *= -1f;
 
-        ViewPoint = TrackCenter + Quaternion.Euler(3f * PitchAccum, 0f, 0f) * CameraOffset;
-        ViewDirection =  Quaternion.Euler(3f * PitchAccum, 0f, 0f) * Quaternion.Euler(-TiltValue, 0f, 0f) * Vector3.forward;
+        // PitchAccum is already clamped to PitchLimits, which the odf gives in
+        // degrees. The old 3x multiplier drove the camera three times past the
+        // limit the vehicle author set, which is most of "the camera is off".
+        ViewPoint = TrackCenter + look * CameraOffset;
+        ViewDirection = look * Quaternion.Euler(-TiltValue, 0f, 0f) * Vector3.forward;
 
-
-        Vector3 TargetPos = BaseTransform.transform.TransformPoint(30000f * ViewDirection + ViewPoint);
+        // Aim from the camera outward, not from the far point outward.
+        //
+        // This used to cast FROM the 30km target point ALONG (target - camera),
+        // i.e. starting 30km away and continuing further out, then took the
+        // first hit within 1000m of there. It could only ever hit something
+        // 30km behind the player, so what the seat believed it was aiming at
+        // was unrelated to where it was pointing.
+        Vector3 aimOrigin = BaseTransform.transform.TransformPoint(ViewPoint);
+        Vector3 aimDir = BaseTransform.transform.TransformDirection(ViewDirection);
+        Vector3 TargetPos = aimOrigin + aimDir * AimRange;
 
         if (AimOverride.HasValue)
         {
             // AI-controlled seat: aim straight at the designated point
             TargetPos = AimOverride.Value;
         }
-        else if (Physics.Raycast(TargetPos, TargetPos - CAM.transform.position, out RaycastHit hit, 1000f))
+        else if (Physics.Raycast(aimOrigin, aimDir, out RaycastHit hit, AimRange,
+                                 ~0, QueryTriggerInteraction.Ignore))
         {
             TargetPos = hit.point;
 
@@ -168,7 +190,13 @@ public abstract class PhxSeat : IPhxTrackable, IPhxTickable
 
             Aim = GetInstance(hit.collider.gameObject.transform);
         }
-
+        else
+        {
+            // Nothing within range: the seat is pointing at open sky, so it has
+            // no aim target. Leaving the previous one set made a turret keep
+            // reporting whatever it last swept past.
+            Aim = null;
+        }
         // Update aimers for each weapon system
         foreach (PhxWeaponSystem System in WeaponSystems)
         {

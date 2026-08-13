@@ -1680,7 +1680,49 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         }
         else if ((State == PhxControlState.Stand || State == PhxControlState.Crouch || State == PhxControlState.Sprint) && LandTimer == 0f)
         {
-            Body.MovePosition(Body.position + CurrSpeed * deltaTime);
+            // Sweep before moving, or the move is a teleport.
+            //
+            // On a NON-kinematic rigidbody MovePosition behaves like writing
+            // transform.position: it relocates the body without sweeping. So
+            // ContinuousDynamic is configured on this body and then bypassed
+            // every tick, and a soldier crossing thin geometry - a floor panel,
+            // a ramp edge, a catwalk - steps straight through it instead of
+            // being stopped by it.
+            //
+            // Casting the soldier's own capsule along the intended delta and
+            // clamping to the first hit keeps the existing movement model
+            // (position is pinned per tick, gravity does not apply while
+            // grounded) while making it collide.
+            Vector3 delta = CurrSpeed * deltaTime;
+            float distance = delta.magnitude;
+
+            if (distance > 1e-4f)
+            {
+                CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+                if (capsule != null && capsule.enabled)
+                {
+                    // Capsule end points in world space, pulled in by the skin
+                    // width so a body already touching a wall is not reported
+                    // as starting inside it.
+                    float half = Mathf.Max(0f, capsule.height * 0.5f - capsule.radius);
+                    Vector3 centre = transform.TransformPoint(capsule.center);
+                    Vector3 up = transform.up * half;
+                    float radius = capsule.radius * 0.95f;
+
+                    if (Physics.CapsuleCast(centre - up, centre + up, radius,
+                                            delta / distance, out RaycastHit sweepHit,
+                                            distance, PhxLayers.SoldierGround,
+                                            QueryTriggerInteraction.Ignore))
+                    {
+                        // Stop just short of the surface rather than exactly on
+                        // it, so the next tick does not start embedded.
+                        distance = Mathf.Max(0f, sweepHit.distance - 0.01f);
+                        delta = delta.normalized * distance;
+                    }
+                }
+            }
+
+            Body.MovePosition(Body.position + delta);
 
             // Last line of defence before PhysX. Guarding every producer of
             // LookRot is the real fix, but a single unguarded path anywhere -
