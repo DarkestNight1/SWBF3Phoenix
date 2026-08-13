@@ -25,7 +25,8 @@ namespace SkelProbe
             "WALKERSECTION", "WalkerHeight", "WalkerType",
             "AnimatedAddon", "AddonName",
             "TransformAnimation", "RollAnimation", "DeployAnimation",
-            "ClassLabel", "Pilot9Pose", "PilotAnimation", "PilotPosition", "ThrowVelocity", "LaunchForce", "Velocity", "FuseTime", "TimeOut",
+            "ClassLabel", "ChunkGeometryName", "ChunkNodeName", "ChunkPhysics",
+            "DestructionName", "ExplosionName", "MaxHealth", "Pilot9Pose", "PilotAnimation", "PilotPosition", "ThrowVelocity", "LaunchForce", "Velocity", "FuseTime", "TimeOut",
             "ExplosionName", "OrdnanceName", "TriggerRadius", "DetonateTime",
             "ArmedTime", "MaxRange", "ShotDelay", "GravityScale",
         };
@@ -39,7 +40,8 @@ namespace SkelProbe
             foreach (EntityClass ec in classes)
             {
                 if (ec == null || string.IsNullOrEmpty(ec.Name)) continue;
-                if (!ec.Name.ToLowerInvariant().Contains(nameFilter)) continue;
+                if (nameFilter != "*" && !ec.Name.ToLowerInvariant().Contains(nameFilter)) continue;
+            if (nameFilter == "*" && ec.ClassType != EEntityClassType.GameObjectClass) continue;
 
                 Console.WriteLine($"### {ec.Name}  (base {ec.BaseClassName}, type {ec.ClassType})");
 

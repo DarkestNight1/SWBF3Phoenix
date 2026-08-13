@@ -70,9 +70,18 @@ public class PhxLeafPatch : PhxInstance<PhxLeafPatchClass>
         LeavesMainModule.maxParticles = C.NumParticles;
         LeavesMainModule.simulationSpace = ParticleSystemSimulationSpace.Local;
 
-        Color MinColor = new Color(C.DarknessMin, C.DarknessMin, C.DarknessMin, C.Alpha);
-        Color MaxColor = new Color(C.DarknessMax, C.DarknessMax, C.DarknessMax, C.Alpha);
-        LeavesMainModule.startColor = new ParticleSystem.MinMaxGradient(MinColor, MaxColor);
+        // Darkness is an amount to DARKEN BY, not a brightness.
+        //
+        // Both properties default to 0, and feeding that straight in as an RGB
+        // value made every unauthored leaf patch pure black - which is most of
+        // them, since only a few maps set it. Inverting means 0 leaves the
+        // texture untouched and 1 drives it to black, which is what "darkness"
+        // has to mean for the authored values to read correctly.
+        float brightMax = Mathf.Clamp01(1f - C.DarknessMin);
+        float brightMin = Mathf.Clamp01(1f - C.DarknessMax);
+
+        Color MinColor = new Color(brightMin, brightMin, brightMin, C.Alpha);
+        Color MaxColor = new Color(brightMax, brightMax, brightMax, C.Alpha);
 
         //var colModule = Leaves.colorOverLifetime;
         //colModule.enabled = true;
@@ -80,7 +89,13 @@ public class PhxLeafPatch : PhxInstance<PhxLeafPatchClass>
 
         LeavesRenderer.alignment = ParticleSystemRenderSpace.Facing;
         LeavesRenderer.minParticleSize = .000001f;
-        LeavesRenderer.maxParticleSize = 999999f;
+        // Same clamp EffectsLoader already applies, and for the same reason:
+        // maxParticleSize is a FRACTION OF THE VIEWPORT, not a world size. At
+        // 999999 a leaf billboard near the camera scales up to fill the frame,
+        // so walking into a bush turns the screen into flat green with a hard
+        // straight edge across it - and because the quad sits in front of
+        // everything, the foliage also looks like it is drawing through walls.
+        LeavesRenderer.maxParticleSize = 0.6f;
 
         Material mat = new Material(Resources.Load<Material>("effects/HDRPParticleNormal"));
         var mainTexID = Shader.PropertyToID("Texture2D_23DD87FD");
@@ -91,7 +106,10 @@ public class PhxLeafPatch : PhxInstance<PhxLeafPatchClass>
 
         for (int j = 0; j < C.NumParticles; j++)
         {
-            byte ByteDarkness = (byte) (255f * UnityEngine.Random.Range(C.DarknessMin, C.DarknessMax));
+            // Same inversion as above - this loop set the per-particle colour and
+            // would otherwise re-blacken every leaf regardless of startColor.
+            byte ByteDarkness = (byte) (255f * Mathf.Clamp01(
+                1f - UnityEngine.Random.Range(C.DarknessMin, C.DarknessMax)));
 
             var emitParams = new ParticleSystem.EmitParams();
             emitParams.startColor = new Color32(ByteDarkness, ByteDarkness, ByteDarkness, ByteAlpha);
