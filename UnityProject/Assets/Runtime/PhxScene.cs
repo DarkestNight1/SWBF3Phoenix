@@ -89,6 +89,7 @@ public class PhxScene
         PhxHeroRules.Reset();
         PhxComboLoader.Reset();
         PhxAIDirectives.Reset();
+        PhxCommandpost.ResetDiagnostics();
 
         // The bus holds its listener lists in statics, which outlive a match -
         // in a player build they outlive everything short of the process. A

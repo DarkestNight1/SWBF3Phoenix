@@ -152,6 +152,17 @@ public class PhxCommandpost : PhxInstance<PhxCommandpost.ClassProperties>, IPhxT
     static readonly HashSet<string> ReportedCaptureSource = new HashSet<string>();
 
     /// <summary>
+    /// Forget which posts have been reported. Statics outlive a match, so
+    /// without this a warning raised on one map stays suppressed for the rest
+    /// of the session - including on maps where it would be a different
+    /// problem. Same shape as PhxBF3AIController.ResetDiagnostics.
+    /// </summary>
+    public static void ResetDiagnostics()
+    {
+        ReportedCaptureSource.Clear();
+    }
+
+    /// <summary>
     /// Hook whichever region actually drives this post's capture.
     /// </summary>
     /// <remarks>
