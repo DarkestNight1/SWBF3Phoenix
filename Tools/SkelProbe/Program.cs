@@ -30,6 +30,7 @@ namespace SkelProbe
         static string OdfFilter;
         static bool ResolveNames;
         static bool DestructMode;
+        static bool SubLvlMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -38,11 +39,13 @@ namespace SkelProbe
             int limit = 6;
             OdfFilter = null;
             DestructMode = false;
+            SubLvlMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--destruct") { DestructMode = true; }
+                if (args[i] == "--sublvl") { SubLvlMode = true; }
+                else if (args[i] == "--destruct") { DestructMode = true; }
                 else if (args[i] == "--names") { ResolveNames = true; }
                 else if (args[i] == "--csv" && i + 1 < args.Length) { LookupCsv = args[++i]; }
                 else if (args[i] == "--odf" && i + 1 < args.Length) { OdfFilter = args[++i].ToLowerInvariant(); }
@@ -72,6 +75,7 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (SubLvlMode) { SubLvlProbe.Run(path, LookupCsv); continue; }
                 if (DestructMode) { DestructProbe.Run(path, Path.GetFileName(path)); continue; }
                 Level level;
                 try

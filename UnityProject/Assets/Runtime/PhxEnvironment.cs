@@ -84,7 +84,9 @@ public class PhxEnvironment
 
     // To prevent loading an lvl more than once.
     // The path here always describes the relative 2-leaf lvl path
-    Dictionary<PhxPath, SWBF2Handle> PathToHandle = new Dictionary<PhxPath, SWBF2Handle>();
+    // Keyed by path AND requested sub-LVLs - see ScheduleKey. A path-only key
+    // silently dropped every mount after the first for a given file.
+    Dictionary<string, SWBF2Handle> PathToHandle = new Dictionary<string, SWBF2Handle>();
 
     bool FirePostLoadEvent;
 
@@ -703,11 +705,50 @@ public class PhxEnvironment
         return mapName;
     }
 
+    /// <summary>
+    /// A file plus the sub-LVLs requested from it.
+    /// </summary>
+    /// <remarks>
+    /// Keying the "already scheduled" cache on the path alone loses content. A
+    /// BF2 map is one lvl containing several named sub-LVLs, and the mission
+    /// script mounts them with separate calls - kas2.lvl is asked for
+    /// "kas2_obj" (the props, the destructibles) and then for "kas2_con" (the
+    /// mode's command posts and spawns). With a path-only key the second call
+    /// found the first one's handle and returned it, so whichever set was
+    /// requested second never loaded at all.
+    ///
+    /// Either half missing looks like a broken map rather than a missing
+    /// mount: objects first means no command posts, mode first means no props.
+    /// </remarks>
+    static string ScheduleKey(PhxPath absPath, string[] subLVLs)
+    {
+        if (subLVLs == null || subLVLs.Length == 0)
+        {
+            // No filter means the whole file, which subsumes any subset.
+            return absPath.ToString() + "|*";
+        }
+
+        var sorted = new List<string>(subLVLs);
+        sorted.Sort(StringComparer.OrdinalIgnoreCase);
+        return absPath.ToString() + "|" + string.Join(",", sorted);
+    }
+
     bool Schedule(PhxPath absPath, out SWBF2Handle handle, string[] subLVLs = null)
     {
         Debug.Assert(CanSchedule);
 
-        if (PathToHandle.TryGetValue(absPath, out handle))
+        string key = ScheduleKey(absPath, subLVLs);
+
+        // The same file requested with the SAME sub-LVLs is a genuine repeat.
+        // With different ones it is more of the map, and has to be scheduled.
+        if (PathToHandle.TryGetValue(key, out handle))
+        {
+            return true;
+        }
+
+        // A whole-file mount already covers every subset of it.
+        if (subLVLs != null && subLVLs.Length > 0 &&
+            PathToHandle.TryGetValue(absPath.ToString() + "|*", out handle))
         {
             return true;
         }
@@ -715,8 +756,6 @@ public class PhxEnvironment
         if (absPath.Exists() && absPath.IsFile())
         {
             handle = EnvCon.AddLevel(absPath, subLVLs);
-
-            // Index any cloth this file carries while its path is in hand.
             //
             // CLTH has no handler in LibSWBF2 at all, so it never arrives
             // through EnvCon and has to be read from the file directly. This
@@ -733,7 +772,7 @@ public class PhxEnvironment
                 bIsAddon = absPath.Contains("/addon/")
             });
 
-            PathToHandle.Add(absPath, handle);
+            PathToHandle.Add(key, handle);
             return true;
         }
 
