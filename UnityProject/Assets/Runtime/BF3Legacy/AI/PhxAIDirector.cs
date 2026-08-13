@@ -508,10 +508,41 @@ public class PhxAIDirector : MonoBehaviour
 
             if (pool.Count == 0) continue;
 
-            // Seed with whoever is left; position is what matters from here.
-            PhxBF3AIController seed = pool[0];
-            pool.RemoveAt(0);
-            group.Add(seed);
+            // Seed as far from the squads already formed as possible.
+            //
+            // Taking pool[0] made every squad's seed arbitrary, and at spawn -
+            // when a whole team is stacked on one command post - every squad
+            // then formed around nearly the same point. Farthest-point seeding
+            // gives each squad a distinct centre even when everyone starts on
+            // top of each other, so squads diverge immediately instead of
+            // travelling as one body and separating later, if at all.
+            int seedIdx = 0;
+            if (s > 0)
+            {
+                float bestDist = -1f;
+                for (int i = 0; i < pool.Count; ++i)
+                {
+                    Vector3 p = pool[i].PawnPosition();
+
+                    // Distance to the nearest existing seed; maximise it.
+                    float nearestSeed = float.MaxValue;
+                    for (int g = 0; g < groups.Count - 1; ++g)
+                    {
+                        if (groups[g].Count == 0) continue;
+                        float d = Vector3.SqrMagnitude(groups[g][0].PawnPosition() - p);
+                        if (d < nearestSeed) nearestSeed = d;
+                    }
+
+                    if (nearestSeed > bestDist)
+                    {
+                        bestDist = nearestSeed;
+                        seedIdx = i;
+                    }
+                }
+            }
+
+            PhxBF3AIController seed = pool[seedIdx];
+            pool.RemoveAt(seedIdx);
             Vector3 origin = seed.PawnPosition();
 
             // Last squad takes everything remaining rather than stranding

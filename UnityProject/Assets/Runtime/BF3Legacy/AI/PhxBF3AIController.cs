@@ -363,6 +363,7 @@ public class PhxBF3AIController : PhxAIController
         ApplyLedgeGuard();
         TickStuckRecovery(deltaTime);
 
+        TickDecision(deltaTime);
         TickActionAnimation();
     }
 
@@ -389,6 +390,120 @@ public class PhxBF3AIController : PhxAIController
     /// arbitration - somebody has to own layer 0 and take requests - which is a
     /// change to PhxSoldier's locomotion code, not a flag.
     /// </remarks>
+
+    // How often the scored decision runs. It reads a dozen fields and walks a
+    // short candidate list, so it is cheap - but not per-frame-per-soldier
+    // cheap at 128 units, and the answer does not change that fast anyway.
+    // Set by the decision/role logic in Engage and read by the movement and
+    // cover code below, so the two stay in one place rather than each rolling
+    // their own dice.
+    bool EngageHoldGround;
+    bool WantsCover;
+
+    float DecisionTimer;
+    BFAIAction Decision = BFAIAction.Attack;
+
+    /// <summary>The action the scored chooser last picked for this soldier.</summary>
+    public BFAIAction CurrentDecision => Decision;
+
+    /// <summary>
+    /// Run BFAIDecision over this soldier's situation.
+    /// </summary>
+    /// <remarks>
+    /// The chooser has existed, fully written, with nothing ever calling it -
+    /// scoring ten actions and applying difficulty as a band of good-enough
+    /// options rather than always taking the best. This is the producer.
+    ///
+    /// It advises rather than replaces. The concrete state machine (seek,
+    /// defend, engage, capture, board, sabotage, turret) works and owns
+    /// movement; what it lacked was any variation in HOW a soldier fights once
+    /// it is in contact. So the decision is consumed inside Engage, where the
+    /// difference between pressing, taking cover, flanking and backing off is
+    /// exactly the choice this scores - and where getting it wrong costs a
+    /// firefight rather than a whole objective.
+    /// </remarks>
+    void TickDecision(float deltaTime)
+    {
+        DecisionTimer -= deltaTime;
+        if (DecisionTimer > 0f) return;
+
+        // Jittered so a squad that spawned together does not re-decide in
+        // lockstep for the rest of the match.
+        DecisionTimer = Random.Range(0.6f, 1.1f);
+
+        if (!(Pawn is PhxSoldier self) || self == null) return;
+
+        Vector3 pos = PawnPosition();
+
+        BFAISituation s = default;
+        s.Position = pos;
+        s.Team = Team;
+        s.HealthFraction = self.HealthFraction;
+
+        IPhxWeapon weapon = self.GetPrimaryWeapon();
+        int mag = weapon != null ? weapon.GetMagazineSize() : 0;
+        s.AmmoFraction = mag > 0 ? Mathf.Clamp01(weapon.GetMagazineAmmo() / (float)mag) : 1f;
+
+        s.HasVisibleEnemy = HasVisibleTarget;
+        s.HasRememberedEnemy = HasFreshContact;
+        s.DistanceToEnemy = TryGetTargetPosition(out Vector3 tp)
+            ? Vector3.Distance(pos, tp)
+            : (HasFreshContact ? Vector3.Distance(pos, LastKnownEnemyPosition) : float.MaxValue);
+
+        CountNearby(pos, out int enemies, out int allies);
+        s.NearbyEnemies = enemies;
+        s.NearbyAllies = allies;
+
+        s.LocalDanger = PhxAIDanger.Sample(pos, Team);
+
+        PhxCommandpost objective = GetObjective() ?? DefendObjective;
+        s.DistanceToObjective = objective != null
+            ? Vector3.Distance(pos, objective.transform.position)
+            : float.MaxValue;
+        // "Contested" here means capture is partway through - somebody is
+        // working on it, whoever that is.
+        s.ObjectiveThreatened = objective != null && objective.GetCaptureProgress() > 0.01f;
+
+        s.InCover = ClaimedHint != null;
+        s.CoverAvailable = ClaimedHint == null && Skill.CoverUsage > 0f;
+
+        Decision = BFAIDecision.Choose(s, (int)PhxBF3.Config.AIDifficulty,
+                                       PhxAIDirectives.GetAggressiveness(Team));
+    }
+
+    /// <summary>
+    /// Enemies and allies this soldier can plausibly account for.
+    /// </summary>
+    /// <remarks>
+    /// Reuses the shared overlap buffer and the soldier layer mask, the same
+    /// way target acquisition does - an unmasked query fills with scenery long
+    /// before it finds people.
+    /// </remarks>
+    void CountNearby(Vector3 pos, out int enemies, out int allies)
+    {
+        enemies = 0;
+        allies = 0;
+
+        const float awareness = 30f;
+        int count = Physics.OverlapSphereNonAlloc(pos, awareness, OverlapCache,
+                                                  PhxLayers.Soldier,
+                                                  QueryTriggerInteraction.Ignore);
+
+        for (int i = 0; i < count; ++i)
+        {
+            PhxSoldier other = OverlapCache[i] != null
+                ? OverlapCache[i].GetComponentInParent<PhxSoldier>()
+                : null;
+            if (other == null || other.IsDead) continue;
+
+            if (other.Team.Get() == Team) ++allies;
+            else ++enemies;
+        }
+
+        // We counted ourselves among the allies.
+        if (allies > 0) --allies;
+    }
+
     void TickActionAnimation()
     {
         if (!(Pawn is PhxSoldier soldier) || soldier.IsInVehicle) return;
@@ -992,6 +1107,78 @@ public class PhxBF3AIController : PhxAIController
 
         float dist = Vector3.Distance(PawnPosition(), targetPos);
 
+        // What the scored chooser and the squad want from this soldier.
+        //
+        // Both are advisory: they bias how the fight is taken, not whether it
+        // is. A Base element holds where it is and keeps firing so the enemy
+        // stays looking at it; a Maneuver element breaks the direct approach
+        // and comes from an angle. Without the split, four soldiers with the
+        // same target all walk at it.
+        BFSquadRole role = BFSquadSystem.SquadOf(this)?.RoleOf(this) ?? BFSquadRole.None;
+
+        if (role == BFSquadRole.Base)
+        {
+            // Hold. Suppression is the job, so keep shooting even at ranges a
+            // lone soldier would close.
+            EngageHoldGround = true;
+        }
+        else if (role == BFSquadRole.Maneuver && dist > 12f)
+        {
+            // Break the straight line. Reusing FlankOffset keeps this on the
+            // one path the movement code already understands rather than
+            // adding a second notion of "where I am going".
+            if (FlankOffset == Vector3.zero)
+            {
+                Vector3 toTarget = targetPos - PawnPosition();
+                toTarget.y = 0f;
+                if (toTarget.sqrMagnitude > 1f)
+                {
+                    Vector3 side = Vector3.Cross(toTarget.normalized, Vector3.up);
+                    FlankOffset = side * (Random.value < 0.5f ? -18f : 18f);
+                }
+            }
+            EngageHoldGround = false;
+        }
+        else
+        {
+            EngageHoldGround = false;
+        }
+
+        // The chooser's verdict, applied where it changes how the fight goes.
+        switch (Decision)
+        {
+            case BFAIAction.SeekCover:
+                // Bias toward claiming cover; the hint-node scan below reads
+                // this rather than rolling purely on skill.
+                WantsCover = true;
+                break;
+
+            case BFAIAction.Retreat:
+                // Self-preservation already owns actually disengaging - this
+                // only stops us pressing forward while it decides.
+                EngageHoldGround = true;
+                WantsCover = true;
+                break;
+
+            case BFAIAction.Flank:
+                if (role == BFSquadRole.None && dist > 12f && FlankOffset == Vector3.zero)
+                {
+                    Vector3 toTarget = targetPos - PawnPosition();
+                    toTarget.y = 0f;
+                    if (toTarget.sqrMagnitude > 1f)
+                    {
+                        Vector3 side = Vector3.Cross(toTarget.normalized, Vector3.up);
+                        FlankOffset = side * (Random.value < 0.5f ? -15f : 15f);
+                    }
+                }
+                WantsCover = false;
+                break;
+
+            default:
+                WantsCover = false;
+                break;
+        }
+
         // grenade / secondary weapon: mid-range targets, on cooldown, skill-gated
         if (GrenadePulse > 0f)
         {
@@ -1050,7 +1237,9 @@ public class PhxBF3AIController : PhxAIController
         if (HintScanTimer <= 0f)
         {
             HintScanTimer = 3f;
-            if (ClaimedHint == null && Random.value < Skill.CoverUsage)
+            // WantsCover is the scored chooser asking for cover; without it this
+            // was a pure skill roll that ignored how the fight was actually going.
+            if (ClaimedHint == null && (WantsCover || Random.value < Skill.CoverUsage))
             {
                 // marksmen at range look for a snipe post, everyone else cover
                 PhxHintType want = dist > 45f ? PhxHintType.Snipe : PhxHintType.Cover;
@@ -1109,7 +1298,10 @@ public class PhxBF3AIController : PhxAIController
             // branch (which flips the body's facing) never engages mid-fight
             move.y = 0.1f;
         }
-        if (dist > 25f) move.y = 1f;        // close in
+        // A base element does not close - holding the enemy's attention only
+        // works from where it already has an angle. Everyone else advances as
+        // before.
+        if (dist > 25f && !EngageHoldGround) move.y = 1f;   // close in
         else if (dist < 8f) move.y = -0.7f; // back off
         MoveDirection = move;
     }

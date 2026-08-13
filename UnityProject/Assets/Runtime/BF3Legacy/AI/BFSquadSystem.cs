@@ -26,6 +26,38 @@ public struct BFRegionThreat
     public int HostileTeam;
 }
 
+
+/// <summary>What a squad is collectively doing.</summary>
+public enum BFSquadState
+{
+    /// <summary>Moving to an objective, no contact.</summary>
+    Advancing,
+    /// <summary>In contact and splitting into base and maneuver elements.</summary>
+    Engaging,
+    /// <summary>Badly hurt or scattered; close up before doing anything else.</summary>
+    Regrouping,
+}
+
+/// <summary>
+/// A member's job inside an engaged squad.
+/// </summary>
+/// <remarks>
+/// This is the difference between four soldiers shooting at the same enemy and
+/// a squad fighting. One element holds the enemy's attention from where it is;
+/// the other uses that to move. Neither works alone - a flank with nobody
+/// fixing the target is just a long walk into a gunfight, and a base element
+/// with nobody manoeuvring is a stalemate.
+/// </remarks>
+public enum BFSquadRole
+{
+    /// <summary>No assignment; behave as before.</summary>
+    None,
+    /// <summary>Hold position and keep the enemy's head down.</summary>
+    Base,
+    /// <summary>Break off and come at them from somewhere else.</summary>
+    Maneuver,
+}
+
 /// <summary>Formation a squad holds while moving.</summary>
 public enum BFSquadFormation
 {
@@ -67,6 +99,109 @@ public sealed class BFSquad
     public PhxBF3AIController Leader { get; private set; }
 
     public BFSquadFormation Formation { get; private set; } = BFSquadFormation.Wedge;
+
+    /// <summary>What the squad is collectively doing right now.</summary>
+    public BFSquadState State { get; private set; } = BFSquadState.Advancing;
+
+    // Role per member, parallel to Members. Rebuilt whenever the state changes
+    // rather than every tick, so a soldier is not reassigned mid-manoeuvre.
+    readonly List<BFSquadRole> Roles = new List<BFSquadRole>();
+
+    /// <summary>This member's job, or None when the squad is not engaged.</summary>
+    public BFSquadRole RoleOf(PhxBF3AIController member)
+    {
+        int idx = Members.IndexOf(member);
+        return (idx >= 0 && idx < Roles.Count) ? Roles[idx] : BFSquadRole.None;
+    }
+
+    /// <summary>
+    /// Decide what the squad is doing, and split it into elements when fighting.
+    /// </summary>
+    /// <remarks>
+    /// The split is what turns a squad from four soldiers who happen to share a
+    /// target into one that fights. Roughly half hold where they are and keep
+    /// firing; the rest break off and come from another angle. The base element
+    /// is picked from whoever already has a target, because a soldier who is
+    /// currently shooting is the one best placed to keep doing it, and moving
+    /// the ones without contact costs the squad nothing.
+    ///
+    /// A squad too small to split does not try - two soldiers separating is not
+    /// a manoeuvre, it is two lone soldiers.
+    /// </remarks>
+    public void UpdateState()
+    {
+        BFSquadState previous = State;
+
+        int engaged = 0, alive = 0;
+        float healthSum = 0f;
+        for (int i = 0; i < Members.Count; ++i)
+        {
+            PhxBF3AIController c = Members[i];
+            if (c == null || !(c.Pawn is PhxSoldier s) || s == null) continue;
+
+            ++alive;
+            healthSum += s.HealthFraction;
+            if (c.HasVisibleTarget) ++engaged;
+        }
+
+        if (alive == 0)
+        {
+            State = BFSquadState.Advancing;
+            Roles.Clear();
+            return;
+        }
+
+        float avgHealth = healthSum / alive;
+
+        if (avgHealth < 0.35f) State = BFSquadState.Regrouping;
+        else if (engaged > 0) State = BFSquadState.Engaging;
+        else State = BFSquadState.Advancing;
+
+        // Only reassign on a transition. Re-rolling roles every replan would
+        // recall a flanker halfway round and send a different one instead.
+        if (State == previous && Roles.Count == Members.Count) return;
+
+        AssignRoles();
+    }
+
+    void AssignRoles()
+    {
+        Roles.Clear();
+        for (int i = 0; i < Members.Count; ++i) Roles.Add(BFSquadRole.None);
+
+        // Fewer than three and there is nobody to spare for a manoeuvre.
+        if (State != BFSquadState.Engaging || Members.Count < 3) return;
+
+        // Everyone already in contact becomes the base element first.
+        int wantBase = Mathf.Max(1, Members.Count / 2);
+        int assignedBase = 0;
+
+        for (int i = 0; i < Members.Count && assignedBase < wantBase; ++i)
+        {
+            if (Members[i] != null && Members[i].HasVisibleTarget)
+            {
+                Roles[i] = BFSquadRole.Base;
+                ++assignedBase;
+            }
+        }
+
+        // Top the base element up from whoever is left, then everyone else
+        // manoeuvres.
+        for (int i = 0; i < Members.Count; ++i)
+        {
+            if (Roles[i] != BFSquadRole.None) continue;
+
+            if (assignedBase < wantBase)
+            {
+                Roles[i] = BFSquadRole.Base;
+                ++assignedBase;
+            }
+            else
+            {
+                Roles[i] = BFSquadRole.Maneuver;
+            }
+        }
+    }
 
     /// <summary>Which team this squad fights for. Set at creation.</summary>
     public int Team;
@@ -348,6 +483,7 @@ public static class BFSquadSystem
 
             s.ElectLeader();
             s.ChooseFormation();
+            s.UpdateState();
         }
 
         DecayThreats();
