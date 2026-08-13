@@ -1,0 +1,12 @@
+# Auto detect text files and perform LF normalization
+* text=auto
+
+# NOTE: the LFS filters that used to live here (*.NET.dll, *.gif) are gone.
+# This content is now vendored into SWBF3Phoenix, which is a GitHub fork, and
+# forks cannot receive new LFS objects:
+#
+#   batch response: @DarkestNight1 can not upload new objects to public fork
+#
+# The only files those rules matched were the upstream repo's README demo GIFs
+# under GitRepoAssets/, which have no part in the build and are no longer
+# tracked here.
