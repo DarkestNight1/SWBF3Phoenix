@@ -29,6 +29,7 @@ namespace SkelProbe
     {
         static string OdfFilter;
         static bool ResolveNames;
+        static bool DestructMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -36,11 +37,13 @@ namespace SkelProbe
             var files = new List<string>();
             int limit = 6;
             OdfFilter = null;
+            DestructMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--names") { ResolveNames = true; }
+                if (args[i] == "--destruct") { DestructMode = true; }
+                else if (args[i] == "--names") { ResolveNames = true; }
                 else if (args[i] == "--csv" && i + 1 < args.Length) { LookupCsv = args[++i]; }
                 else if (args[i] == "--odf" && i + 1 < args.Length) { OdfFilter = args[++i].ToLowerInvariant(); }
                 else if (args[i] == "--limit" && i + 1 < args.Length)
@@ -69,6 +72,7 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (DestructMode) { DestructProbe.Run(path, Path.GetFileName(path)); continue; }
                 Level level;
                 try
                 {

@@ -115,39 +115,89 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
         EntityClass EC = C.EntityClass;
         EC.GetAllProperties(out uint[] properties, out string[] values);
 
+        // Hash once, not once per property per iteration.
+        uint hStart  = HashUtils.GetFNV("DamageStartPercent");
+        uint hStop   = HashUtils.GetFNV("DamageStopPercent");
+        uint hEffect = HashUtils.GetFNV("DamageEffect");
+        uint hAttach = HashUtils.GetFNV("DamageAttachPoint");
+
         PhxDamageEffect CurrDamageEffect = null;
+
+        // Any damage property starts a group, not just DamageStartPercent.
+        //
+        // The old parser only allocated on DamageStartPercent and then
+        // dereferenced CurrDamageEffect for the other three. GetAllProperties
+        // returns declaration order, and an odf is free to put DamageEffect
+        // first or to omit the start percent entirely - either throws a
+        // NullReferenceException out of Init, which loses the whole instance
+        // rather than one effect. Every stock destructible happens to declare
+        // them in the lucky order; a mod has no reason to.
+        PhxDamageEffect Current()
+        {
+            if (CurrDamageEffect == null)
+            {
+                CurrDamageEffect = new PhxDamageEffect();
+                DamageEffects.Add(CurrDamageEffect);
+            }
+            return CurrDamageEffect;
+        }
 
         int i = 0;
         while (i < properties.Length)
         {
-            if (properties[i] == HashUtils.GetFNV("DamageStartPercent"))
+            uint prop = properties[i];
+
+            if (prop == hStart)
             {
+                // A start percent always begins a NEW group - that is what
+                // separates one damage stage from the next.
                 CurrDamageEffect = new PhxDamageEffect();
                 DamageEffects.Add(CurrDamageEffect);
-
-                CurrDamageEffect.DamageStartPercent = float.Parse(values[i], System.Globalization.CultureInfo.InvariantCulture) / 100f;
+                CurrDamageEffect.DamageStartPercent = ParsePercent(values[i]);
             }
-            else if (properties[i] == HashUtils.GetFNV("DamageStopPercent"))
+            else if (prop == hStop)
             {
-                CurrDamageEffect.DamageStopPercent = float.Parse(values[i], System.Globalization.CultureInfo.InvariantCulture) / 100f;
+                Current().DamageStopPercent = ParsePercent(values[i]);
             }
-            else if (properties[i] == HashUtils.GetFNV("DamageEffect"))
+            else if (prop == hEffect)
             {
-                CurrDamageEffect.Effect = SCENE.EffectsManager.LendEffect(values[i]);
+                Current().Effect = SCENE.EffectsManager.LendEffect(values[i]);
             }
-            else if (properties[i] == HashUtils.GetFNV("DamageAttachPoint"))
+            else if (prop == hAttach)
             {
-                CurrDamageEffect.DamageAttachPoint = UnityUtils.FindChildTransform(transform, values[i]);
+                Current().DamageAttachPoint = UnityUtils.FindChildTransform(transform, values[i]);
             }
 
             i++;
         }
     }
 
+    /// <summary>
+    /// A damage threshold, as a 0..1 fraction.
+    /// </summary>
+    /// <remarks>
+    /// float.Parse throws on anything unexpected, and one malformed odf value
+    /// would take out the instance. A bad threshold is worth a warning, not a
+    /// missing building.
+    /// </remarks>
+    static float ParsePercent(string raw)
+    {
+        if (float.TryParse(raw, System.Globalization.NumberStyles.Float,
+                           System.Globalization.CultureInfo.InvariantCulture, out float pct))
+        {
+            return pct / 100f;
+        }
 
+        Debug.LogWarning($"[Destructible] Could not read damage percent '{raw}'; treating as 0.");
+        return 0f;
+    }
     public virtual void Tick(float deltaTime)
     {
-        float HealthPercent = CurHealth.Get() / C.MaxHealth.Get();
+        // MaxHealth 0 would make this NaN, and NaN > 0.0001f is false - so the
+        // building would report itself destroyed on its first tick, before
+        // anything shot at it.
+        float maxHealth = C.MaxHealth.Get();
+        float HealthPercent = maxHealth > 0f ? CurHealth.Get() / maxHealth : 0f;
 
         Health = CurHealth.Get();
 
