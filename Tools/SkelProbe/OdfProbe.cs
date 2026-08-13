@@ -25,7 +25,7 @@ namespace SkelProbe
             "WALKERSECTION", "WalkerHeight", "WalkerType",
             "AnimatedAddon", "AddonName",
             "TransformAnimation", "RollAnimation", "DeployAnimation",
-            "ClassLabel", "ThrowVelocity", "LaunchForce", "Velocity", "FuseTime", "TimeOut",
+            "ClassLabel", "Pilot9Pose", "PilotAnimation", "PilotPosition", "ThrowVelocity", "LaunchForce", "Velocity", "FuseTime", "TimeOut",
             "ExplosionName", "OrdnanceName", "TriggerRadius", "DetonateTime",
             "ArmedTime", "MaxRange", "ShotDelay", "GravityScale",
         };

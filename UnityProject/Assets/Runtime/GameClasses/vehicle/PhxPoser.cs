@@ -97,6 +97,19 @@ public class PhxPoser
 
 
 
+    /// <summary>
+    /// Whether the constructor actually found pose data.
+    /// </summary>
+    /// <remarks>
+    /// A poser built from a bank/clip that does not exist leaves its arrays
+    /// null and then logs "No pose data initialized" on every SetState - which
+    /// is per frame, for as long as someone is sitting in the seat. Callers can
+    /// now test this and try another name instead.
+    /// </remarks>
+    public bool HasPose => Rotations != null && Bones != null && Positions != null;
+
+    bool ReportedNoPose;
+
     public PhxPoser(string animBankName, string animName, Transform objRoot, bool IsStatic = false)
     {
         AnimationBank NinePose = AnimationLoader.Instance.GetRawAnimationBank(animBankName);
@@ -171,7 +184,13 @@ public class PhxPoser
     {
         if (Rotations == null || Bones == null || Positions == null)
         {
-            Debug.LogErrorFormat("No pose data initialized.");
+            // Reported once. This used to fire every frame the seat was
+            // occupied, burying everything else in the console.
+            if (!ReportedNoPose)
+            {
+                ReportedNoPose = true;
+                Debug.LogWarning("[PhxPoser] No pose data; the pilot will not be posed.");
+            }
             return;
         }
 

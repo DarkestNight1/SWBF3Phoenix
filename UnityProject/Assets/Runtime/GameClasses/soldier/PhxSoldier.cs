@@ -951,9 +951,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             {
                 bool isStatic = CurrentSeat.PilotAnimationType == PilotAnimationType.StaticPose;
                 string animName = isStatic ? CurrentSeat.PilotAnimation : CurrentSeat.Pilot9Pose;
-                
-                Poser = new PhxPoser("human_4", "human_" + animName, transform, isStatic);   
-            }    
+
+                Poser = CreatePilotPoser(animName, isStatic);
+            }
         }
 
         if (WeaponIdx[0] >= 0 && Weapons[0][WeaponIdx[0]] != null)
@@ -962,6 +962,72 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         }
     }
 
+
+
+    /// <summary>
+    /// Build the pilot pose, trying the names the data actually uses.
+    /// </summary>
+    /// <remarks>
+    /// This was hardcoded to bank "human_4" and clip "human_" + animName, with
+    /// a comment in PhxVehicle admitting the format was a guess ("human_{Pilot9Pose}" ?).
+    /// It is wrong, and it never resolved for anything.
+    ///
+    /// Recovered from the game's own CRCs, the real clips are prefixed by the
+    /// RIDER rather than by "human": imp_speederbike_9pose, all_snowspeeder_9pose,
+    /// rep_fightertank_9pose, ewok_speederbike_9pose, yoda_speederbike_9pose,
+    /// grevious_barc_9pose. There is no human_*_9pose anywhere in the stock
+    /// content, so the hardcoded name could never match and no rider was ever
+    /// posed - which is most of "vehicle animations are broken".
+    ///
+    /// The vehicle ODF stores the unprefixed half (Pilot9Pose = speederbike_9pose),
+    /// so the prefix has to come from context. Rather than guess again, generate
+    /// the plausible combinations and keep the first that actually has data.
+    /// </remarks>
+    PhxPoser CreatePilotPoser(string animName, bool isStatic)
+    {
+        if (string.IsNullOrEmpty(animName)) return null;
+
+        string species = C != null ? C.AnimationName.Get() : "human";
+
+        // The side prefix, taken from the vehicle's own object name -
+        // "imp_hover_speederbike" gives "imp", which is exactly the prefix its
+        // rider pose uses.
+        string sidePrefix = null;
+        Transform vehicleRoot = CurrentSeat.Owner?.GetRootTransform();
+        if (vehicleRoot != null)
+        {
+            string vname = vehicleRoot.name;
+            int us = vname.IndexOf('_');
+            if (us > 0) sidePrefix = vname.Substring(0, us).ToLowerInvariant();
+        }
+
+        var clips = new List<string>();
+        if (!string.IsNullOrEmpty(sidePrefix)) clips.Add($"{sidePrefix}_{animName}");
+        if (!string.IsNullOrEmpty(species)) clips.Add($"{species}_{animName}");
+        clips.Add(animName);
+        clips.Add($"human_{animName}");
+
+        // Banks worth searching, most specific first.
+        var banks = new List<string>();
+        if (!string.IsNullOrEmpty(sidePrefix)) banks.Add(sidePrefix);
+        if (!string.IsNullOrEmpty(species)) { banks.Add(species); banks.Add(species + "_4"); }
+        banks.Add("human_4");
+        banks.Add("human_0");
+
+        foreach (string bank in banks)
+        {
+            foreach (string clip in clips)
+            {
+                PhxPoser candidate = new PhxPoser(bank, clip, transform, isStatic);
+                if (candidate.HasPose) return candidate;
+            }
+        }
+
+        Debug.LogWarning($"[PhxSoldier] No pilot pose found for '{animName}' " +
+                         $"(species '{species}', vehicle prefix '{sidePrefix}'). " +
+                         "The rider will sit unposed.");
+        return null;
+    }
 
     // see: com_inf_default
     float[] GetControlSpeed(PhxControlState state)
