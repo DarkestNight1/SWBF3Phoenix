@@ -164,6 +164,27 @@ public sealed class BFSquad
         AssignRoles();
     }
 
+
+    /// <summary>
+    /// Push each member's role onto the controller.
+    /// </summary>
+    /// <remarks>
+    /// The alternative - asking SquadOf(this) from the combat tick - is a
+    /// linear scan of every squad doing a List.Contains, run per engaged
+    /// soldier per frame. At 128 units that is tens of thousands of reference
+    /// comparisons a frame to answer a question that only changes when the
+    /// director regroups. Pushing on change is the same information for
+    /// nothing.
+    /// </remarks>
+    void PublishRoles()
+    {
+        for (int i = 0; i < Members.Count; ++i)
+        {
+            if (Members[i] == null) continue;
+            Members[i].SquadRole = (i < Roles.Count) ? Roles[i] : BFSquadRole.None;
+        }
+    }
+
     void AssignRoles()
     {
         Roles.Clear();
@@ -201,6 +222,7 @@ public sealed class BFSquad
                 Roles[i] = BFSquadRole.Maneuver;
             }
         }
+        PublishRoles();
     }
 
     /// <summary>Which team this squad fights for. Set at creation.</summary>

@@ -216,6 +216,21 @@ public class PhxCamera : MonoBehaviour
         }
         else if (Mode == CamMode.Track)
         {
+            // Unguarded, this threw from LateUpdate every frame once the
+            // tracked thing was gone - and a vehicle exploding while the player
+            // is riding it is the ordinary case, not an edge one. IPhxTrackable
+            // is an interface, so a plain != null would not have caught a
+            // destroyed Unity object either; the cast is what makes Unity's own
+            // null check apply.
+            var tracked = TrackableInstance as MonoBehaviour;
+            if (TrackableInstance == null || tracked == null)
+            {
+                // Nothing left to watch. Free leaves the view where it is
+                // rather than snapping to the origin.
+                Free();
+                return;
+            }
+
             transform.rotation = TrackableInstance.GetCameraRotation();
             transform.position = TrackableInstance.GetCameraPosition();
         }

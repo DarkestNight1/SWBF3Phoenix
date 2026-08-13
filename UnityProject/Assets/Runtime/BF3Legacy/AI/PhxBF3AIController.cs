@@ -38,6 +38,13 @@ public class PhxBF3AIController : PhxAIController
     public PhxCapitalShip BoardTarget;
     public Vector3 FlankOffset;   // world-space detour offset when approaching contested areas
 
+    /// <summary>
+    /// This soldier's job inside its squad, pushed by BFSquadSystem when the
+    /// squad's state changes. Read per frame in combat, so it is stored rather
+    /// than looked up - SquadOf is a scan over every squad.
+    /// </summary>
+    public BFSquadRole SquadRole = BFSquadRole.None;
+
     PhxAIState State = PhxAIState.SeekObjective;
 
     // combat memory
@@ -180,6 +187,9 @@ public class PhxBF3AIController : PhxAIController
     /// </summary>
     public void ResetForRespawn()
     {
+        // A recycled controller must not inherit the role its previous life had;
+        // the director re-publishes on the next replan.
+        SquadRole = BFSquadRole.None;
         // Re-read the skill profile: this controller was constructed before its
         // team was known (and possibly before the mission called
         // SetAIDifficulty at all), so its first profile could not account for
@@ -1114,7 +1124,7 @@ public class PhxBF3AIController : PhxAIController
         // stays looking at it; a Maneuver element breaks the direct approach
         // and comes from an angle. Without the split, four soldiers with the
         // same target all walk at it.
-        BFSquadRole role = BFSquadSystem.SquadOf(this)?.RoleOf(this) ?? BFSquadRole.None;
+        BFSquadRole role = SquadRole;
 
         if (role == BFSquadRole.Base)
         {

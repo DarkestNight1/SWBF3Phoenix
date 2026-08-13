@@ -839,7 +839,20 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             Animator.Anim.SetState(1, Animator.StandReload);
             Animator.Anim.RestartState(1);
             float animTime = Animator.Anim.GetCurrentState(1).GetDuration();
-            Animator.Anim.SetPlaybackSpeed(1, Animator.StandReload, 1f / (weap.GetReloadTime() / animTime));
+            float reloadTime = weap.GetReloadTime();
+
+            // Both divisions can go wrong, and both ways are reachable.
+            //
+            // A missing reload clip gives animTime 0, so reloadTime/0 is
+            // infinity and 1/infinity is 0 - a playback speed of zero, which
+            // freezes the reload animation permanently rather than skipping it.
+            // A weapon with no declared reload time gives 1/0 the other way and
+            // feeds infinity into Cra. Clips do go missing here; the console
+            // reports them by name.
+            if (animTime > 0.001f && reloadTime > 0.001f)
+            {
+                Animator.Anim.SetPlaybackSpeed(1, Animator.StandReload, animTime / reloadTime);
+            }
         }
     }
 

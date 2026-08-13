@@ -85,7 +85,13 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
             if (wantExit || mustExit)
             {
                 PlayerPossessed = false;
-                if (PossessedPawn != null && PossessedController != null)
+                // GetInstance(), not "!= null". PossessedPawn is an INTERFACE
+                // reference, so == null is plain reference equality and does
+                // not see a destroyed Unity object - and the pawn being dead
+                // is one of the two reasons we are in this branch. Handing a
+                // controller back to a destroyed soldier, or pointing the
+                // camera at one, throws from a Unity call rather than here.
+                if (PossessedPawn?.GetInstance() != null && PossessedController != null)
                 {
                     PossessedPawn.Assign(PossessedController);
                     cam.Follow(PossessedPawn);
