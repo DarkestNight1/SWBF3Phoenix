@@ -82,8 +82,31 @@ namespace SkelProbe
                     uint m = (uint)mesh.MaskFlags;
                     maskTally.TryGetValue(m, out int n);
                     maskTally[m] = n + 1;
+                    // Bounds decide whether a static mesh is the door frame or
+                    // the door itself. A frame is a thin ring around the
+                    // opening; a panel spans it.
+                    string extent = "";
+                    try
+                    {
+                        var verts = mesh.GetVertices<UnityLikeVec3>();
+                        if (verts != null && verts.Length > 0)
+                        {
+                            float minX = verts[0].X, maxX = verts[0].X;
+                            float minY = verts[0].Y, maxY = verts[0].Y;
+                            float minZ = verts[0].Z, maxZ = verts[0].Z;
+                            foreach (var v in verts)
+                            {
+                                if (v.X < minX) minX = v.X; if (v.X > maxX) maxX = v.X;
+                                if (v.Y < minY) minY = v.Y; if (v.Y > maxY) maxY = v.Y;
+                                if (v.Z < minZ) minZ = v.Z; if (v.Z > maxZ) maxZ = v.Z;
+                            }
+                            extent = $" size {maxX - minX:F1} x {maxY - minY:F1} x {maxZ - minZ:F1}";
+                        }
+                    }
+                    catch { }
+
                     Console.WriteLine($"      collision mesh  {mesh.VertexCount,6} verts  " +
-                                      $"mask {m} [{Describe(mesh.MaskFlags)}]");
+                                      $"node '{mesh.NodeName}'{extent}");
                 }
 
                 if (hasPrims)
@@ -95,7 +118,7 @@ namespace SkelProbe
                         maskTally.TryGetValue(m, out int n);
                         maskTally[m] = n + 1;
                         Console.WriteLine($"      primitive {p.PrimitiveType,-10} '{p.Name}' " +
-                                          $"mask {m} [{Describe(p.MaskFlags)}]");
+                                          $"parent '{p.ParentName}'");
                     }
                 }
 
@@ -127,5 +150,14 @@ namespace SkelProbe
             if (f.HasFlag(ECollisionMaskFlags.All)) parts.Add("All");
             return parts.Count == 0 ? $"0x{(uint)f:x}" : string.Join("|", parts);
         }
+    }
+}
+
+namespace SkelProbe
+{
+    /// <summary>Plain XYZ, so vertices can be read without a Unity reference.</summary>
+    public struct UnityLikeVec3
+    {
+        public float X, Y, Z;
     }
 }

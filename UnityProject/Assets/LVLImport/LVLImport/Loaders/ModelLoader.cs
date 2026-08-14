@@ -836,7 +836,43 @@ public class ModelLoader : Loader {
                     meshCollider.name = "collisionmesh";
                     meshCollider.sharedMesh = collMeshUnity;
                     meshCollider.sharedMaterial = PhyMat;
-                    MeshColliderObj.transform.SetParent(newObject.transform);
+
+                    // Attach the collision mesh to the node it was authored
+                    // against, exactly as the primitive path above already does
+                    // with ParentName.
+                    //
+                    // This was always parented to the model root, and
+                    // CollisionMesh.NodeName - which LibSWBF2 parses and
+                    // exposes - was read nowhere in the project. For static
+                    // geometry that is harmless, because the node it names is
+                    // the root anyway. For anything animated it is the whole
+                    // bug: the renderers hang off the bone and move, the
+                    // collider hangs off the root and does not.
+                    //
+                    // Death Star's garbage room door is the clearest case. Its
+                    // entire collision is one 58-vertex mesh measuring
+                    // 0.6 x 3.0 x 2.1 - a door panel, not a frame - authored
+                    // against 'dummyroot'. The door slides open in front of you
+                    // and the slab stays exactly where it was.
+                    Transform collisionParent = newObject.transform;
+                    string collisionNode = collMesh.NodeName;
+
+                    if (!string.IsNullOrEmpty(collisionNode))
+                    {
+                        Transform authored = UnityUtils.FindChildTransform(newObject.transform, collisionNode);
+
+                        // Only when it resolves to something other than the
+                        // root. A name that does not resolve keeps the old
+                        // behaviour rather than dropping collision on the
+                        // floor - an over-solid prop is recoverable, a missing
+                        // one is not.
+                        if (authored != null && authored != newObject.transform)
+                        {
+                            collisionParent = authored;
+                        }
+                    }
+
+                    MeshColliderObj.transform.SetParent(collisionParent, false);
 
                     SWBFColliders.Add(new SWBFCollider(collMesh.MaskFlags, SWBFColliderType.Mesh, MeshColliderObj));
                 }

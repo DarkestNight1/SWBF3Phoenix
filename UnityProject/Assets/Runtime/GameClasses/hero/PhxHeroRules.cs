@@ -133,6 +133,20 @@ public static class PhxHeroRules
     /// </remarks>
     public static bool CanSpawnHero(int team)
     {
+        // Testing override. Deliberately the ONLY thing it changes: the hero
+        // still comes from the map's own hero class, still occupies the team's
+        // single slot, and NotifyHeroLost still frees it - so what is being
+        // tested is the real hero, reached early, rather than a different code
+        // path that only exists in development.
+        //
+        // Everything below this line is the shipping rule set and is untouched:
+        // points accumulate, unlock at the authored threshold, one hero per
+        // team, slot spent on death.
+        if (PhxBF3.Config.AlwaysAllowHeroes)
+        {
+            return !State(team).Spawned;
+        }
+
         if (!HeroRulesEnabled && !ScriptedHeroesEnabled) return false;
 
         TeamState state = State(team);

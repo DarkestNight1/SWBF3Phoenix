@@ -434,6 +434,20 @@ public class PhxBF3Config
     public float AlphaCutoff = 0.35f;
 
     /// <summary>
+    /// Make the team hero selectable from the spawn screen immediately.
+    /// </summary>
+    /// <remarks>
+    /// A testing switch, off by default. It removes the unlock requirement and
+    /// nothing else - the hero is still the map's own, still limited to one per
+    /// team, and the slot is still spent when they die. Shipping behaviour is
+    /// the stock rule set: earn the points, unlock, spawn once.
+    ///
+    /// Kept as config rather than a build define so a hero can be checked in a
+    /// player build, which is where the interesting problems are.
+    /// </remarks>
+    public bool AlwaysAllowHeroes = false;
+
+    /// <summary>
     /// Re-compress imported world textures to DXT on upload.
     /// </summary>
     /// <remarks>
