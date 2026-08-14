@@ -90,6 +90,20 @@ public static class PhxBF3
         }
         if (Config.UpscaleTextures)
         {
+            // The default upscale budget assumes a card with room to spare. On
+            // 8GB hardware it competes with the screen-space history buffers
+            // and the reflection probe cache for the same VRAM, and losing
+            // that fight costs far more than sharper textures win.
+            if (SystemInfo.graphicsMemorySize > 0 &&
+                SystemInfo.graphicsMemorySize < 10000 &&
+                Config.UpscaleBudgetMB > 768)
+            {
+                Debug.Log($"[BF3Legacy] {SystemInfo.graphicsMemorySize}MB of video memory; " +
+                          $"capping the texture upscale budget at 768MB (config asked for " +
+                          $"{Config.UpscaleBudgetMB}MB).");
+                Config.UpscaleBudgetMB = 768;
+            }
+
             Host.AddComponent<PhxTextureUpscaler>();
         }
 

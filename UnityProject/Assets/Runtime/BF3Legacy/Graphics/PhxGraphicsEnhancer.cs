@@ -170,9 +170,13 @@ public class PhxGraphicsEnhancer : MonoBehaviour
             data.dithering = true;
             data.stopNaNs = true;
 
-            // With TAA on, sampling textures sharper than 1:1 is safe and is
-            // what makes the upscaled textures actually read as detailed.
-            data.allowDynamicResolution = PhxBF3.Config.UseDynamicResolution;
+            // Both flags, not just the HD one. The pipeline asset asks for
+            // hardware dynamic resolution, and HDRP quietly forces the software
+            // path when the plain Camera field is false - which it was, so the
+            // whole feature ran in a mode nobody chose and nothing reported.
+            bool dynamic = PhxBF3.Config.UseDynamicResolution;
+            data.allowDynamicResolution = dynamic;
+            cam.allowDynamicResolution = dynamic;
         }
         catch (System.Exception e)
         {

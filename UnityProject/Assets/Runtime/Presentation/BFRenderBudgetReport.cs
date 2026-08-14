@@ -372,6 +372,7 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             r.dynamicResolutionEnabled = s.dynamicResolutionSettings.enabled;
             r.dynamicResHardware = s.dynamicResolutionSettings.dynResType == DynamicResolutionType.Hardware;
             r.dynamicResMinPercent = s.dynamicResolutionSettings.minPercentage;
+            r.dynamicResMapFloorPercent = BFDynamicResolution.MapFloorPercent;
 
             data.features.shadowFilteringQuality = (int)s.hdShadowInitParams.shadowFilteringQuality;
             data.features.ssgiSupportedByAsset = s.supportSSGI;

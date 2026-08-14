@@ -70,6 +70,10 @@ public static class BFPresentation
         Host.AddComponent<BFWetnessSystem>();
         Host.AddComponent<BFSnowAccumulation>();
         Host.AddComponent<BFPresentationMapHook>();
+        Host.AddComponent<BFDynamicResolution>();
+
+        // Last on purpose: the report measures what everything above produced,
+        // and Unity runs Start in the order components were added.
         Host.AddComponent<BFRenderBudgetReport>();
 
         Debug.Log($"[BFPresentation] Active at quality tier {BFPresentationQuality.Tier}.");
@@ -78,6 +82,11 @@ public static class BFPresentation
     /// <summary>Tear down state that belongs to the previous map.</summary>
     public static void ResetForMapChange()
     {
+        // Re-emit the map's budget with what it actually cost while it was
+        // played. Load-time counts say what a map asks for; only this says
+        // whether the hardware could afford it.
+        BFRenderBudgetReport.EmitWithMeasurements(BFDynamicResolution.Instance?.Snapshot());
+
         BFSurfaceQuery.Reset();
         BFSurfaceInteractionSystem.Reset();
         BFTerrainSurfaceMap.Reset();
