@@ -129,6 +129,12 @@ public class BFLightingDirector : MonoBehaviour
         string worldName = PhxGame.GetEnvironment()?.GetWorldName() ?? "";
         Active = BFEnvironmentLightingProfile.Resolve(worldName);
 
+        // Before anything below reads a budget. The profile carries both what
+        // the map should look like and what it is allowed to spend, and every
+        // Apply* call past this point depends on the second half being in
+        // place.
+        BFPresentationQuality.BeginMap(Active);
+
         // The map's dominant surface seeds everything that has to answer
         // "what am I standing on" before it has anything better to go on.
         BFSurfaceQuery.MapDefault = Active.DominantSurface;

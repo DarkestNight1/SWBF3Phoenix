@@ -209,6 +209,60 @@ public sealed class BFEnvironmentLightingProfile
     /// <summary>Dominant terrain surface, used when nothing else identifies it.</summary>
     public BFSurfaceType DominantSurface = BFSurfaceType.Rock;
 
+    // ---------------------------------------------------------------- cost
+
+    // What a map is allowed to SPEND, as distinct from what it should look
+    // like. Everything above describes an environment; everything here
+    // describes its budget.
+    //
+    // All nullable, and null means "the tier decides" - which is what every
+    // map did before these existed, so an unset field cannot change behaviour.
+    // A map may only ever lower a cost below what the tier allows, never raise
+    // one: the tier is a ceiling and the profile is a request. That rule is
+    // enforced in BFPresentationQuality and checked in the render budget
+    // report, which warns if a profile ever violates it.
+
+    /// <summary>Caps how many point/spot lights may cast shadows here.</summary>
+    public int? MaxShadowCastingPunctual;
+
+    /// <summary>Caps reflection probes placed for this map.</summary>
+    public int? MaxReflectionProbes;
+
+    /// <summary>Caps live decals.</summary>
+    public int? MaxDecals;
+
+    /// <summary>Caps the sun's shadow map resolution.</summary>
+    public int? SunShadowResolutionCap;
+
+    /// <summary>Caps shadow cascade count.</summary>
+    public int? ShadowCascadeCap;
+
+    /// <summary>
+    /// Raises the size below which a static renderer stops casting shadows.
+    /// </summary>
+    /// <remarks>
+    /// A floor, not a cap - bigger is cheaper here, so this is combined with
+    /// Max rather than Min. Interiors want it at zero, because greebles are
+    /// what interiors are made of; open exteriors can discard small casters
+    /// without anyone noticing.
+    /// </remarks>
+    public float? MinShadowCasterRadiusFloor;
+
+    // There is deliberately no per-map punctual shadow resolution. The one
+    // BFLocalLightPolicy uses is already 256, chosen because that shadow exists
+    // to stop light crossing a wall rather than to resolve detail - so a map
+    // could only ever raise it, which the rule forbids.
+
+    /// <summary>
+    /// Lowest fraction of native resolution dynamic scaling may fall to, 0..1.
+    /// </summary>
+    /// <remarks>
+    /// Per map because content decides how well it upscales. Foliage and
+    /// alpha-tested detail break down early; clean interior and space geometry
+    /// survives much lower.
+    /// </remarks>
+    public float? DynamicResolutionFloor;
+
     // ================================================================ built-ins
 
     /// <summary>
@@ -584,6 +638,19 @@ public sealed class BFEnvironmentLightingProfile
         ReflectionMinSmoothness = 0.4f,
         AmbientOcclusionIntensity = 1.7f,
         DominantSurface = BFSurfaceType.Metal,
+
+        // Punctual shadows are deliberately NOT capped here. An interior has
+        // no sun, so its own fixtures are the lighting, and their shadows are
+        // the thing worth paying for. The tier's budget is the right number.
+        //
+        // What an interior can give back is everything to do with the sun it
+        // does not have, and the distance it does not see.
+        SunShadowResolutionCap = 1024,
+        ShadowCascadeCap = 2,
+
+        // Interiors are where SSGI runs, so leave some resolution headroom
+        // rather than spending it all on pixels.
+        DynamicResolutionFloor = 0.70f,
     };
 
     static BFEnvironmentLightingProfile Space(string name) => new BFEnvironmentLightingProfile
@@ -605,6 +672,17 @@ public sealed class BFEnvironmentLightingProfile
         ContactShadowLength = 0.5f,
         AmbientOcclusionIntensity = 1.1f,
         DominantSurface = BFSurfaceType.Metal,
+
+        // Vacuum: nothing to bounce off, nothing nearby to shadow, and very
+        // few surfaces for a probe to capture. Almost all of the screen-space
+        // and shadow budget is wasted here, so it is given back.
+        MaxShadowCastingPunctual = 0,
+        MaxReflectionProbes = 2,
+        MinShadowCasterRadiusFloor = 1.5f,
+
+        // Hard-edged hulls against black upscale better than anything else in
+        // the game.
+        DynamicResolutionFloor = 0.55f,
     };
 
     /// <summary>Used by any map with no profile of its own.</summary>

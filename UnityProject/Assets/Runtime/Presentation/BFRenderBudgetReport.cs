@@ -392,13 +392,24 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
 
         // Budgets carry the tier's own value alongside the effective one, so
         // the reduce-only rule can be checked rather than assumed.
-        AddBudget(data, "decals", BFPresentationQuality.DecalBudget, BFPresentationQuality.DecalBudget);
+        AddBudget(data, "decals", BFPresentationQuality.DecalBudget,
+                  BFPresentationQuality.TierValueOf("decals"));
+        AddBudget(data, "reflectionProbes", BFPresentationQuality.ReflectionProbeBudget,
+                  BFPresentationQuality.TierValueOf("reflectionProbes"));
+        AddBudget(data, "sunShadowResolution", BFPresentationQuality.SunShadowResolution,
+                  BFPresentationQuality.TierValueOf("sunShadowResolution"));
+        AddBudget(data, "shadowCascades", BFPresentationQuality.ShadowCascades,
+                  BFPresentationQuality.TierValueOf("shadowCascades"));
+        AddBudget(data, "shadowCastingPunctual", BFPresentationQuality.ShadowCastingPunctualBudget,
+                  BFPresentationQuality.TierValueOf("shadowCastingPunctual"));
+
+        // Bigger is cheaper for this one, so the violation test is inverted -
+        // AddBudget handles that by name.
+        AddBudget(data, "minShadowCasterRadius", BFPresentationQuality.MinShadowCasterRadius,
+                  BFPresentationQuality.TierMinShadowCasterRadius);
+
+        // No per-map cap on these yet; recorded so the schema is stable.
         AddBudget(data, "impactLights", BFPresentationQuality.ImpactLightBudget, BFPresentationQuality.ImpactLightBudget);
-        AddBudget(data, "reflectionProbes", BFPresentationQuality.ReflectionProbeBudget, BFPresentationQuality.ReflectionProbeBudget);
-        AddBudget(data, "sunShadowResolution", BFPresentationQuality.SunShadowResolution, BFPresentationQuality.SunShadowResolution);
-        AddBudget(data, "shadowCascades", BFPresentationQuality.ShadowCascades, BFPresentationQuality.ShadowCascades);
-        AddBudget(data, "shadowCastingPunctual", BFPresentationQuality.ShadowCastingPunctualBudget, BFPresentationQuality.ShadowCastingPunctualBudget);
-        AddBudget(data, "minShadowCasterRadius", BFPresentationQuality.MinShadowCasterRadius, BFPresentationQuality.MinShadowCasterRadius);
         AddBudget(data, "interactionDistance", BFPresentationQuality.InteractionDistance, BFPresentationQuality.InteractionDistance);
         AddBudget(data, "terrainDeformationResolution", BFPresentationQuality.TerrainDeformationResolution, BFPresentationQuality.TerrainDeformationResolution);
 
@@ -427,7 +438,15 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
     /// </summary>
     static void AddBudget(BFRenderBudgetData data, string name, float value, float tierValue)
     {
-        string source = Mathf.Approximately(value, tierValue) ? "tier" : "min(tier,map)";
+        // One budget runs the other way: a larger minimum caster radius
+        // discards more shadow casters, so bigger is cheaper there.
+        bool biggerIsCheaper = name == "minShadowCasterRadius";
+
+        bool sameAsTier = Mathf.Approximately(value, tierValue);
+        string source = sameAsTier
+            ? "tier"
+            : (biggerIsCheaper ? "max(tier,map)" : "min(tier,map)");
+
         data.budgets.Add(new BFBudgetEntry
         {
             name = name,
@@ -437,12 +456,14 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         });
 
         // The invariant the whole per-map design rests on: a map may lower a
-        // cost, never raise it. Cheaper to assert here than to discover from a
-        // frame time six maps later.
-        if (value > tierValue && !Mathf.Approximately(value, tierValue))
+        // cost, never raise one. Cheaper to assert here than to discover it
+        // from a frame time six maps later.
+        bool raised = biggerIsCheaper ? value < tierValue : value > tierValue;
+        if (raised && !sameAsTier)
         {
-            data.warnings.Add($"budget '{name}' ({value}) exceeds its tier value ({tierValue}) - " +
-                              "a map profile raised a cost, which the precedence rule forbids.");
+            data.warnings.Add($"budget '{name}' ({value}) is more expensive than its tier value " +
+                              $"({tierValue}) - a map profile raised a cost, which the precedence " +
+                              "rule forbids.");
         }
     }
 

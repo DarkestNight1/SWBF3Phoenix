@@ -40,6 +40,73 @@ public static class BFPresentationQuality
         }
     }
 
+    // ------------------------------------------------------------- map caps
+
+    /// <summary>
+    /// The current map's profile, whose cost fields cap the tier's budgets.
+    /// </summary>
+    /// <remarks>
+    /// THE RULE, and it is not negotiable anywhere in this layer:
+    ///
+    ///   The tier is a ceiling. A map may lower a cost, never raise one. A
+    ///   feature runs only if the tier permits it AND the map asks for it.
+    ///
+    /// This is the same doctrine BFLightingDirector states for its enhancement
+    /// passes - reduce, never promote - and it is what keeps a quality setting
+    /// meaningful. A profile that could raise a budget would turn the tier from
+    /// a guarantee into a suggestion, and the player's choice into a hint.
+    ///
+    /// The render budget report records every budget beside the tier's own
+    /// value and warns if this is ever violated, so the rule is checked rather
+    /// than trusted.
+    /// </remarks>
+    static BFEnvironmentLightingProfile map = BFEnvironmentLightingProfile.Default;
+
+    /// <summary>
+    /// Adopt a map's cost profile. Called once per map by BFLightingDirector,
+    /// immediately after it resolves the profile - one writer, like every other
+    /// per-map parameter in this layer.
+    /// </summary>
+    public static void BeginMap(BFEnvironmentLightingProfile profile)
+    {
+        map = profile ?? BFEnvironmentLightingProfile.Default;
+
+        // Dynamic resolution is the one budget that lives outside this class,
+        // because it is driven per frame rather than read per map.
+        BFDynamicResolution.SetMapFloorPercent(
+            map.DynamicResolutionFloor.HasValue ? map.DynamicResolutionFloor.Value * 100f : 0f);
+
+        Apply();
+    }
+
+    /// <summary>Smaller wins: the map may only reduce.</summary>
+    static int Cap(int tierValue, int? mapValue)
+        => mapValue.HasValue ? Mathf.Min(tierValue, mapValue.Value) : tierValue;
+
+    /// <summary>
+    /// Larger wins - for the one budget where a bigger number is the cheaper
+    /// one, so "reduce cost" still means "move away from the tier's value".
+    /// </summary>
+    static float Floor(float tierValue, float? mapValue)
+        => mapValue.HasValue ? Mathf.Max(tierValue, mapValue.Value) : tierValue;
+
+    /// <summary>The tier's own value, ignoring the map. For the budget report.</summary>
+    public static int TierValueOf(string budgetName)
+    {
+        switch (budgetName)
+        {
+            case "decals": return TierDecalBudget;
+            case "reflectionProbes": return TierReflectionProbeBudget;
+            case "sunShadowResolution": return TierSunShadowResolution;
+            case "shadowCascades": return TierShadowCascades;
+            case "shadowCastingPunctual": return TierShadowCastingPunctualBudget;
+            default: return 0;
+        }
+    }
+
+    /// <summary>The tier's own MinShadowCasterRadius, ignoring the map.</summary>
+    public static float TierMinShadowCasterRadius => TierMinShadowCasterRadiusValue;
+
     // ---------------------------------------------------------- feature gates
 
     public static bool Volumetrics => tier >= BFQualityTier.Medium;
@@ -127,7 +194,9 @@ public static class BFPresentationQuality
     // --------------------------------------------------------------- budgets
 
     /// <summary>Live decals. Oldest is recycled when the budget is spent.</summary>
-    public static int DecalBudget
+    public static int DecalBudget => Cap(TierDecalBudget, map.MaxDecals);
+
+    static int TierDecalBudget
     {
         get
         {
@@ -179,7 +248,9 @@ public static class BFPresentationQuality
     }
 
     /// <summary>Reflection probes the presentation layer places per map.</summary>
-    public static int ReflectionProbeBudget
+    public static int ReflectionProbeBudget => Cap(TierReflectionProbeBudget, map.MaxReflectionProbes);
+
+    static int TierReflectionProbeBudget
     {
         get
         {
@@ -202,7 +273,9 @@ public static class BFPresentationQuality
     /// directional meant several full-resolution cascade atlases rendered and
     /// then discarded, because HDRP only ever uses one.
     /// </remarks>
-    public static int SunShadowResolution
+    public static int SunShadowResolution => Cap(TierSunShadowResolution, map.SunShadowResolutionCap);
+
+    static int TierSunShadowResolution
     {
         get
         {
@@ -227,7 +300,9 @@ public static class BFPresentationQuality
     /// geometry is 130k triangles. The budget goes to the nearest lights that
     /// asked for it; the rest keep their light and lose their shadow.
     /// </remarks>
-    public static int ShadowCastingPunctualBudget
+    public static int ShadowCastingPunctualBudget => Cap(TierShadowCastingPunctualBudget, map.MaxShadowCastingPunctual);
+
+    static int TierShadowCastingPunctualBudget
     {
         get
         {
@@ -251,7 +326,9 @@ public static class BFPresentationQuality
     /// shadowed light. Dropping them costs almost nothing visible and removes
     /// them from every shadow pass at once.
     /// </remarks>
-    public static float MinShadowCasterRadius
+    public static float MinShadowCasterRadius => Floor(TierMinShadowCasterRadiusValue, map.MinShadowCasterRadiusFloor);
+
+    static float TierMinShadowCasterRadiusValue
     {
         get
         {
@@ -269,7 +346,9 @@ public static class BFPresentationQuality
     /// Cascade splits for directional shadows. Each cascade is another render
     /// of everything inside it.
     /// </summary>
-    public static int ShadowCascades
+    public static int ShadowCascades => Cap(TierShadowCascades, map.ShadowCascadeCap);
+
+    static int TierShadowCascades
     {
         get
         {
