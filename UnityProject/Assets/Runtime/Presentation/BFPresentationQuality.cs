@@ -45,7 +45,67 @@ public static class BFPresentationQuality
     public static bool Volumetrics => tier >= BFQualityTier.Medium;
     public static bool ContactShadows => tier >= BFQualityTier.Medium;
     public static bool ScreenSpaceReflections => tier >= BFQualityTier.High;
-    public static bool ScreenSpaceGlobalIllumination => tier >= BFQualityTier.Ultra;
+
+    /// <summary>
+    /// Screen-space global illumination.
+    /// </summary>
+    /// <remarks>
+    /// High rather than Ultra. Every interior profile and Coruscant ask for
+    /// SSGI, but the config default is High, so at an Ultra threshold the only
+    /// maps written to use it could never reach it - and the pipeline asset had
+    /// SSGI unsupported anyway, so nothing noticed.
+    ///
+    /// The threshold moved rather than letting those profiles promote
+    /// themselves past the tier: the tier is a ceiling, and a map that could
+    /// raise one would break the rule the whole per-map design rests on.
+    ///
+    /// Cost is bounded by the per-map quality level rather than by the gate -
+    /// interiors run it at Low, which is half resolution.
+    /// </remarks>
+    public static bool ScreenSpaceGlobalIllumination => tier >= BFQualityTier.High;
+
+    /// <summary>
+    /// PCSS blocker search and filter sample counts for the sun.
+    /// </summary>
+    /// <remarks>
+    /// The pipeline filters shadows with PCSS, whose penumbra width comes from
+    /// the light's angular diameter - which every planet profile already
+    /// authors, and which did nothing at all under the previous PCF filtering.
+    /// Kamino's 3 degree sun and Tatooine's 0.35 degree one now differ in
+    /// shadow softness the way they always described.
+    ///
+    /// Sample counts are the cost dial: penumbra width is the map's statement
+    /// and must not be touched to buy frame time, since it also drives the
+    /// light's maximum smoothness and would change specular highlights as a
+    /// side effect.
+    /// </remarks>
+    public static int SunShadowBlockerSamples
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 8;
+                case BFQualityTier.Medium: return 8;
+                case BFQualityTier.Ultra: return 24;
+                default: return 16;
+            }
+        }
+    }
+
+    public static int SunShadowFilterSamples
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 8;
+                case BFQualityTier.Medium: return 16;
+                case BFQualityTier.Ultra: return 32;
+                default: return 24;
+            }
+        }
+    }
     public static bool Decals => tier >= BFQualityTier.Low;
     public static bool ImpactLights => tier >= BFQualityTier.Medium;
     public static bool TerrainDeformation => tier >= BFQualityTier.Medium;

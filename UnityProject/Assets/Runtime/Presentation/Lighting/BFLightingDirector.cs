@@ -466,6 +466,19 @@ public class BFLightingDirector : MonoBehaviour
 
         GlobalIllumination.enable.Override(p.ScreenSpaceGlobalIllumination &&
                                            BFPresentationQuality.ScreenSpaceGlobalIllumination);
+
+        // Quality has to be stated, not inherited. The component's own default
+        // is Medium, which in this pipeline means full-resolution SSGI with 64
+        // ray steps - at 1440p that is the expensive path, and it would have
+        // arrived silently the moment the asset started supporting SSGI at all.
+        //
+        // Low is half resolution with 32 steps, which is what makes SSGI
+        // affordable on the hardware this targets. Ultra is where the full-rate
+        // version belongs.
+        GlobalIllumination.quality.Override(
+            BFPresentationQuality.Tier >= BFQualityTier.Ultra
+                ? (int)ScalableSettingLevelParameter.Level.High
+                : (int)ScalableSettingLevelParameter.Level.Low);
     }
 
     /// <summary>
@@ -545,6 +558,15 @@ public class BFLightingDirector : MonoBehaviour
         // Resolution by tier rather than the blanket 4096 PhxModernLighting
         // was applying to every directional light in the scene.
         SunData.SetShadowResolution(BFPresentationQuality.SunShadowResolution);
+
+        // Sample counts for PCSS. The penumbra itself comes from the sun's
+        // angular diameter, which every planet profile already authors and
+        // which was inert while the pipeline filtered shadows with PCF - so
+        // Kamino's overcast 3 degree sun and Tatooine's hard 0.35 degree one
+        // produced identical shadow edges. These counts are the cost dial;
+        // the angular diameter is the map's statement and is not touched here.
+        SunData.SetPCSSParams(BFPresentationQuality.SunShadowBlockerSamples,
+                              BFPresentationQuality.SunShadowFilterSamples);
 
         EnforceSingleShadowCastingSun(Sun);
 
