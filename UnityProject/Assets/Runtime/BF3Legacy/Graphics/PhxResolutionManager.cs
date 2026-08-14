@@ -26,7 +26,10 @@ public class PhxResolutionManager : MonoBehaviour
         // Full-resolution textures, best filtering
         QualitySettings.masterTextureLimit = 0;
         QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
-        QualitySettings.lodBias = 2f;
+        // lodBias is set by BFPresentationQuality.Apply, per tier, so that it
+        // stays with the other budgets rather than being a constant here that
+        // silently overrides them. It was 2f, which cancelled most of the value
+        // of the stock low-detail meshes.
 
         // Frame pacing. Without this the project runs every quality tier at
         // vSyncCount 0, and an uncapped borderless-fullscreen window presents

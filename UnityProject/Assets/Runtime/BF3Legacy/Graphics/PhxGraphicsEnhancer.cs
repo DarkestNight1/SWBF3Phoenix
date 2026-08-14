@@ -57,14 +57,12 @@ public class PhxGraphicsEnhancer : MonoBehaviour
     /// <remarks>
     /// This used to poll PhxGame.GetScene() from Update and fire the moment the
     /// scene object existed, which is well before its contents do. Every other
-    /// system here hangs off OnMapLoaded; this one did not, so EnableGpuInstancing
-    /// walked a partially imported scene and missed every material that arrived
-    /// after it ran.
+    /// system here hangs off OnMapLoaded; this one did not, so the scene walk it
+    /// used to do ran against a partially imported map.
     /// </remarks>
     void OnMapLoaded()
     {
         ConfigureCamera();   // the map may have spawned a fresh camera
-        EnableGpuInstancing();
     }
 
     // ------------------------------------------------------------------ post
@@ -206,25 +204,16 @@ public class PhxGraphicsEnhancer : MonoBehaviour
     /// props hundreds of times, so this reclaims a lot of draw calls - paying
     /// for the more expensive post stack above.
     /// </summary>
-    void EnableGpuInstancing()
-    {
-        int count = 0;
-        foreach (Renderer r in FindObjectsOfType<Renderer>())
-        {
-            foreach (Material m in r.sharedMaterials)
-            {
-                if (m != null && !m.enableInstancing)
-                {
-                    m.enableInstancing = true;
-                    count++;
-                }
-            }
-        }
-        if (count > 0)
-        {
-            Debug.Log($"[BF3Legacy] GPU instancing enabled on {count} materials");
-        }
-    }
+    // EnableGpuInstancing used to live here, walking every renderer on every
+    // map load and setting enableInstancing on each shared material.
+    //
+    // It could never do anything. MaterialLoader already sets that flag on
+    // every material it imports, so the count was always zero - and the walk
+    // itself was not free: FindObjectsOfType<Renderer> across a few thousand
+    // objects, with r.sharedMaterials allocating a fresh array per renderer,
+    // once per map. On top of that the pipeline runs with the SRP Batcher on,
+    // which takes precedence over GPU instancing for the shaders these
+    // materials use, so the flag is largely moot either way.
 
     void OnDestroy()
     {

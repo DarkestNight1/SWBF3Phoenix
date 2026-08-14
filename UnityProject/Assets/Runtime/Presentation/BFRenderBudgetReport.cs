@@ -105,6 +105,16 @@ public class BFRenderFeatureStats
     public bool derivedMaterialMaps;
     public int shadowFilteringQuality;
     public bool ssgiSupportedByAsset;
+
+    /// <summary>
+    /// LOD distance multiplier. Read against geometry.authoredLodGroups: a
+    /// high bias with many authored LOD groups means the map is paying for
+    /// detail meshes the artists expected to have been swapped out.
+    /// </summary>
+    public float lodBias;
+
+    /// <summary>Distance past which decals stop rendering, in metres.</summary>
+    public float decalDrawDistance;
 }
 
 /// <summary>Filled on map exit, not on load - see BFRenderBudgetReport.</summary>
@@ -391,6 +401,7 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
 
             data.features.shadowFilteringQuality = (int)s.hdShadowInitParams.shadowFilteringQuality;
             data.features.ssgiSupportedByAsset = s.supportSSGI;
+            data.features.decalDrawDistance = s.decalSettings.drawDistance;
         }
 
         data.tier.name = BFPresentationQuality.Tier.ToString();
@@ -411,6 +422,17 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         f.ssgi = BFPresentationQuality.ScreenSpaceGlobalIllumination;
         f.derivedMaterialMaps = BFPresentationQuality.DerivedMaterialMaps;
         f.ssrMinSmoothness = BFLightingDirector.Active?.ReflectionMinSmoothness ?? 0f;
+        f.lodBias = QualitySettings.lodBias;
+
+        // Authored LOD meshes only pay off if the bias lets them engage. A map
+        // with plenty of them and a bias above 1 is rendering detail its own
+        // artists expected to have been swapped out by that distance.
+        if (data.geometry.authoredLodGroups > 10 && f.lodBias > 1.25f)
+        {
+            data.warnings.Add($"{data.geometry.authoredLodGroups} authored LOD group(s) against a " +
+                              $"LOD bias of {f.lodBias} - the stock low-detail meshes will rarely " +
+                              "engage.");
+        }
 
         // Budgets carry the tier's own value alongside the effective one, so
         // the reduce-only rule can be checked rather than assumed.

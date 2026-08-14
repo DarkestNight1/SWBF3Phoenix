@@ -118,8 +118,16 @@ namespace SkelProbe
                 }
             }
 
+            int lowd = 0;
+            foreach (Model m2 in models)
+            {
+                if (m2 != null && m2.Name != null &&
+                    m2.Name.EndsWith("LOWD", StringComparison.OrdinalIgnoreCase)) ++lowd;
+            }
+
             Console.WriteLine($"=== {Path.GetFileName(path)}: {models.Length} model(s), " +
                               $"{totalSegments} segment(s), {allMaterials.Count} distinct material(s)");
+            Console.WriteLine($"    authored LOWD meshes: {lowd}");
 
             // Combinations matter because the importer picks ONE template per
             // material, in a fixed order. A flag that always arrives alongside

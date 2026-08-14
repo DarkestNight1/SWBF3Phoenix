@@ -401,8 +401,42 @@ public static class BFPresentationQuality
     }
 
     /// <summary>Push the current tier's derived limits into the systems that use them.</summary>
+    /// <summary>
+    /// Distance multiplier for authored level-of-detail switches.
+    /// </summary>
+    /// <remarks>
+    /// Above 1 keeps the high-detail mesh at longer range and costs more; below
+    /// 1 swaps sooner and costs less. 1 means "switch where the model's author
+    /// said to".
+    ///
+    /// This was a flat 2 for every tier, which doubled the range the full mesh
+    /// survived to and therefore threw away most of the benefit of the stock
+    /// low-detail meshes - on exactly the maps that ship the most of them.
+    /// Measured across the stock data: 38 of 87 models on Tatooine carry an
+    /// authored LOWD mesh, 27 of 73 on Kashyyyk, against 1 of 94 on the Death
+    /// Star. Open maps are where LODs were authored and where the draw call
+    /// count is worst, and the bias was cancelling them there.
+    /// </remarks>
+    public static float LodBias
+    {
+        get
+        {
+            switch (tier)
+            {
+                case BFQualityTier.Low: return 0.7f;
+                case BFQualityTier.Medium: return 1f;
+                case BFQualityTier.Ultra: return 1.5f;
+                default: return 1f;
+            }
+        }
+    }
+
     public static void Apply()
     {
         BFSurfaceInteractionSystem.MaxInteractionDistance = InteractionDistance;
+
+        // HDRP's frame settings take lodBiasMode from QualitySettings, so this
+        // is the dial that actually reaches the renderer.
+        QualitySettings.lodBias = LodBias;
     }
 }
