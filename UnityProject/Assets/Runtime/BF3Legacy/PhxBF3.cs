@@ -372,4 +372,8 @@ public class PhxBF3Config
     public bool MusicEnabled = true;
     public float MusicVolume = 0.6f;
     public float VOVolume = 1.0f;
+
+    // Positional ambience placed in the world (machinery, shield hums, water).
+    public bool AmbienceEnabled = true;
+    public float AmbienceVolume = 0.7f;
 }

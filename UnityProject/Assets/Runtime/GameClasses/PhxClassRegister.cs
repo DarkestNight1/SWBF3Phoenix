@@ -53,6 +53,16 @@ public static class PhxClassRegister
         // e.g. season changer on Marth's Pioneer Trails...
         { "leafpatch",      new GameBaseClass(typeof(PhxLeafPatchClass),                 typeof(PhxLeafPatch))      },
 
+        // Positional ambience: machinery, shield hums, water, tractor beams.
+        // Unregistered until now, so every map imported its soundemitters
+        // world as a few hundred silent empties.
+        { "soundambiencestatic", new GameBaseClass(typeof(PhxSoundAmbienceStatic.ClassProperties), typeof(PhxSoundAmbienceStatic)) },
+
+        // Drifting dust and mist volumes, and the periodic ambient rumble that
+        // goes with them. Both were unregistered.
+        { "dusteffect",     new GameBaseClass(typeof(PhxDustEffect.ClassProperties),     typeof(PhxDustEffect))     },
+        { "rumbleeffect",   new GameBaseClass(typeof(PhxRumbleEffect.ClassProperties),   typeof(PhxRumbleEffect))   },
+
         { "commandpost",    new GameBaseClass(typeof(PhxCommandpost.ClassProperties),    typeof(PhxCommandpost))    },
         { "hologram",       new GameBaseClass(typeof(PhxHoloIcon.ClassProperties),       typeof(PhxHoloIcon))       },
         { "soldier",        new GameBaseClass(typeof(PhxSoldier.ClassProperties),        typeof(PhxSoldier))        },

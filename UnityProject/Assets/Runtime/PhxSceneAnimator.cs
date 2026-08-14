@@ -107,6 +107,29 @@ public class PhxSceneAnimator
             }
         }
 
+        // Every instance name the loaded worlds actually define.
+        //
+        // A map lvl holds one world per game mode, and only the ones this mode
+        // asked for are mounted. Coruscant's animation groups live in the
+        // always-loaded base world but drive doors that exist only in
+        // cor1_campaign, so a conquest match legitimately has nothing to bind
+        // them to. Reporting that as missing content buries the real failures:
+        // it was the whole of the "0 of 5 animations imported" figure.
+        //
+        // If a loaded world declares the instance and the scene lookup still
+        // fails, that is a genuine import failure and is still reported.
+        HashSet<string> declaredInstances = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (World world in worlds)
+        {
+            foreach (Instance inst in world.GetInstances())
+            {
+                if (inst != null && !string.IsNullOrEmpty(inst.Name))
+                {
+                    declaredInstances.Add(inst.Name);
+                }
+            }
+        }
+
         foreach (World world in worlds)
         {
             foreach (WorldAnimationGroup animGroup in world.GetAnimationGroups())
@@ -120,6 +143,7 @@ public class PhxSceneAnimator
 
                 PhxAnimationGroup newAnimGroup = new PhxAnimationGroup();
                 int bound = 0;
+                int notInThisMode = 0;
 
                 List<Tuple<string,string>> AnimInstPairs = animGroup.GetAnimationInstancePairs();
                 foreach (var pair in AnimInstPairs)
@@ -134,6 +158,14 @@ public class PhxSceneAnimator
                     GameObject instance = ResolveInstance(pair.Item2);
                     if (instance == null)
                     {
+                        if (!declaredInstances.Contains(pair.Item2))
+                        {
+                            // The layer holding it is not part of this game
+                            // mode. Absent by design, not a failure.
+                            ++notInThisMode;
+                            continue;
+                        }
+
                         // Every miss used to be a silent continue, which is why
                         // a map full of dead machinery looked like a map with no
                         // machinery in it.
@@ -229,6 +261,12 @@ public class PhxSceneAnimator
                 if (bound > 0)
                 {
                     AnimGroupDB[groupKey] = newAnimGroup;
+                }
+                else if (notInThisMode == AnimInstPairs.Count && AnimInstPairs.Count > 0)
+                {
+                    // Whole group belongs to a layer this mode does not mount.
+                    Debug.Log($"World animation group '{animGroup.Name}' animates objects " +
+                              $"from a layer this game mode does not load - skipped.");
                 }
                 else if (AnimInstPairs.Count > 0)
                 {

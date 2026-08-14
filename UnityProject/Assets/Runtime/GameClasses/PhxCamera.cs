@@ -114,6 +114,57 @@ public class PhxCamera : MonoBehaviour
     }
 
 
+    // ------------------------------------------------------------- shake
+
+    float ShakeAmount;
+    float ShakeTimeLeft;
+    float ShakeDuration;
+
+    /// <summary>
+    /// Rattle the camera for a moment. The strongest request wins.
+    /// </summary>
+    /// <remarks>
+    /// Applied after every mode has placed the camera, as an offset rather
+    /// than by moving the camera itself - otherwise the modes that lerp toward
+    /// a target would chase the shake and drift.
+    /// </remarks>
+    public void Shake(float amount, float duration)
+    {
+        if (amount <= 0f || duration <= 0f) return;
+
+        // A weaker shake arriving mid-shake must not cut the current one short.
+        if (amount < ShakeAmount && ShakeTimeLeft > 0f) return;
+
+        ShakeAmount = amount;
+        ShakeDuration = duration;
+        ShakeTimeLeft = duration;
+    }
+
+    void ApplyShake(float deltaTime)
+    {
+        if (ShakeTimeLeft <= 0f) return;
+
+        ShakeTimeLeft -= deltaTime;
+        if (ShakeTimeLeft <= 0f)
+        {
+            ShakeAmount = 0f;
+            return;
+        }
+
+        // Fade out over the tail so it settles instead of stopping dead.
+        float strength = ShakeAmount * (ShakeTimeLeft / Mathf.Max(0.0001f, ShakeDuration));
+
+        transform.position += transform.rotation * new Vector3(
+            Random.Range(-strength, strength),
+            Random.Range(-strength, strength),
+            0f) * 0.1f;
+
+        transform.rotation *= Quaternion.Euler(
+            Random.Range(-strength, strength),
+            Random.Range(-strength, strength),
+            Random.Range(-strength, strength));
+    }
+
     void LateUpdate()
     {
         float deltaTime = Time.deltaTime;
@@ -234,5 +285,8 @@ public class PhxCamera : MonoBehaviour
             transform.rotation = TrackableInstance.GetCameraRotation();
             transform.position = TrackableInstance.GetCameraPosition();
         }
+
+        // Last, so it offsets whatever the active mode decided.
+        ApplyShake(deltaTime);
     }
 }
