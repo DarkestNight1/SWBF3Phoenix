@@ -36,23 +36,19 @@ public class PhxGraphicsEnhancer : MonoBehaviour
 {
     Volume PostVolume;
     VolumeProfile PostProfile;
-    PhxScene ActiveScene;
 
 
+    // Subscribed from Start, not OnEnable, to match every other system in the
+    // project. OnEnable fires during AddComponent, which is earlier than
+    // anything else here subscribes, and a null PhxGame.Instance at that moment
+    // would mean silently never subscribing at all - where the polling this
+    // replaced would at least have recovered.
     void Start()
     {
         BuildPostProcessing();
         ConfigureCamera();
-    }
 
-    void OnEnable()
-    {
         if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded += OnMapLoaded;
-    }
-
-    void OnDisable()
-    {
-        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= OnMapLoaded;
     }
 
     /// <summary>
@@ -67,8 +63,6 @@ public class PhxGraphicsEnhancer : MonoBehaviour
     /// </remarks>
     void OnMapLoaded()
     {
-        ActiveScene = PhxGame.GetScene();
-
         ConfigureCamera();   // the map may have spawned a fresh camera
         EnableGpuInstancing();
     }
@@ -234,6 +228,7 @@ public class PhxGraphicsEnhancer : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= OnMapLoaded;
         if (PostProfile != null) ScriptableObject.Destroy(PostProfile);
     }
 }

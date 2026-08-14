@@ -50,11 +50,18 @@ public sealed class BFDynamicResolution : MonoBehaviour
     float SettleUntil;
 
     // Stats for the render budget report, accumulated across the map.
-    double GpuMsSum;
-    int GpuMsCount;
+    //
+    // Histograms rather than a sample per frame. Two Lists appending every
+    // frame is unbounded - a half-hour match at 90fps is 160k entries each,
+    // with the array doubling that implies - and all the report wants out of
+    // them is a median and a 95th percentile, which fixed buckets give exactly
+    // as well in constant memory.
+    const float GpuBucketMs = 0.25f;                 // 0.25ms resolution
+    const int GpuBuckets = 400;                      // up to 100ms
+    readonly int[] GpuHistogram = new int[GpuBuckets];
+    readonly int[] ScaleHistogram = new int[101];     // percent, 0..100
+    int SampleTotal;
     float StatsStartedAt;
-    readonly System.Collections.Generic.List<float> GpuHistory = new System.Collections.Generic.List<float>(4096);
-    readonly System.Collections.Generic.List<float> ScaleHistory = new System.Collections.Generic.List<float>(4096);
 
     FrameTiming[] Timings = new FrameTiming[1];
     bool WarnedNoTimings;
@@ -90,11 +97,27 @@ public sealed class BFDynamicResolution : MonoBehaviour
         if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= OnMapLoaded;
     }
 
+    /// <summary>
+    /// Whether this is allowed to move the resolution. Measurement runs either
+    /// way.
+    /// </summary>
+    /// <remarks>
+    /// Separate from `enabled` on purpose. Disabling the component when
+    /// scaling is off also stops Update, and with it the GPU-time sampling the
+    /// budget report reads - so anyone who pinned a render scale, or turned
+    /// dynamic resolution off entirely, would get a report with an empty
+    /// measured block and no way to tell what the map actually cost. Those are
+    /// exactly the users most likely to be tuning by hand.
+    /// </remarks>
+    bool ScalingEnabled;
+
     void Start()
     {
+        StatsStartedAt = Time.unscaledTime;
+
         if (!PhxBF3.Config.UseDynamicResolution)
         {
-            enabled = false;
+            ScalingEnabled = false;
             return;
         }
 
@@ -108,34 +131,61 @@ public sealed class BFDynamicResolution : MonoBehaviour
                 Scale, DynamicResScalePolicyType.ReturnsPercentage);
             Debug.Log($"[BFPresentation] Render scale pinned at {Current:F0}% by config; " +
                       "automatic scaling is off.");
-            enabled = false;
+            ScalingEnabled = false;
             return;
         }
 
         Current = 100f;
+        ScalingEnabled = true;
 
         // Percentage, not the min/max lerp factor. The lerp policy hides the
         // resolution behind a 0..1 against asset-level bounds, which makes both
         // the per-map floor and the report awkward to express.
         DynamicResolutionHandler.SetDynamicResScaler(
             Scale, DynamicResScalePolicyType.ReturnsPercentage);
-
-        StatsStartedAt = Time.unscaledTime;
     }
+
+    bool MapActive;
 
     void OnMapLoaded()
     {
+        MapActive = true;
         SettleUntil = Time.unscaledTime + SettleAfterLoad;
         NextDecisionAt = SettleUntil;
         SampleFilled = 0;
         SampleHead = 0;
         Current = 100f;
 
-        GpuHistory.Clear();
-        ScaleHistory.Clear();
-        GpuMsSum = 0;
-        GpuMsCount = 0;
+        Array.Clear(GpuHistogram, 0, GpuHistogram.Length);
+        Array.Clear(ScaleHistogram, 0, ScaleHistogram.Length);
+        SampleTotal = 0;
         StatsStartedAt = Time.unscaledTime;
+    }
+
+    void RecordSample(float frameMs, float percent)
+    {
+        int gpuBucket = Mathf.Clamp(Mathf.FloorToInt(frameMs / GpuBucketMs), 0, GpuBuckets - 1);
+        ++GpuHistogram[gpuBucket];
+
+        int scaleBucket = Mathf.Clamp(Mathf.RoundToInt(percent), 0, 100);
+        ++ScaleHistogram[scaleBucket];
+
+        ++SampleTotal;
+    }
+
+    /// <summary>Value at a percentile, read straight out of a histogram.</summary>
+    static float Percentile(int[] histogram, int total, float fraction, float bucketWidth)
+    {
+        if (total <= 0) return 0f;
+
+        int target = Mathf.Clamp(Mathf.RoundToInt(total * fraction), 1, total);
+        int seen = 0;
+        for (int i = 0; i < histogram.Length; ++i)
+        {
+            seen += histogram[i];
+            if (seen >= target) return i * bucketWidth;
+        }
+        return (histogram.Length - 1) * bucketWidth;
     }
 
     /// <summary>The registered scaler. Must not allocate - it runs per frame.</summary>
@@ -150,12 +200,16 @@ public sealed class BFDynamicResolution : MonoBehaviour
         SampleHead = (SampleHead + 1) % SampleCount;
         if (SampleFilled < SampleCount) ++SampleFilled;
 
-        GpuHistory.Add(frameMs);
-        ScaleHistory.Add(Current);
-        GpuMsSum += frameMs;
-        ++GpuMsCount;
+        RecordSample(frameMs, Current);
 
         float now = Time.unscaledTime;
+
+        // Nothing to scale until a map exists. Before that this is the menu,
+        // whose cost says nothing about any map, and letting it drive the
+        // scaler means the first map inherits a decision made about a
+        // completely different scene.
+        if (!ScalingEnabled || !MapActive) return;
+
         if (now < SettleUntil || now < NextDecisionAt) return;
         if (SampleFilled < SampleCount) return;
 
@@ -167,8 +221,14 @@ public sealed class BFDynamicResolution : MonoBehaviour
         float median = Median(Samples, SampleFilled);
         float target = TargetFrameMs();
 
-        float min = Mathf.Max(MapFloor > 0f ? MapFloor : 0f,
-                              PhxBF3.Config.MinDynamicResolutionPercent);
+        // The map's floor REPLACES the config default rather than combining
+        // with it. Taking the larger of the two looked safer and made the
+        // per-map floor unreachable in the direction it exists for: space
+        // states 55% because clean hulls against black upscale better than
+        // anything else in the game, and max(55, 65) is 65, so it could never
+        // bind. The pipeline asset's own minimum is the real backstop and is
+        // set below every profile's floor.
+        float min = MapFloor > 0f ? MapFloor : PhxBF3.Config.MinDynamicResolutionPercent;
         min = Mathf.Clamp(min, 10f, 100f);
 
         if (median > target)
@@ -249,20 +309,9 @@ public sealed class BFDynamicResolution : MonoBehaviour
             timingSource = TimingSource,
         };
 
-        if (GpuHistory.Count > 0)
-        {
-            var sorted = GpuHistory.ToArray();
-            Array.Sort(sorted);
-            stats.gpuFrameMsMedian = sorted[sorted.Length / 2];
-            stats.gpuFrameMsP95 = sorted[Mathf.Clamp((int)(sorted.Length * 0.95f), 0, sorted.Length - 1)];
-        }
-
-        if (ScaleHistory.Count > 0)
-        {
-            var sorted = ScaleHistory.ToArray();
-            Array.Sort(sorted);
-            stats.resolutionPercentMedian = sorted[sorted.Length / 2];
-        }
+        stats.gpuFrameMsMedian = Percentile(GpuHistogram, SampleTotal, 0.50f, GpuBucketMs);
+        stats.gpuFrameMsP95 = Percentile(GpuHistogram, SampleTotal, 0.95f, GpuBucketMs);
+        stats.resolutionPercentMedian = Percentile(ScaleHistogram, SampleTotal, 0.50f, 1f);
 
         return stats;
     }

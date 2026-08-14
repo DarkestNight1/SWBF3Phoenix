@@ -217,8 +217,9 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         BFRenderGeometryStats g = data.geometry;
         g.renderers = renderers.Length;
 
+        // One set, not two: every id added to the count set was also added to
+        // the "distinct materials" set, so they were always identical.
         var materials = new HashSet<int>();
-        var countedMaterials = new HashSet<int>();
 
         for (int i = 0; i < renderers.Length; ++i)
         {
@@ -236,10 +237,8 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
                 Material mat = MaterialScratch[m];
                 if (mat == null) continue;
 
-                materials.Add(mat.GetInstanceID());
-
-                // Per distinct material, not per renderer using it.
-                if (!countedMaterials.Add(mat.GetInstanceID())) continue;
+                // Counted per distinct material, not per renderer using it.
+                if (!materials.Add(mat.GetInstanceID())) continue;
 
                 if (mat.IsKeywordEnabled("_ALPHATEST_ON")) ++g.alphaTestedMaterials;
                 if (mat.HasProperty("_DoubleSidedEnable") &&

@@ -370,7 +370,16 @@ public class PhxBF3Config
     /// </remarks>
     public float RenderScale = 1.0f;
 
-    /// <summary>Lowest fraction of native resolution the scaler may fall to.</summary>
+    /// <summary>
+    /// Default floor for dynamic resolution, as a percentage of native.
+    /// </summary>
+    /// <remarks>
+    /// Used by maps that do not state a floor of their own. A map profile that
+    /// does state one replaces this, in both directions - interiors hold a
+    /// higher floor because they run SSGI, space allows a lower one because its
+    /// geometry upscales cleanly. The pipeline asset's minPercentage is the
+    /// absolute backstop beneath all of them.
+    /// </remarks>
     public float MinDynamicResolutionPercent = 65f;
 
     /// <summary>

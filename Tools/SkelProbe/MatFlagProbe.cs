@@ -121,6 +121,13 @@ namespace SkelProbe
             Console.WriteLine($"=== {Path.GetFileName(path)}: {models.Length} model(s), " +
                               $"{totalSegments} segment(s), {allMaterials.Count} distinct material(s)");
 
+            // Combinations matter because the importer picks ONE template per
+            // material, in a fixed order. A flag that always arrives alongside
+            // an earlier-tested one is a flag the import path never reaches.
+            ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Glow, "Hardedged+Glow");
+            ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Transparent, "Hardedged+Transparent");
+            ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Doublesided, "Hardedged+Doublesided");
+
             foreach (var t in Tracked)
             {
                 int segs = segmentsWith[t.Name];
@@ -129,6 +136,30 @@ namespace SkelProbe
 
                 double pct = totalSegments == 0 ? 0 : 100.0 * segs / totalSegments;
                 Console.WriteLine($"    {t.Name,-26} {mats,4} material(s)  {segs,5} segment(s)  {pct,5:F1}%");
+            }
+        }
+
+        static void ReportCombo(Model[] models, EMaterialFlags a, EMaterialFlags b, string label)
+        {
+            int segs = 0;
+            foreach (Model model in models)
+            {
+                if (model == null) continue;
+                Segment[] segments;
+                try { segments = model.GetSegments(); } catch { continue; }
+                if (segments == null) continue;
+
+                foreach (Segment seg in segments)
+                {
+                    LibSWBF2.Wrappers.Material mat = seg?.Material;
+                    if (mat == null) continue;
+                    if ((mat.MaterialFlags & a) != 0 && (mat.MaterialFlags & b) != 0) ++segs;
+                }
+            }
+
+            if (segs > 0)
+            {
+                Console.WriteLine($"    ** {label,-24} {segs,5} segment(s)");
             }
         }
     }
