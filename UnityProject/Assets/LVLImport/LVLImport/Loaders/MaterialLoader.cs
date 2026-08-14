@@ -610,7 +610,13 @@ public class MaterialLoader : Loader
             return null;
         }
 
-        Texture2D grayscale = new Texture2D(width, height, UnityEngine.TextureFormat.RGB24, false);
+        // Mipped and linear. This is a MASK - the diffuse alpha channel reused
+        // as an emissive strength - so the sRGB curve does not belong on it,
+        // and without a mip chain every emissive panel, screen and strip light
+        // shimmers the moment it is minified. On a Death Star or Coruscant
+        // interior that is most of the bright pixels in the frame, and the
+        // global trilinear/anisotropic settings can do nothing about it.
+        Texture2D grayscale = new Texture2D(width, height, UnityEngine.TextureFormat.RGB24, true, true);
         int numPixels = width * height;
         byte[] dst = new byte[numPixels * 3];
         for (int i = 0; i < numPixels; ++i)
@@ -621,7 +627,7 @@ public class MaterialLoader : Loader
             dst[(i * 3) + 2] = alpha;
         }
         grayscale.LoadRawTextureData(dst);
-        grayscale.Apply();
+        grayscale.Apply(true);
         return grayscale;
     }
 

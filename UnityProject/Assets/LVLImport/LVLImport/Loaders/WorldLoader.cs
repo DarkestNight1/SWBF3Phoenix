@@ -507,7 +507,14 @@ public class WorldLoader : Loader
 
         for (i = 0; i < 4; i++)
         {
-            Texture2D blendTex = new Texture2D((int)blendDim, (int)blendDim);
+            // Linear, and no mip chain. These channels are per-layer blend
+            // WEIGHTS, not colour: reading them through the sRGB curve turns a
+            // half weight into about a fifth, which misblends every layer
+            // transition - and BuildBlendLightingScale bakes per-vertex
+            // ambient occlusion into the same channels, so that was being
+            // gamma-curved too. Mips on a weight map only muddy transitions.
+            Texture2D blendTex = new Texture2D((int)blendDim, (int)blendDim,
+                                               TextureFormat.RGBA32, false, true);
 
             Color[] colors = blendTex.GetPixels(0);
 
@@ -645,7 +652,14 @@ public class WorldLoader : Loader
 
         for (int i = 0; i < 4; i++)
         {
-            Texture2D blendTex = new Texture2D((int)blendDim, (int)blendDim);
+            // Linear, and no mip chain. These channels are per-layer blend
+            // WEIGHTS, not colour: reading them through the sRGB curve turns a
+            // half weight into about a fifth, which misblends every layer
+            // transition - and BuildBlendLightingScale bakes per-vertex
+            // ambient occlusion into the same channels, so that was being
+            // gamma-curved too. Mips on a weight map only muddy transitions.
+            Texture2D blendTex = new Texture2D((int)blendDim, (int)blendDim,
+                                               TextureFormat.RGBA32, false, true);
 
             Color[] colors = blendTex.GetPixels(0);
 
