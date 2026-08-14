@@ -27,6 +27,12 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
     protected Action ReloadCallback;
     protected AudioSource Audio;
 
+    /// <summary>Authored pitch for the fire sound, 1 when the data says nothing.</summary>
+    protected float BasePitch = 1f;
+
+    /// <summary>How far either side of the authored pitch a shot may land.</summary>
+    const float PitchJitter = 0.04f;
+
     protected int Ammunition;
     protected int MagazineAmmo;
 
@@ -113,9 +119,35 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
                 Audio = gameObject.AddComponent<AudioSource>();
                 Audio.playOnAwake = false;
                 Audio.spatialBlend = 1.0f;
-                Audio.rolloffMode = AudioRolloffMode.Linear;
-                Audio.minDistance = 2.0f;
-                Audio.maxDistance = 30.0f;
+
+                // Logarithmic, not linear. Weapon fire is impulsive: loud up
+                // close, falling away fast, then faintly present for a long
+                // way. Linear falloff makes distant fire fade evenly to
+                // nothing, which is what turns a battle into a series of
+                // isolated local skirmishes.
+                Audio.rolloffMode = AudioRolloffMode.Logarithmic;
+
+                // Falloff comes from the sound's own authored data where it
+                // exists. The parser has been reading MinDistance/MaxDistance
+                // and Pitch out of the .snd configs all along; this hardcoded
+                // 2 to 30 metres ignored them, and 30 metres is roughly one
+                // building. Every firefight beyond that was silent, on maps
+                // hundreds of metres across.
+                if (SoundLoader.Instance != null &&
+                    SoundLoader.Instance.TryGetProperties(C.FireSound.Get(),
+                                                          out SoundLoader.SoundProperties props) &&
+                    props.HasDistances)
+                {
+                    Audio.minDistance = props.MinDistance;
+                    Audio.maxDistance = props.MaxDistance;
+                    BasePitch = props.Pitch > 0f ? props.Pitch : 1f;
+                }
+                else
+                {
+                    Audio.minDistance = 8f;
+                    Audio.maxDistance = 180f;
+                }
+
                 Audio.loop = false;
                 Audio.clip = FireSound;
             }
@@ -249,7 +281,15 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
             if (Audio != null)
             {
                 // PitchSpread was previously used here to vary the sound pitch, that was a misunderstanding
-                // as PitchSpread is part of the weapon's aim spread, not sound
+                // as PitchSpread is part of the weapon's aim spread, not sound.
+                //
+                // A small variation is still wanted, just not from that
+                // property. A blaster fires the identical sample several times
+                // a second, and identical repeats phase-align into something
+                // that reads as a machine rather than a weapon. A few percent
+                // either side of the authored pitch is enough to break that up
+                // without anyone hearing it as detuned.
+                Audio.pitch = BasePitch * UnityEngine.Random.Range(1f - PitchJitter, 1f + PitchJitter);
                 Audio.PlayOneShot(Audio.clip, 1.0f);
             }
 

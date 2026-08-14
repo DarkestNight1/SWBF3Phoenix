@@ -38,6 +38,7 @@ namespace SkelProbe
         static bool WorldAnimMode;
         static bool ClassMode;
         static bool MatFlagMode;
+        static bool CollisionMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -54,11 +55,13 @@ namespace SkelProbe
             WorldAnimMode = false;
             ClassMode = false;
             MatFlagMode = false;
+            CollisionMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--matflags") { MatFlagMode = true; }
+                if (args[i] == "--collision") { CollisionMode = true; }
+                else if (args[i] == "--matflags") { MatFlagMode = true; }
                 else if (args[i] == "--classprops") { ClassMode = true; }
                 else if (args[i] == "--worldanim") { WorldAnimMode = true; }
                 else if (args[i] == "--streams") { StreamMode = true; }
@@ -98,6 +101,7 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (CollisionMode) { CollisionProbe.Run(path); continue; }
                 if (MatFlagMode) { MatFlagProbe.Run(path); continue; }
                 if (ClassMode) { ClassProbe.Run(path); continue; }
                 if (WorldAnimMode) { WorldAnimProbe.Run(path); continue; }
