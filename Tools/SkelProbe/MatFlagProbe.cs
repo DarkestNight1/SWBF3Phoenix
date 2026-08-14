@@ -127,6 +127,9 @@ namespace SkelProbe
             ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Glow, "Hardedged+Glow");
             ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Transparent, "Hardedged+Transparent");
             ReportCombo(models, EMaterialFlags.Hardedged, EMaterialFlags.Doublesided, "Hardedged+Doublesided");
+            ReportCombo(models, EMaterialFlags.Additive, EMaterialFlags.Transparent, "Additive+Transparent");
+            ReportCombo(models, EMaterialFlags.Additive, EMaterialFlags.Glow, "Additive+Glow");
+            ReportCombo(models, EMaterialFlags.Additive, EMaterialFlags.Hardedged, "Additive+Hardedged");
 
             foreach (var t in Tracked)
             {

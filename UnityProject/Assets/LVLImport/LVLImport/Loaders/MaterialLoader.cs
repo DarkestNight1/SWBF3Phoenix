@@ -124,6 +124,29 @@ public class MaterialLoader : Loader
         return _DefaultHDRPCutoutMaterial;
     }
 
+    UMaterial _DefaultHDRPAdditiveMaterial;
+
+    /// <summary>
+    /// Template for additive materials - holograms, force fields, engine glow.
+    /// </summary>
+    /// <remarks>
+    /// Additive was handled for particle effects, where the blend comes from
+    /// the effect's own BlendMode string, but never for world geometry. Those
+    /// materials fell through to the plain lit template and drew as solid
+    /// quads, which is the opposite of what an additive sprite is for.
+    ///
+    /// Only a handful per map, but ingame.lvl carries five of them and is
+    /// mounted on every map, so the wrong ones are always on screen somewhere.
+    /// </remarks>
+    UMaterial GetDefaultAdditiveMaterial()
+    {
+        if (_DefaultHDRPAdditiveMaterial == null)
+        {
+            _DefaultHDRPAdditiveMaterial = Resources.Load<UMaterial>("HDRPAdditive");
+        }
+        return _DefaultHDRPAdditiveMaterial;
+    }
+
     UMaterial GetDefaultUnlitMaterial()
     {
         if (_DefaultHDRPUnlitMaterial == null)
@@ -401,7 +424,16 @@ public class MaterialLoader : Loader
                     }
                     else if (matFlags.HasFlag(EMaterialFlags.Transparent))
                     {
-                        material = new UMaterial(GetDefaultTransparentMaterial());
+                        // Additive always arrives WITH Transparent in the stock
+                        // data - measured, every one of them, on every map that
+                        // has any. So this cannot be a branch tested after
+                        // Transparent; it has to be the choice of template
+                        // inside it, or the additive flag is simply never
+                        // reached and holograms and force fields alpha-blend
+                        // where they should add.
+                        material = new UMaterial(matFlags.HasFlag(EMaterialFlags.Additive)
+                            ? GetDefaultAdditiveMaterial()
+                            : GetDefaultTransparentMaterial());
 
                         // A material can carry Glow AND Transparent together -
                         // force fields, shield bubbles and holograms all do.
@@ -440,6 +472,14 @@ public class MaterialLoader : Loader
                         //material.SetFloat("_ZTestDepthEqualForOpaque", 4.0f);
                         //material.SetOverrideTag("RenderType", "Transparent");
                         //material.renderQueue = 3000;
+                    }
+                    else if (matFlags.HasFlag(EMaterialFlags.Additive))
+                    {
+                        // Not reached by any stock material, since Additive
+                        // there always carries Transparent too. Kept because a
+                        // mod is free to author one without it, and the cost of
+                        // covering that is a single line.
+                        material = new UMaterial(GetDefaultAdditiveMaterial());
                     }
                     else if (matFlags.HasFlag(EMaterialFlags.Hardedged) && !unlit)
                     {

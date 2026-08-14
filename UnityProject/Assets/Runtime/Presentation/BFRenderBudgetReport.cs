@@ -76,7 +76,22 @@ public class BFRenderTierStats
 {
     public string name;
     public int ordinal;
-    public string source;      // "config" | "default"
+
+    /// <summary>"config" if a config file was read, "default" otherwise.</summary>
+    /// <remarks>
+    /// Says where the VALUE came from, not that anyone chose it - a config
+    /// written out on first run contains the compiled default. Its purpose is
+    /// narrower than it looks: it catches the case where presentation
+    /// bootstrapped before the config was loaded and silently used defaults.
+    /// </remarks>
+    public string source;
+
+    /// <summary>
+    /// The raw config value before clamping. Differs from ordinal when someone
+    /// has written a tier outside the valid range and is silently getting a
+    /// different one.
+    /// </summary>
+    public int requested;
 }
 
 [Serializable]
@@ -208,6 +223,7 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         CollectSettings(data);
 
         Last = data;
+        MeasurementsApplied = false;
         Emit(data);
     }
 
@@ -380,6 +396,13 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         data.tier.name = BFPresentationQuality.Tier.ToString();
         data.tier.ordinal = (int)BFPresentationQuality.Tier;
         data.tier.source = PhxBF3.ConfigLoadedFromDisk ? "config" : "default";
+        data.tier.requested = PhxBF3.Config.PresentationQuality;
+
+        if (data.tier.requested != data.tier.ordinal)
+        {
+            data.warnings.Add($"PresentationQuality {data.tier.requested} is outside the valid " +
+                              $"range and was clamped to {data.tier.ordinal} ({data.tier.name}).");
+        }
 
         BFRenderFeatureStats f = data.features;
         f.volumetrics = BFPresentationQuality.Volumetrics;
@@ -489,11 +512,40 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
     /// Re-emit the current report with the timings gathered while it was
     /// played. Load-time counts do not say whether a map was affordable.
     /// </summary>
+    /// <summary>Guards against appending the same warnings twice to one report.</summary>
+    /// <remarks>
+    /// Import can run more than once for a map - a retried load is the obvious
+    /// case - and each run re-emits the previous map's report on the way past.
+    /// </remarks>
+    static bool MeasurementsApplied;
+
     public static void EmitWithMeasurements(BFRenderMeasuredStats measured)
     {
-        if (Last == null) return;
+        if (Last == null || MeasurementsApplied) return;
+        MeasurementsApplied = true;
 
         Last.measured = measured ?? new BFRenderMeasuredStats();
+
+        // Say so in the file, not only once in the console.
+        //
+        // vsync quantises wall-clock frame time to the refresh interval, which
+        // is exactly the signal dynamic resolution needs and exactly what it
+        // destroys. Without GPU timings the numbers below are the refresh rate
+        // reported back, and any conclusion drawn from them about what a map
+        // costs is worthless - which is not obvious from a plausible-looking
+        // median sitting next to every other real measurement in the file.
+        if (Last.measured.timingSource == "wallClock")
+        {
+            Last.warnings.Add("GPU timings unavailable; frame cost was measured from wall clock, " +
+                              "which vsync quantises. Treat gpuFrameMs* as unreliable and do not " +
+                              "tune budgets from them.");
+        }
+        else if (Last.measured.timingSource == "none")
+        {
+            Last.warnings.Add("No frame timings were captured for this map - it was probably left " +
+                              "before the sampler ran.");
+        }
+
         Emit(Last);
     }
 
