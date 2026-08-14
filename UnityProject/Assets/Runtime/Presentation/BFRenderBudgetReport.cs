@@ -1,7 +1,126 @@
+using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.IO;
 using System.Text;
 using UnityEngine;
+using UnityEngine.Rendering;
 using UnityEngine.Rendering.HighDefinition;
+
+/// <summary>One budget, what the tier would have allowed, and where it came from.</summary>
+/// <remarks>
+/// The source is the whole point. When a map runs at the resolution floor the
+/// question is always "which number did that, and was it the tier or the map's
+/// own profile?" - and a budget without its provenance sends you back to
+/// reading BFPresentationQuality to find out.
+/// </remarks>
+[Serializable]
+public class BFBudgetEntry
+{
+    public string name;
+    public float value;
+    public float tierValue;
+    public string source;      // "tier" | "map" | "min(tier,map)"
+}
+
+[Serializable]
+public class BFRenderGeometryStats
+{
+    public int renderers;
+    public int skinned;
+    public int shadowCasters;
+    public int uniqueMaterials;
+    public long triangles;
+    public long shadowCasterTriangles;
+    public int alphaTestedMaterials;
+    public int doubleSidedMaterials;
+    public int clothPieces;
+    public int authoredLodGroups;
+}
+
+[Serializable]
+public class BFRenderLightStats
+{
+    public int total;
+    public int directional;
+    public int point;
+    public int spot;
+    public int shadowedDirectional;
+    public int shadowedPunctual;
+    public int volumetricAffecting;
+}
+
+[Serializable]
+public class BFRenderProbeStats
+{
+    public int reflectionPlaced;
+    public int reflectionBudget;
+    public int reflectionCacheSize;
+}
+
+[Serializable]
+public class BFRenderResolutionStats
+{
+    public int screenW;
+    public int screenH;
+    public int targetW;
+    public int targetH;
+    public bool dynamicResolutionEnabled;
+    public bool dynamicResHardware;
+    public float dynamicResMinPercent;
+    public float dynamicResMapFloorPercent;
+}
+
+[Serializable]
+public class BFRenderTierStats
+{
+    public string name;
+    public int ordinal;
+    public string source;      // "config" | "default"
+}
+
+[Serializable]
+public class BFRenderFeatureStats
+{
+    public bool volumetrics;
+    public bool contactShadows;
+    public bool ssr;
+    public float ssrMinSmoothness;
+    public bool ssgi;
+    public bool derivedMaterialMaps;
+    public int shadowFilteringQuality;
+    public bool ssgiSupportedByAsset;
+}
+
+/// <summary>Filled on map exit, not on load - see BFRenderBudgetReport.</summary>
+[Serializable]
+public class BFRenderMeasuredStats
+{
+    public float gpuFrameMsMedian;
+    public float gpuFrameMsP95;
+    public float resolutionPercentMedian;
+    public float sampleSeconds;
+    public string timingSource;    // "FrameTimingManager" | "wallClock" | "none"
+}
+
+[Serializable]
+public class BFRenderBudgetData
+{
+    public string generatedUtc;
+    public string worldName;
+    public string profileName;
+
+    public BFRenderGeometryStats geometry = new BFRenderGeometryStats();
+    public BFRenderLightStats lights = new BFRenderLightStats();
+    public BFRenderProbeStats probes = new BFRenderProbeStats();
+    public BFRenderResolutionStats resolution = new BFRenderResolutionStats();
+    public BFRenderTierStats tier = new BFRenderTierStats();
+    public BFRenderFeatureStats features = new BFRenderFeatureStats();
+    public BFRenderMeasuredStats measured = new BFRenderMeasuredStats();
+
+    public List<BFBudgetEntry> budgets = new List<BFBudgetEntry>();
+    public List<string> warnings = new List<string>();
+}
 
 /// <summary>
 /// Reports what the renderer is actually being asked to do, once per map.
@@ -14,16 +133,22 @@ using UnityEngine.Rendering.HighDefinition;
 /// calls, and neither shows up in a screenshot.
 ///
 /// This is the cheap substitute - the counts that actually determine cost,
-/// printed once at load, so "performance is poor" can be attached to a number.
+/// printed once at load and written as JSON beside the import validation
+/// reports, so "performance is poor" can be attached to a number and two
+/// commits can be diffed against each other.
+///
 /// It measures nothing per frame and costs one scene walk per map.
 /// </remarks>
 public sealed class BFRenderBudgetReport : MonoBehaviour
 {
+    /// <summary>The most recent report, so map exit can re-emit it with timings.</summary>
+    public static BFRenderBudgetData Last { get; private set; }
+
     void Start()
     {
         if (PhxGame.Instance != null)
         {
-            PhxGame.Instance.OnMapLoaded += Report;
+            PhxGame.Instance.OnMapLoaded += BeginReport;
         }
     }
 
@@ -31,45 +156,94 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
     {
         if (PhxGame.Instance != null)
         {
-            PhxGame.Instance.OnMapLoaded -= Report;
+            PhxGame.Instance.OnMapLoaded -= BeginReport;
         }
     }
 
-    void Report()
+    void BeginReport()
     {
-        var sb = new StringBuilder();
-        sb.AppendLine("[BFPerf] Render budget for this map:");
+        StopAllCoroutines();
+        StartCoroutine(ReportWhenSettled());
+    }
 
-        ReportGeometry(sb);
-        ReportLights(sb);
-        ReportSettings(sb);
+    /// <summary>
+    /// Wait for the systems whose output this measures to finish producing it.
+    /// </summary>
+    /// <remarks>
+    /// Reflection probes are placed a frame apart, so a report that runs inside
+    /// the OnMapLoaded dispatch counted zero of them on every map ever
+    /// recorded. Waiting is not optional: a budget report that reads its own
+    /// subjects before they exist is worse than none, because it looks precise.
+    /// </remarks>
+    IEnumerator ReportWhenSettled()
+    {
+        BFReflectionProbeManager probes = BFReflectionProbeManager.Instance;
 
-        Debug.Log(sb.ToString());
+        // Bounded: a manager that never completes must not stall the report
+        // forever, and one probe per frame over a generous budget is fast.
+        for (int i = 0; i < 600 && probes != null && !probes.PlacementComplete; ++i)
+        {
+            yield return null;
+        }
+
+        yield return new WaitForEndOfFrame();
+
+        Report();
     }
 
     static readonly List<Material> MaterialScratch = new List<Material>();
 
-    void ReportGeometry(StringBuilder sb)
+    void Report()
+    {
+        var data = new BFRenderBudgetData
+        {
+            generatedUtc = DateTime.UtcNow.ToString("o"),
+            worldName = PhxGame.GetEnvironment()?.GetWorldName() ?? string.Empty,
+            profileName = BFLightingDirector.Active?.Name ?? "Default",
+        };
+
+        CollectGeometry(data);
+        CollectLights(data);
+        CollectProbes(data);
+        CollectSettings(data);
+
+        Last = data;
+        Emit(data);
+    }
+
+    void CollectGeometry(BFRenderBudgetData data)
     {
         Renderer[] renderers = FindObjectsOfType<Renderer>();
+        BFRenderGeometryStats g = data.geometry;
+        g.renderers = renderers.Length;
 
-        int skinned = 0;
-        int shadowCasters = 0;
-        long triangles = 0;
         var materials = new HashSet<int>();
+        var countedMaterials = new HashSet<int>();
 
         for (int i = 0; i < renderers.Length; ++i)
         {
             Renderer renderer = renderers[i];
-            if (renderer is SkinnedMeshRenderer) ++skinned;
-            if (renderer.shadowCastingMode != UnityEngine.Rendering.ShadowCastingMode.Off) ++shadowCasters;
+            if (renderer is SkinnedMeshRenderer) ++g.skinned;
+
+            bool casts = renderer.shadowCastingMode != ShadowCastingMode.Off;
+            if (casts) ++g.shadowCasters;
 
             // Into a reused list rather than the sharedMaterials property,
             // which hands back a fresh array per renderer.
             renderer.GetSharedMaterials(MaterialScratch);
             for (int m = 0; m < MaterialScratch.Count; ++m)
             {
-                if (MaterialScratch[m] != null) materials.Add(MaterialScratch[m].GetInstanceID());
+                Material mat = MaterialScratch[m];
+                if (mat == null) continue;
+
+                materials.Add(mat.GetInstanceID());
+
+                // Per distinct material, not per renderer using it.
+                if (!countedMaterials.Add(mat.GetInstanceID())) continue;
+
+                if (mat.IsKeywordEnabled("_ALPHATEST_ON")) ++g.alphaTestedMaterials;
+                if (mat.HasProperty("_DoubleSidedEnable") &&
+                    mat.GetFloat("_DoubleSidedEnable") > 0.5f) ++g.doubleSidedMaterials;
             }
 
             MeshFilter filter = renderer.GetComponent<MeshFilter>();
@@ -83,114 +257,302 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             // and it throws outright on any mesh the importer marked
             // non-readable, which would make this report fail on exactly the
             // content it exists to measure.
+            long tris = 0;
             for (int sub = 0; sub < mesh.subMeshCount; ++sub)
             {
-                triangles += (long)mesh.GetIndexCount(sub) / 3;
+                tris += (long)mesh.GetIndexCount(sub) / 3;
             }
+
+            g.triangles += tris;
+
+            // What the cascades actually redraw, which is the number that
+            // decides shadow cost - not the scene's total.
+            if (casts) g.shadowCasterTriangles += tris;
         }
 
-        sb.Append("  renderers      ").Append(renderers.Length)
-          .Append("  (skinned ").Append(skinned)
-          .Append(", shadow casters ").Append(shadowCasters).AppendLine(")");
-        sb.Append("  unique mats    ").Append(materials.Count).AppendLine();
-        sb.Append("  triangles      ").Append(triangles / 1000).AppendLine("k");
-        sb.Append("  cloth pieces   ").Append(BFClothImporter.PiecesAttached)
-          .AppendLine(" authored CLTH piece(s) attached");
-        sb.Append("  authored LODs  ").Append(ModelLoader.LODGroupsBuilt)
-          .AppendLine(" model(s) with a stock low-detail mesh");
+        g.uniqueMaterials = materials.Count;
+        g.clothPieces = BFClothImporter.PiecesAttached;
+        g.authoredLodGroups = ModelLoader.LODGroupsBuilt;
 
         // The number that most often explains a bad frame on this content.
         // Every renderer is at least one draw call unless something batches or
         // instances it away.
-        if (renderers.Length > 4000)
+        if (g.renderers > 4000)
         {
-            sb.AppendLine("  ^ high renderer count - draw calls are the likely bottleneck, " +
-                          "not shading. Check static batching actually ran.");
+            data.warnings.Add($"{g.renderers} renderers - draw calls are the likely bottleneck, " +
+                              "not shading. Check static batching actually ran.");
         }
     }
 
-    void ReportLights(StringBuilder sb)
+    void CollectLights(BFRenderBudgetData data)
     {
         Light[] lights = FindObjectsOfType<Light>();
-
-        int directional = 0, point = 0, spot = 0;
-        int shadowed = 0, shadowedPunctual = 0;
+        BFRenderLightStats l = data.lights;
+        l.total = lights.Length;
 
         for (int i = 0; i < lights.Length; ++i)
         {
             Light light = lights[i];
             bool casts = light.shadows != LightShadows.None;
-            if (casts) ++shadowed;
 
             switch (light.type)
             {
-                case LightType.Directional: ++directional; break;
-                case LightType.Point: ++point; if (casts) ++shadowedPunctual; break;
-                case LightType.Spot: ++spot; if (casts) ++shadowedPunctual; break;
+                case LightType.Directional:
+                    ++l.directional;
+                    if (casts) ++l.shadowedDirectional;
+                    break;
+                case LightType.Point:
+                    ++l.point;
+                    if (casts) ++l.shadowedPunctual;
+                    break;
+                case LightType.Spot:
+                    ++l.spot;
+                    if (casts) ++l.shadowedPunctual;
+                    break;
             }
-        }
 
-        sb.Append("  lights         ").Append(lights.Length)
-          .Append("  (dir ").Append(directional)
-          .Append(", point ").Append(point)
-          .Append(", spot ").Append(spot)
-          .Append("; casting ").Append(shadowed).AppendLine(")");
+            HDAdditionalLightData hd = light.GetComponent<HDAdditionalLightData>();
+            if (hd != null && hd.affectsVolumetric) ++l.volumetricAffecting;
+        }
 
         // A shadowed point light is six shadow renders. This is the single
         // easiest way to accidentally cost a great deal.
-        if (shadowedPunctual > 0)
+        if (l.shadowedPunctual > 0)
         {
-            sb.Append("  ^ ").Append(shadowedPunctual)
-              .AppendLine(" shadow-casting point/spot light(s) - each is up to six shadow renders.");
+            data.warnings.Add($"{l.shadowedPunctual} shadow-casting point/spot light(s) - " +
+                              "each is up to six shadow renders.");
         }
-        // Count how many directionals actually cast, not how many exist. A map
-        // is free to author several; only more than one *casting* is the error
-        // condition, and the previous wording reported a healthy scene as a
-        // problem.
-        int shadowedDirectional = 0;
-        for (int i = 0; i < lights.Length; ++i)
+
+        // More than one *casting* directional is the error condition; a map is
+        // free to author several so long as only one casts.
+        if (l.shadowedDirectional > 1)
         {
-            if (lights[i].type == LightType.Directional && lights[i].shadows != LightShadows.None)
-            {
-                ++shadowedDirectional;
-            }
-        }
-        if (shadowedDirectional > 1)
-        {
-            sb.Append("  ^ ").Append(shadowedDirectional)
-              .AppendLine(" directional lights casting; HDRP shadows only one and will report a "
-                          + "cascade atlas failure every frame.");
+            data.warnings.Add($"{l.shadowedDirectional} directional lights casting; HDRP shadows " +
+                              "only one and will report a cascade atlas failure every frame.");
         }
     }
 
-    void ReportSettings(StringBuilder sb)
+    void CollectProbes(BFRenderBudgetData data)
     {
-        sb.Append("  resolution     ").Append(Screen.width).Append('x').Append(Screen.height)
-          .Append("  (target ").Append(PhxBF3.Config.TargetWidth).Append('x')
-          .Append(PhxBF3.Config.TargetHeight).AppendLine(")");
+        BFReflectionProbeManager mgr = BFReflectionProbeManager.Instance;
+        data.probes.reflectionPlaced = mgr != null ? mgr.Placed : 0;
+        data.probes.reflectionBudget = BFPresentationQuality.ReflectionProbeBudget;
 
-        sb.Append("  quality tier   ").Append(BFPresentationQuality.Tier)
-          .Append("  shadows ").Append(BFPresentationQuality.SunShadowResolution)
-          .Append(" x").Append(BFPresentationQuality.ShadowCascades)
-          .Append(" cascades, decals ").Append(BFPresentationQuality.DecalBudget)
-          .Append(", impact lights ").Append(BFPresentationQuality.ImpactLightBudget)
+        HDRenderPipelineAsset hdrp = GraphicsSettings.currentRenderPipeline as HDRenderPipelineAsset;
+        if (hdrp != null)
+        {
+            data.probes.reflectionCacheSize =
+                hdrp.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionProbeCacheSize;
+        }
+
+        // A budget larger than the cache guarantees the cache thrashes every
+        // frame, and nothing else in the engine will say so.
+        if (data.probes.reflectionCacheSize > 0 &&
+            data.probes.reflectionBudget > data.probes.reflectionCacheSize)
+        {
+            data.warnings.Add($"reflection probe budget {data.probes.reflectionBudget} exceeds the " +
+                              $"pipeline's cache of {data.probes.reflectionCacheSize} - the cache " +
+                              "will evict and re-render probes every frame.");
+        }
+    }
+
+    void CollectSettings(BFRenderBudgetData data)
+    {
+        BFRenderResolutionStats r = data.resolution;
+        r.screenW = Screen.width;
+        r.screenH = Screen.height;
+        r.targetW = PhxBF3.Config.TargetWidth;
+        r.targetH = PhxBF3.Config.TargetHeight;
+
+        HDRenderPipelineAsset hdrp = GraphicsSettings.currentRenderPipeline as HDRenderPipelineAsset;
+        if (hdrp != null)
+        {
+            RenderPipelineSettings s = hdrp.currentPlatformRenderPipelineSettings;
+
+            r.dynamicResolutionEnabled = s.dynamicResolutionSettings.enabled;
+            r.dynamicResHardware = s.dynamicResolutionSettings.dynResType == DynamicResolutionType.Hardware;
+            r.dynamicResMinPercent = s.dynamicResolutionSettings.minPercentage;
+
+            data.features.shadowFilteringQuality = (int)s.hdShadowInitParams.shadowFilteringQuality;
+            data.features.ssgiSupportedByAsset = s.supportSSGI;
+        }
+
+        data.tier.name = BFPresentationQuality.Tier.ToString();
+        data.tier.ordinal = (int)BFPresentationQuality.Tier;
+        data.tier.source = PhxBF3.ConfigLoadedFromDisk ? "config" : "default";
+
+        BFRenderFeatureStats f = data.features;
+        f.volumetrics = BFPresentationQuality.Volumetrics;
+        f.contactShadows = BFPresentationQuality.ContactShadows;
+        f.ssr = BFPresentationQuality.ScreenSpaceReflections;
+        f.ssgi = BFPresentationQuality.ScreenSpaceGlobalIllumination;
+        f.derivedMaterialMaps = BFPresentationQuality.DerivedMaterialMaps;
+        f.ssrMinSmoothness = BFLightingDirector.Active?.ReflectionMinSmoothness ?? 0f;
+
+        // Budgets carry the tier's own value alongside the effective one, so
+        // the reduce-only rule can be checked rather than assumed.
+        AddBudget(data, "decals", BFPresentationQuality.DecalBudget, BFPresentationQuality.DecalBudget);
+        AddBudget(data, "impactLights", BFPresentationQuality.ImpactLightBudget, BFPresentationQuality.ImpactLightBudget);
+        AddBudget(data, "reflectionProbes", BFPresentationQuality.ReflectionProbeBudget, BFPresentationQuality.ReflectionProbeBudget);
+        AddBudget(data, "sunShadowResolution", BFPresentationQuality.SunShadowResolution, BFPresentationQuality.SunShadowResolution);
+        AddBudget(data, "shadowCascades", BFPresentationQuality.ShadowCascades, BFPresentationQuality.ShadowCascades);
+        AddBudget(data, "shadowCastingPunctual", BFPresentationQuality.ShadowCastingPunctualBudget, BFPresentationQuality.ShadowCastingPunctualBudget);
+        AddBudget(data, "minShadowCasterRadius", BFPresentationQuality.MinShadowCasterRadius, BFPresentationQuality.MinShadowCasterRadius);
+        AddBudget(data, "interactionDistance", BFPresentationQuality.InteractionDistance, BFPresentationQuality.InteractionDistance);
+        AddBudget(data, "terrainDeformationResolution", BFPresentationQuality.TerrainDeformationResolution, BFPresentationQuality.TerrainDeformationResolution);
+
+        float shadowDistance = (BFLightingDirector.Active?.ShadowDistance ?? 0f)
+                             * BFPresentationQuality.ShadowDistanceScale;
+        AddBudget(data, "shadowDistanceMetres", shadowDistance, shadowDistance);
+
+        long pixels = (long)Screen.width * Screen.height;
+        if (pixels > 3_000_000 && f.ssr)
+        {
+            data.warnings.Add("4K-class resolution with screen-space effects on. " +
+                              "PhxBF3Config.TargetWidth/Height and PresentationQuality are the dials.");
+        }
+
+        if (!r.dynamicResolutionEnabled && PhxBF3.Config.UseDynamicResolution)
+        {
+            data.warnings.Add("config asks for dynamic resolution but the pipeline asset has it " +
+                              "disabled - the request does nothing.");
+        }
+    }
+
+    /// <summary>
+    /// Record a budget. Phase-0 callers pass the same number twice; once maps
+    /// carry their own caps, effective and tier values diverge and the source
+    /// says which won.
+    /// </summary>
+    static void AddBudget(BFRenderBudgetData data, string name, float value, float tierValue)
+    {
+        string source = Mathf.Approximately(value, tierValue) ? "tier" : "min(tier,map)";
+        data.budgets.Add(new BFBudgetEntry
+        {
+            name = name,
+            value = value,
+            tierValue = tierValue,
+            source = source,
+        });
+
+        // The invariant the whole per-map design rests on: a map may lower a
+        // cost, never raise it. Cheaper to assert here than to discover from a
+        // frame time six maps later.
+        if (value > tierValue && !Mathf.Approximately(value, tierValue))
+        {
+            data.warnings.Add($"budget '{name}' ({value}) exceeds its tier value ({tierValue}) - " +
+                              "a map profile raised a cost, which the precedence rule forbids.");
+        }
+    }
+
+    static void Emit(BFRenderBudgetData data)
+    {
+        Debug.Log(ToSummary(data));
+
+        try
+        {
+            string fileName = string.IsNullOrEmpty(data.worldName)
+                ? "bf2-render-budget.json"
+                : $"bf2-render-budget-{Sanitize(data.worldName)}.json";
+            string path = Path.Combine(Application.persistentDataPath, fileName);
+            File.WriteAllText(path, JsonUtility.ToJson(data, true));
+            Debug.Log($"[BFPerf] render budget written to {path}");
+        }
+        catch (Exception e)
+        {
+            Debug.LogWarning($"[BFPerf] could not write render budget report: {e.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Re-emit the current report with the timings gathered while it was
+    /// played. Load-time counts do not say whether a map was affordable.
+    /// </summary>
+    public static void EmitWithMeasurements(BFRenderMeasuredStats measured)
+    {
+        if (Last == null) return;
+
+        Last.measured = measured ?? new BFRenderMeasuredStats();
+        Emit(Last);
+    }
+
+    static string ToSummary(BFRenderBudgetData d)
+    {
+        var sb = new StringBuilder();
+        sb.Append("[BFPerf] Render budget for '").Append(d.worldName)
+          .Append("' (profile ").Append(d.profileName).AppendLine("):");
+
+        sb.Append("  renderers      ").Append(d.geometry.renderers)
+          .Append("  (skinned ").Append(d.geometry.skinned)
+          .Append(", shadow casters ").Append(d.geometry.shadowCasters).AppendLine(")");
+        sb.Append("  unique mats    ").Append(d.geometry.uniqueMaterials)
+          .Append("  (alpha-tested ").Append(d.geometry.alphaTestedMaterials)
+          .Append(", double-sided ").Append(d.geometry.doubleSidedMaterials).AppendLine(")");
+        sb.Append("  triangles      ").Append(d.geometry.triangles / 1000)
+          .Append("k  (shadow casters ").Append(d.geometry.shadowCasterTriangles / 1000).AppendLine("k)");
+        sb.Append("  cloth pieces   ").Append(d.geometry.clothPieces)
+          .AppendLine(" authored CLTH piece(s) attached");
+        sb.Append("  authored LODs  ").Append(d.geometry.authoredLodGroups)
+          .AppendLine(" model(s) with a stock low-detail mesh");
+
+        sb.Append("  lights         ").Append(d.lights.total)
+          .Append("  (dir ").Append(d.lights.directional)
+          .Append(", point ").Append(d.lights.point)
+          .Append(", spot ").Append(d.lights.spot)
+          .Append("; casting ").Append(d.lights.shadowedDirectional + d.lights.shadowedPunctual)
+          .Append(", volumetric ").Append(d.lights.volumetricAffecting).AppendLine(")");
+
+        sb.Append("  probes         ").Append(d.probes.reflectionPlaced)
+          .Append(" placed of budget ").Append(d.probes.reflectionBudget)
+          .Append(", cache ").Append(d.probes.reflectionCacheSize).AppendLine();
+
+        sb.Append("  resolution     ").Append(d.resolution.screenW).Append('x').Append(d.resolution.screenH)
+          .Append("  (target ").Append(d.resolution.targetW).Append('x').Append(d.resolution.targetH)
+          .Append(", dynamic ").Append(d.resolution.dynamicResolutionEnabled)
+          .Append(d.resolution.dynamicResHardware ? "/hardware" : "/software").AppendLine(")");
+
+        sb.Append("  quality tier   ").Append(d.tier.name)
+          .Append(" (from ").Append(d.tier.source).Append(')')
+          .Append("  shadows ").Append((int)Budget(d, "sunShadowResolution"))
+          .Append(" x").Append((int)Budget(d, "shadowCascades"))
+          .Append(" cascades, decals ").Append((int)Budget(d, "decals"))
+          .Append(", impact lights ").Append((int)Budget(d, "impactLights"))
           .AppendLine();
 
         sb.Append("  features       ")
-          .Append("volumetrics ").Append(BFPresentationQuality.Volumetrics)
-          .Append(", contact shadows ").Append(BFPresentationQuality.ContactShadows)
-          .Append(", SSR ").Append(BFPresentationQuality.ScreenSpaceReflections)
-          .Append(", SSGI ").Append(BFPresentationQuality.ScreenSpaceGlobalIllumination)
-          .Append(", derived maps ").Append(BFPresentationQuality.DerivedMaterialMaps)
+          .Append("volumetrics ").Append(d.features.volumetrics)
+          .Append(", contact shadows ").Append(d.features.contactShadows)
+          .Append(", SSR ").Append(d.features.ssr)
+          .Append(", SSGI ").Append(d.features.ssgi)
+          .Append(d.features.ssgiSupportedByAsset ? "" : " (unsupported by asset)")
+          .Append(", shadow filtering ").Append(d.features.shadowFilteringQuality)
+          .Append(", derived maps ").Append(d.features.derivedMaterialMaps)
           .AppendLine();
 
-        // 4K with the full screen-space stack is a large ask, and the default
-        // config requests it without saying so anywhere the player would look.
-        long pixels = (long)Screen.width * Screen.height;
-        if (pixels > 3_000_000 && BFPresentationQuality.ScreenSpaceReflections)
+        for (int i = 0; i < d.warnings.Count; ++i)
         {
-            sb.AppendLine("  ^ 4K-class resolution with screen-space effects on. " +
-                          "PhxBF3Config.TargetWidth/Height and PresentationQuality are the dials.");
+            sb.Append("  ^ ").AppendLine(d.warnings[i]);
         }
+
+        return sb.ToString();
+    }
+
+    static float Budget(BFRenderBudgetData d, string name)
+    {
+        for (int i = 0; i < d.budgets.Count; ++i)
+        {
+            if (d.budgets[i].name == name) return d.budgets[i].value;
+        }
+        return 0f;
+    }
+
+    static string Sanitize(string name)
+    {
+        var sb = new StringBuilder(name.Length);
+        foreach (char c in name)
+        {
+            sb.Append(char.IsLetterOrDigit(c) || c == '_' || c == '-' ? c : '_');
+        }
+        return sb.ToString();
     }
 }

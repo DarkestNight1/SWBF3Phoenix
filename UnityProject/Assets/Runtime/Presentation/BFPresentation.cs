@@ -36,6 +36,13 @@ public static class BFPresentation
     {
         if (Host != null) return;
 
+        // Read the config before anything below looks at it. This and
+        // PhxBF3.Bootstrap are both AfterSceneLoad with no defined order, so
+        // whichever runs first has to be the one that loads it - otherwise the
+        // tier and the ModernLighting gate below silently come from compiled
+        // defaults on roughly half of all launches.
+        PhxBF3.EnsureConfigLoaded();
+
         // Off entirely unless the fork's modern rendering is on. A user who
         // has turned that off wants the original presentation, and that has to
         // include none of this.

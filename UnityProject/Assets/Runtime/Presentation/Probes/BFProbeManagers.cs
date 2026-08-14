@@ -35,6 +35,19 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
     /// <summary>Height above the post the probe sits at - roughly eye level.</summary>
     const float ProbeHeight = 3f;
 
+    /// <summary>Probes actually placed for this map.</summary>
+    public int Placed => Probes.Count;
+
+    /// <summary>
+    /// Whether placement has finished for this map.
+    /// </summary>
+    /// <remarks>
+    /// Placement runs a frame per probe, so anything reading Placed during the
+    /// OnMapLoaded dispatch sees zero. The render budget report did exactly
+    /// that and reported no probes on every map.
+    /// </remarks>
+    public bool PlacementComplete { get; private set; } = true;
+
     void Awake() => Instance = this;
 
     void OnDestroy()
@@ -65,8 +78,13 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
         Clear();
 
         int budget = BFPresentationQuality.ReflectionProbeBudget;
-        if (budget <= 0) return;
+        if (budget <= 0)
+        {
+            PlacementComplete = true;
+            return;
+        }
 
+        PlacementComplete = false;
         StopAllCoroutines();
         StartCoroutine(PlaceOverFrames(budget));
     }
@@ -90,7 +108,13 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
 
         PhxScene scene = PhxGame.GetScene();
         PhxCommandpost[] posts = scene?.GetCommandPosts();
-        if (posts == null || posts.Length == 0) yield break;
+        if (posts == null || posts.Length == 0)
+        {
+            // Still "complete" - a map with no command posts gets no probes,
+            // and anything waiting on this must not wait forever.
+            PlacementComplete = true;
+            yield break;
+        }
 
         int placed = 0;
         for (int i = 0; i < posts.Length && placed < budget; ++i)
@@ -102,6 +126,7 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
             yield return null;
         }
 
+        PlacementComplete = true;
         Debug.Log($"[BFPresentation] {placed} reflection probe(s) placed at command posts.");
     }
 

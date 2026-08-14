@@ -36,7 +36,7 @@ public static class PhxBF3
     {
         if (Host != null) return;
 
-        LoadConfig();
+        EnsureConfigLoaded();
 
         Host = new GameObject("BF3Legacy");
         GameObject.DontDestroyOnLoad(Host);
@@ -162,23 +162,52 @@ public static class PhxBF3
         }
     }
 
+    static bool ConfigLoaded;
+
+    /// <summary>
+    /// Load the config once, from whichever bootstrap runs first.
+    /// </summary>
+    /// <remarks>
+    /// PhxBF3.Bootstrap and BFPresentation.Bootstrap are both
+    /// RuntimeInitializeOnLoadMethod(AfterSceneLoad), and Unity does not define
+    /// their relative order. BFPresentation reads PresentationQuality and
+    /// ModernLighting, so when it won the race it read the compiled defaults
+    /// and the user's bf3legacy.json was silently ignored - a quality tier that
+    /// works on one launch and not the next.
+    ///
+    /// Separate from LoadConfig so that an explicit reload (the editor setup
+    /// window does one) still forces a re-read.
+    /// </remarks>
+    public static void EnsureConfigLoaded()
+    {
+        if (ConfigLoaded) return;
+        LoadConfig();
+    }
+
+    /// <summary>Whether the config on disk was read, as opposed to defaults.</summary>
+    public static bool ConfigLoadedFromDisk { get; private set; }
+
     public static void LoadConfig()
     {
+        ConfigLoaded = true;
         try
         {
             if (File.Exists(ConfigPath))
             {
                 Config = JsonUtility.FromJson<PhxBF3Config>(File.ReadAllText(ConfigPath));
+                ConfigLoadedFromDisk = true;
             }
             else
             {
                 SaveConfig();
+                ConfigLoadedFromDisk = false;
             }
         }
         catch (Exception e)
         {
             Debug.LogWarning($"[BF3Legacy] Failed to load config, using defaults: {e.Message}");
             Config = new PhxBF3Config();
+            ConfigLoadedFromDisk = false;
         }
     }
 
