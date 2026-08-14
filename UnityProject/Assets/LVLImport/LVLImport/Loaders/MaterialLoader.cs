@@ -98,6 +98,32 @@ public class MaterialLoader : Loader
         return _DefaultHDRPTransparentMaterial;
     }
 
+    UMaterial _DefaultHDRPCutoutMaterial;
+
+    /// <summary>
+    /// Template for alpha-cutout (Hardedged) materials.
+    /// </summary>
+    /// <remarks>
+    /// A shipped asset rather than a keyword enabled at runtime on a clone of
+    /// HDRPLit. _ALPHATEST_ON is a shader_feature_local and the project builds
+    /// with shader variant stripping on, so a variant nothing references at
+    /// build time may simply not exist in the player - which would work in the
+    /// editor and fail in a build, the worst way for this to be wrong.
+    /// Living under Resources guarantees it is pulled in, which guarantees the
+    /// variant is compiled.
+    ///
+    /// Queue 2475 is OpaqueDecalAlphaTest, keeping decal reception, which is
+    /// the alpha-tested counterpart of the 2225 the plain lit template uses.
+    /// </remarks>
+    UMaterial GetDefaultCutoutMaterial()
+    {
+        if (_DefaultHDRPCutoutMaterial == null)
+        {
+            _DefaultHDRPCutoutMaterial = Resources.Load<UMaterial>("HDRPLitCutout");
+        }
+        return _DefaultHDRPCutoutMaterial;
+    }
+
     UMaterial GetDefaultUnlitMaterial()
     {
         if (_DefaultHDRPUnlitMaterial == null)
@@ -236,6 +262,18 @@ public class MaterialLoader : Loader
 
     /// <summary>Strength of imported bump maps. 0 disables them entirely.</summary>
     public static float NormalMapStrength = 1.0f;
+
+    /// <summary>
+    /// Alpha threshold below which a cutout material discards a pixel.
+    /// </summary>
+    /// <remarks>
+    /// Lower than HDRP's 0.5 default on purpose. 2005 alpha maps were authored
+    /// for a hardware alpha test against soft, often heavily-dithered edges, so
+    /// clipping at the midpoint eats the outer pixels of a leaf or a chain link
+    /// and leaves it looking thin and chewed. 0.35 keeps the silhouette the art
+    /// intended; TAA handles the extra edge detail that survives.
+    /// </remarks>
+    public static float AlphaCutoff = 0.35f;
 
     /// <summary>
     /// Wire the material's authored bump map into HDRP's normal slot.
@@ -402,6 +440,22 @@ public class MaterialLoader : Loader
                         //material.SetFloat("_ZTestDepthEqualForOpaque", 4.0f);
                         //material.SetOverrideTag("RenderType", "Transparent");
                         //material.renderQueue = 3000;
+                    }
+                    else if (matFlags.HasFlag(EMaterialFlags.Hardedged) && !unlit)
+                    {
+                        // Alpha cutout. This was handled only in the legacy
+                        // non-HDRP branch, so under HDRP every fence, grate,
+                        // ladder, railing and foliage card drew as the solid
+                        // rectangle its texture is stored on. Between 3% and
+                        // 17% of the segments on every stock map carry this
+                        // flag, so it is not a corner case.
+                        //
+                        // The cutoff is a real threshold rather than the
+                        // template's 0.5 default only because 2005 art often
+                        // has soft alpha edges; see AlphaCutoff.
+                        material = new UMaterial(GetDefaultCutoutMaterial());
+                        material.SetFloat("_AlphaCutoff", AlphaCutoff);
+                        material.SetFloat("_AlphaCutoffShadow", AlphaCutoff);
                     }
                     else
                     {

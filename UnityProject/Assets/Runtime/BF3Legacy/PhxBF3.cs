@@ -58,6 +58,7 @@ public static class PhxBF3
         // engine-agnostic assembly), so the runtime pushes the value in.
         MaterialLoader.SmoothnessScale = Config.SmoothnessScale;
         MaterialLoader.NormalMapStrength = Config.NormalMapStrength;
+        MaterialLoader.AlphaCutoff = Config.AlphaCutoff;
         TextureLoader.CompressWorldTextures = Config.CompressTextures;
 
         if (Config.EnhancedAI)
@@ -411,6 +412,17 @@ public class PhxBF3Config
     /// second texture slot). 0 disables them.
     /// </summary>
     public float NormalMapStrength = 1.0f;
+
+    /// <summary>
+    /// Alpha threshold for cutout materials - fences, grates, foliage cards.
+    /// </summary>
+    /// <remarks>
+    /// Below HDRP's 0.5 default because 2005 alpha maps were drawn for a
+    /// hardware alpha test against soft, often dithered edges; clipping at the
+    /// midpoint eats the outer pixels of a leaf or a chain link. Raise it if
+    /// foliage looks fringed, lower it if it looks chewed.
+    /// </remarks>
+    public float AlphaCutoff = 0.35f;
 
     /// <summary>
     /// Re-compress imported world textures to DXT on upload.
