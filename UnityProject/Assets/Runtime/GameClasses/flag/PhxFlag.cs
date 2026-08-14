@@ -106,15 +106,40 @@ public class PhxFlag : MonoBehaviour
         PhxSoldier taker = FindSoldierWithin(PickupRadius);
         if (taker == null) return;
 
-        // In CTF you carry the enemy's flag; a friendly touching a dropped
-        // flag sends it home instead. The neutral 1-flag is carried by anyone.
-        if (Mode == PhxFlagMode.Ctf && HomeTeam > 0 && taker.Team == HomeTeam)
+        // A friendly touching their own dropped flag sends it home rather than
+        // carrying it - a different action from a pickup, so it is handled
+        // here rather than inside the can-carry rule.
+        if (Dropped && IsOwnFlagFor(taker))
         {
-            if (Dropped) ResetToHome();
+            ResetToHome();
             return;
         }
 
+        if (!CanInteract(taker)) return;
+
         PickUp(taker);
+    }
+
+    /// <summary>In CTF a team cannot carry its own flag; the 1-flag is neutral.</summary>
+    bool IsOwnFlagFor(PhxSoldier soldier)
+    {
+        return Mode == PhxFlagMode.Ctf && HomeTeam > 0 && soldier != null && soldier.Team == HomeTeam;
+    }
+
+    /// <summary>
+    /// Can this soldier pick the flag up right now?
+    /// </summary>
+    /// <remarks>
+    /// The objective scripts ask this through CanCharacterInteractWithFlag
+    /// before offering the pickup prompt, so the rule lives here rather than
+    /// inline in the pickup path - otherwise the prompt and the pickup can
+    /// disagree about who is allowed to carry what.
+    /// </remarks>
+    public bool CanInteract(PhxSoldier soldier)
+    {
+        if (soldier == null || soldier.IsDead) return false;
+        if (Carrier != null) return false;
+        return !IsOwnFlagFor(soldier);
     }
 
     bool AtScoringPoint(PhxSoldier carrier)

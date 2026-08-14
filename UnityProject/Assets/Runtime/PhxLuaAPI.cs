@@ -1685,6 +1685,68 @@ public static class PhxLuaAPI
 	{
 	}
 
+	/// <summary>
+	/// Lua: ReleaseCharacterDeath. Same no-op contract as the releases above.
+	/// </summary>
+	/// <remarks>
+	/// OnCharacterDeath was implemented but this was not, and objectivetdm
+	/// calls it during cleanup - so team deathmatch died on teardown even
+	/// though the rest of the mode had everything it needed.
+	/// </remarks>
+	public static void ReleaseCharacterDeath(object handle)
+	{
+	}
+
+	/// <summary>
+	/// Lua: CanCharacterInteractWithFlag - may this character take the flag?
+	/// </summary>
+	/// <remarks>
+	/// ObjectiveOneFlagCTF asks before offering the pickup prompt. The rule
+	/// itself lives on PhxFlag so the prompt and the actual pickup cannot
+	/// disagree.
+	/// </remarks>
+	public static bool CanCharacterInteractWithFlag(int charIdx, int? flagPtr)
+	{
+		PhxFlag flag = ResolveFlag(flagPtr);
+		if (flag == null) return false;
+
+		PhxInstance inst = RTS?.GetInstance(charIdx);
+		PhxSoldier soldier = inst != null ? inst.GetComponent<PhxSoldier>() : null;
+		return soldier != null && flag.CanInteract(soldier);
+	}
+
+	/// <summary>
+	/// Lua: AddAssaultDestroyPoints - award a team for destroying a target.
+	/// </summary>
+	/// <remarks>
+	/// Assault scores by destroying objectives rather than by holding ground,
+	/// so this is the mode's entire scoring path.
+	/// </remarks>
+	public static void AddAssaultDestroyPoints(int teamIdx, int points)
+	{
+		MT?.AddTeamPoints(teamIdx, points);
+	}
+
+	/// <summary>
+	/// Lua: GetObjectLastHitWeaponClass - what last damaged this object.
+	/// </summary>
+	/// <remarks>
+	/// ObjectiveAssault uses it to decide whether a target counts as destroyed
+	/// by the attacking team. The damage path carries an instigator but not the
+	/// weapon class, so there is nothing truthful to return yet and this
+	/// answers with an empty string.
+	///
+	/// It exists because a missing global aborts the whole calling chunk: with
+	/// it absent, objectiveassault stops at the first target hit and the mode
+	/// never resolves. Returning "" degrades one scoring condition instead.
+	/// Threading the weapon class through PhxDamage.Apply would fix it
+	/// properly.
+	/// </remarks>
+	public static string GetObjectLastHitWeaponClass(object obj)
+	{
+		return "";
+	}
+
 	/// <summary>Lua: EnableLockOn - missile lock against a named object.</summary>
 	public static void EnableLockOn(object obj, bool enable)
 	{
