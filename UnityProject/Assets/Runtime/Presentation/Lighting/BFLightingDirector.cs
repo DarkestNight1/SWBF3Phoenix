@@ -430,7 +430,42 @@ public class BFLightingDirector : MonoBehaviour
         IndirectLighting.indirectDiffuseLightingMultiplier.Override(p.IndirectDiffuseIntensity);
         IndirectLighting.reflectionLightingMultiplier.Override(p.IndirectSpecularIntensity);
 
+        // Two separate concerns, deliberately kept apart. ApplyAmbient is
+        // allowed to decide it has nothing to do and return; the screen-space
+        // stack must be written on every path. They used to be one method, and
+        // the early returns at the top of the ambient scaling skipped the SSR
+        // and SSGI writes at the bottom.
         ApplyAmbient(p);
+        ApplyScreenSpaceLighting(p);
+    }
+
+    /// <summary>
+    /// Gate the screen-space stack for this map.
+    /// </summary>
+    /// <remarks>
+    /// This must run for every map, and must write every flag it owns on every
+    /// path, because Start adds the volume components with all override states
+    /// forced on. An unwritten parameter is not "left alone" - it is HDRP's own
+    /// default, applied at priority 120 over everything below.
+    ///
+    /// That is not theoretical. ScreenSpaceReflection.enabled defaults to true,
+    /// so while these writes sat below ApplyAmbient's early returns, every map
+    /// resolving to the Default profile ran SSR regardless of quality tier -
+    /// a Low-tier player was paying for it. GlobalIllumination.enable defaults
+    /// to false, so SSGI was forced off on those same maps even where the
+    /// profile asked for it.
+    ///
+    /// The tier is a ceiling and the profile is a request: a feature runs only
+    /// when both agree.
+    /// </remarks>
+    void ApplyScreenSpaceLighting(BFEnvironmentLightingProfile p)
+    {
+        Reflections.enabled.Override(p.ScreenSpaceReflections &&
+                                     BFPresentationQuality.ScreenSpaceReflections);
+        Reflections.minSmoothness = p.ReflectionMinSmoothness;
+
+        GlobalIllumination.enable.Override(p.ScreenSpaceGlobalIllumination &&
+                                           BFPresentationQuality.ScreenSpaceGlobalIllumination);
     }
 
     /// <summary>
@@ -466,12 +501,6 @@ public class BFLightingDirector : MonoBehaviour
         RenderSettings.ambientEquatorColor *= scale;
         RenderSettings.ambientGroundColor *= scale;
         RenderSettings.ambientLight *= scale;
-
-        Reflections.enabled.Override(p.ScreenSpaceReflections && BFPresentationQuality.ScreenSpaceReflections);
-        Reflections.minSmoothness = p.ReflectionMinSmoothness;
-
-        GlobalIllumination.enable.Override(p.ScreenSpaceGlobalIllumination &&
-                                           BFPresentationQuality.ScreenSpaceGlobalIllumination);
     }
 
     /// <summary>

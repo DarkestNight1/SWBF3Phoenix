@@ -315,8 +315,15 @@ public class PhxBF3Config
     public bool DerivedMaterialMaps = true;
 
     // Graphics
-    public int TargetWidth = 3840;
-    public int TargetHeight = 2160;
+    //
+    // 1440p, not 4K. PhxResolutionManager picks the largest supported mode at
+    // or below the target, so a 3840x2160 default silently opts every 4K
+    // display into rendering at 4K - including the mid-range hardware this
+    // project is tuned for, where the screen-space stack cannot afford it.
+    // Anyone with the headroom can raise it; nobody should be opted in by a
+    // number they never saw.
+    public int TargetWidth = 2560;
+    public int TargetHeight = 1440;
     public bool UseDynamicResolution = true;
 
     /// <summary>
@@ -332,11 +339,36 @@ public class PhxBF3Config
 
     /// <summary>Frame cap when VSync is off. 0 leaves it uncapped.</summary>
     public int TargetFrameRate = 0;
-    public float RenderScale = 1.0f;
-    public bool RayTracedEffects = false;     // only honored on capable hardware
 
-    // Extra fidelity pass: TAA, motion blur, DoF, PBR sky, reflection probe,
-    // GPU instancing, mip bias
+    /// <summary>
+    /// Fixed render scale as a fraction of native, or 1.0 to let dynamic
+    /// resolution decide.
+    /// </summary>
+    /// <remarks>
+    /// Anything other than 1.0 pins the resolution there and takes the
+    /// automatic scaler out of the loop - the manual override for someone who
+    /// would rather choose a constant image than have it move.
+    ///
+    /// This had no consumer at all until dynamic resolution was wired up; it
+    /// was a knob in a config file that did nothing, which is how the same
+    /// class of bug got into the graphics stack in the first place.
+    /// </remarks>
+    public float RenderScale = 1.0f;
+
+    /// <summary>Lowest fraction of native resolution the scaler may fall to.</summary>
+    public float MinDynamicResolutionPercent = 65f;
+
+    /// <summary>
+    /// Fraction of the frame budget held back as headroom, so the scaler aims
+    /// under the refresh interval rather than exactly at it.
+    /// </summary>
+    public float DynamicResolutionHeadroom = 0.15f;
+
+    // RayTracedEffects was removed. The pipeline asset has supportRayTracing
+    // off with no ray tracing resources assigned, so it could never have done
+    // anything, and the target hardware could not afford it if it did.
+
+    // Extra fidelity pass: TAA, motion blur, vignette, GPU instancing
     public bool GraphicsEnhancements = true;
 
     /// <summary>
