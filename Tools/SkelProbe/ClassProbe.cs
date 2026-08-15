@@ -47,6 +47,13 @@ namespace SkelProbe
                 return;
             }
 
+            // CLASS_FILTER=* lists the distinct base classes and how many
+            // classes sit on each. That is the step before filtering: the
+            // probe matches the IMMEDIATE base class, and guessing what that
+            // is for a given odf is exactly the mistake this tool exists to
+            // avoid making.
+            bool listBases = filter.Trim() == "*";
+
             var wanted = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (string s in filter.Split(',')) wanted.Add(s.Trim());
 
@@ -87,6 +94,24 @@ namespace SkelProbe
             catch (Exception e) { Console.WriteLine($"=== {Path.GetFileName(path)}: {e.Message}"); return; }
 
             var matched = new List<EntityClass>();
+            if (listBases)
+            {
+                var counts = new SortedDictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (EntityClass ec in classes)
+                {
+                    if (ec == null || ec.BaseClassName == null) continue;
+                    counts.TryGetValue(ec.BaseClassName, out int c);
+                    counts[ec.BaseClassName] = c + 1;
+                }
+                Console.WriteLine("=== " + Path.GetFileName(path) + ": " + counts.Count
+                                  + " distinct base class(es), " + classes.Length + " class(es)");
+                foreach (var kv in counts)
+                {
+                    Console.WriteLine("    " + kv.Key.PadRight(34) + kv.Value);
+                }
+                return;
+            }
+
             int hits = 0;
             foreach (EntityClass ec in classes)
             {
