@@ -45,13 +45,13 @@ public abstract class PhxPawnController
     /// magnification levels and then back out.
     /// </summary>
     /// <remarks>
-    /// Written from the same button as ShootSecondary on purpose. In BF2 right
-    /// mouse zooms on foot and fires the vehicle's second weapon group when
-    /// seated, and that is exactly how it lands here: PhxSoldier reads this,
-    /// PhxSeat and PhxFlyerMainSection read ShootSecondary, and neither sees
-    /// the other's context. No rebinding, no conflict.
+    /// NOT on right mouse, which is the obvious binding and is already taken:
+    /// Fire2 throws the secondary item, which is how grenades, mines and
+    /// detpacks are used. Sharing it made every scope press also lob a thermal
+    /// detonator. Middle mouse instead.
     /// </remarks>
     public bool ZoomPressed;
+
     public bool Enter;
 
     public Vector2 MoveDirection;

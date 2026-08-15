@@ -78,7 +78,6 @@ public class PhxPlayerController : PhxPawnController
         NextSecondaryWeapon = Input.GetAxis("WeaponChange") > 0;
         ShootPrimary = Input.GetButton("Fire1");
         ShootSecondary = Input.GetButton("Fire2");
-        ZoomPressed = Input.GetButtonDown("Fire2");
 
         if (Input.GetButtonDown("Crouch"))
         {
@@ -117,6 +116,15 @@ public class PhxPlayerController : PhxPawnController
         // validated without opening the editor.
         UseForcePower = Input.GetKeyDown(KeyCode.F);
         UseForceJump = Input.GetKeyDown(KeyCode.Q);
+
+        // Zoom on middle mouse, not right.
+        //
+        // Right mouse is the obvious shooter binding and it is already taken
+        // by something that matters more: Fire2 throws the secondary item,
+        // which is how grenades, mines and detpacks are used. Putting zoom
+        // there as well meant every scope press also lobbed a thermal
+        // detonator at your feet.
+        ZoomPressed = Input.GetKeyDown(KeyCode.Mouse2);
 
         // Vehicle enter/exit.
         //
