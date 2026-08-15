@@ -160,6 +160,9 @@ public class PhxBF3AIController : PhxAIController
     Vector3 LastPosition;
     float StuckTimer;
     float UnstickTimer;
+
+    /// <summary>Set when an unstick maneuver overrode the guarded direction.</summary>
+    bool UnstickNeedsGuard;
     Vector3 UnstickDir;
 
     // Target scans write here. Sized for a 64v64 scrum: OverlapSphereNonAlloc
@@ -214,6 +217,8 @@ public class PhxBF3AIController : PhxAIController
         NavRepathTimer = 0f;
         StuckTimer = 0f;
         UnstickTimer = 0f;
+        DeflectSide = 0f;
+        DeflectHold = 0f;
         ReactionTimer = 0f;
         MoveDirection = Vector2.zero;
         Jump = false;
@@ -389,7 +394,15 @@ public class PhxBF3AIController : PhxAIController
         // order judged every vetoed frame as "stuck" and produced a perpetual
         // ~2.5s plant-and-jump loop at the first ledge/slope.
         ApplyLedgeGuard();
+
+        UnstickNeedsGuard = false;
         TickStuckRecovery(deltaTime);
+
+        // Second pass, only when stuck recovery overwrote the direction the
+        // guard had already approved. The ordering above stays as documented -
+        // a guard veto must reach the stuck test as "doesn't want to move" - so
+        // the fix is another guard rather than a swap.
+        if (UnstickNeedsGuard) ApplyLedgeGuard();
 
         TickDecision(deltaTime);
         TickActionAnimation();
@@ -1960,6 +1973,14 @@ public class PhxBF3AIController : PhxAIController
             {
                 Jump = true;
             }
+
+            // Tell Tick to drop-test this. The ledge guard already ran for this
+            // frame, before we overwrote the direction it approved - so without
+            // a second pass an unstick sidestep is the one movement in the
+            // controller that is never checked for a drop, and a soldier wedged
+            // against a railing can be shoved straight off a catwalk by its own
+            // recovery.
+            UnstickNeedsGuard = true;
             return;
         }
 
@@ -2196,6 +2217,59 @@ public class PhxBF3AIController : PhxAIController
     }
 
     /// <summary>Direct steering with obstacle whiskers (fallback / final approach).</summary>
+    /// <summary>Deflection angles tried, smallest first.</summary>
+    static readonly float[] DeflectionAngles = { 40f, 80f };
+
+    /// <summary>Which way the last deflection went, -1 left / +1 right.</summary>
+    float DeflectSide;
+
+    /// <summary>How long that choice stays committed.</summary>
+    float DeflectHold;
+
+    /// <summary>
+    /// Long enough to clear a doorway, short enough that a soldier is not
+    /// married to a decision after the obstacle has gone.
+    /// </summary>
+    const float DeflectHoldTime = 0.7f;
+
+    /// <summary>Radius of the whisker probes.</summary>
+    /// <remarks>
+    /// Matches <c>HasClearWalk</c>'s sphere and sits just inside the soldier's
+    /// own 0.4 m capsule.
+    /// </remarks>
+    const float WhiskerRadius = 0.35f;
+
+    const float WhiskerRange = 4f;
+
+    /// <summary>
+    /// Whether a soldier-sized body can move this way.
+    /// </summary>
+    /// <remarks>
+    /// A SphereCast, not a Raycast. The whiskers used single rays at one height
+    /// while the nav path's own string-pulling correctly used a 0.35 m sphere -
+    /// so steering would declare a direction clear that the capsule could not
+    /// actually fit through, commit to it, and wedge. A ray threads the gap
+    /// between two crates; a soldier does not.
+    ///
+    /// The cast starts slightly back so a body already touching something is
+    /// not reported as beginning inside it, which a zero-distance sphere hit
+    /// would otherwise do every frame against a wall.
+    /// </remarks>
+    bool WhiskerBlocked(Vector3 origin, Vector3 direction, out RaycastHit hit)
+    {
+        int mask = PhxLayers.SoldierGround | PhxLayers.Soldier;
+
+        return Physics.SphereCast(origin - direction * WhiskerRadius, WhiskerRadius,
+                                  direction, out hit, WhiskerRange + WhiskerRadius,
+                                  mask, QueryTriggerInteraction.Ignore);
+    }
+
+    /// <summary>Which side of our heading a blocker is on, so we step the other way.</summary>
+    static float SideAwayFrom(Vector3 toBlocker, Vector3 heading)
+    {
+        return Vector3.Dot(toBlocker, Vector3.Cross(Vector3.up, heading)) > 0f ? -1f : 1f;
+    }
+
     void SteerDirect(Vector3 goal, bool sprint = true)
     {
         Vector3 toGoal = goal - PawnPosition();
@@ -2227,54 +2301,66 @@ public class PhxBF3AIController : PhxAIController
         // their own short-range test rather than being conflated with terrain.
         int obstacleMask = PhxLayers.SoldierGround | PhxLayers.Soldier;
 
+        DeflectHold = Mathf.Max(0f, DeflectHold - Time.deltaTime);
+
         Vector3 eye = PawnPosition() + Vector3.up * 1.0f;
-        if (Physics.Raycast(eye, dir, out RaycastHit hit, 4f, obstacleMask, QueryTriggerInteraction.Ignore))
+        if (WhiskerBlocked(eye, dir, out RaycastHit hit))
         {
             bool blockerIsSoldier = hit.collider.GetComponentInParent<PhxSoldier>() != null;
             if (!blockerIsSoldier || hit.distance < 2f)
             {
-                Vector3 left = Quaternion.Euler(0f, -40f, 0f) * dir;
-                Vector3 right = Quaternion.Euler(0f, 40f, 0f) * dir;
-                bool leftClear = !Physics.Raycast(eye, left, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
-                bool rightClear = !Physics.Raycast(eye, right, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
+                // Candidates in order of preference: the smallest deflection
+                // that still gets past. Taking the widest available angle is
+                // what let a soldier slide along a wall away from where it was
+                // going - every step was "progress" by the stuck detector's
+                // 0.35 m test, so recovery never fired and it could do it
+                // indefinitely.
+                Vector3 chosen = dir;
+                float chosenSide = 0f;
+                bool found = false;
 
-                // Wider probes for when both 40-degree whiskers are blocked -
-                // a wall met at a shallow angle blocks both, and the old code
-                // then just kept walking into it.
-                if (!leftClear && !rightClear)
+                // The side taken last time is tried first at each angle, so a
+                // soldier that has committed to going left keeps going left.
+                // Without this the 50/50 tie-break below re-rolled every frame
+                // and a soldier facing a flat wall head-on alternated
+                // left/right and netted no displacement at all - which is the
+                // plant-and-jitter people see, and the reason it eventually
+                // resolves only when the 1.5 s stuck timer fires.
+                float firstSide = DeflectHold > 0f && DeflectSide != 0f
+                    ? DeflectSide
+                    : (blockerIsSoldier ? SideAwayFrom(hit.point - PawnPosition(), dir)
+                                        : (Random.value < 0.5f ? -1f : 1f));
+
+                foreach (float angle in DeflectionAngles)
                 {
-                    Vector3 hardLeft = Quaternion.Euler(0f, -80f, 0f) * dir;
-                    Vector3 hardRight = Quaternion.Euler(0f, 80f, 0f) * dir;
-                    bool hardLeftClear = !Physics.Raycast(eye, hardLeft, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
-                    bool hardRightClear = !Physics.Raycast(eye, hardRight, 4f, obstacleMask, QueryTriggerInteraction.Ignore);
-
-                    if (hardLeftClear || hardRightClear)
+                    for (int i = 0; i < 2 && !found; ++i)
                     {
-                        // Slide along the wall rather than grinding into it.
-                        left = hardLeft;
-                        right = hardRight;
-                        leftClear = hardLeftClear;
-                        rightClear = hardRightClear;
+                        float side = i == 0 ? firstSide : -firstSide;
+                        Vector3 candidate = Quaternion.Euler(0f, angle * side, 0f) * dir;
+
+                        if (WhiskerBlocked(eye, candidate, out _)) continue;
+
+                        chosen = candidate;
+                        chosenSide = side;
+                        found = true;
                     }
+                    if (found) break;
                 }
 
-                if (leftClear && !rightClear) dir = left;
-                else if (rightClear && !leftClear) dir = right;
-                else if (leftClear && rightClear)
+                if (found)
                 {
-                    if (blockerIsSoldier)
-                    {
-                        // step around the blocker, away from its side of us
-                        Vector3 toBlocker = hit.point - PawnPosition();
-                        float side = Vector3.Dot(toBlocker, Vector3.Cross(Vector3.up, dir));
-                        dir = side > 0f ? left : right;
-                    }
-                    else
-                    {
-                        dir = Random.value < 0.5f ? left : right;
-                    }
+                    dir = chosen;
+                    DeflectSide = chosenSide;
+                    DeflectHold = DeflectHoldTime;
                 }
-                // neither clear: keep pushing, stuck recovery will kick in
+                // Nothing clear at any angle: keep pushing and let stuck
+                // recovery deal with it. Clearing the memory here means the
+                // next attempt is free to pick the other way round rather than
+                // re-committing to a side that just failed everywhere.
+                else
+                {
+                    DeflectHold = 0f;
+                }
             }
         }
 
