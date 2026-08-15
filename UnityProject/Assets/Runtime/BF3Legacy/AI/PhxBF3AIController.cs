@@ -1046,9 +1046,40 @@ public class PhxBF3AIController : PhxAIController
                              - PawnPosition()).normalized;
         }
 
+        // Arrived: stand still inside the field and let it work.
+        //
+        // Without this the goal is simply the droid's transform, and MoveTowards
+        // keeps steering at it forever - so a soldier would reach the station,
+        // walk into it, be pushed off by its collider, re-path, and orbit it.
+        // The resupply tick only fires once a second for soldiers the trigger
+        // volume currently contains, so a soldier that never stops moving can
+        // circle a working droid indefinitely and recover nothing.
+        //
+        // Dwell radius is the station's own, less a margin so a soldier
+        // standing at the very edge is not one physics nudge from leaving the
+        // volume it is waiting on.
+        float dwell = RetreatDwellRadius;
+        if (Vector3.SqrMagnitude(RetreatGoal - PawnPosition()) <= dwell * dwell)
+        {
+            MoveDirection = Vector2.zero;
+            return true;
+        }
+
         MoveTowards(RetreatGoal);
         return true;
     }
+
+    /// <summary>
+    /// How close counts as "at the droid", set when the goal is chosen.
+    /// </summary>
+    /// <remarks>
+    /// Taken from the station's authored Radius rather than assumed, because
+    /// stations differ and standing outside the trigger volume waiting to be
+    /// healed is indistinguishable, from the soldier's side, from the droid
+    /// being broken. Falls back to a modest default for a command-post retreat,
+    /// which has no radius of its own.
+    /// </remarks>
+    float RetreatDwellRadius = 3f;
 
     // Resupply droids don't move and don't get built mid-round, so find them
     // once per map instead of per retreat. Scanning every scene instance (which
@@ -1109,6 +1140,11 @@ public class PhxBF3AIController : PhxAIController
 
     Vector3 FindRecoveryPoint(bool wantHealth, bool wantAmmo)
     {
+        // Reset first: a soldier that fell back to a wide droid last time and
+        // to a command post this time would otherwise keep the droid's dwell
+        // radius and stop well short of the post.
+        RetreatDwellRadius = 3f;
+
         Vector3 self = PawnPosition();
         Vector3 best = Vector3.positiveInfinity;
         float bestDist = float.MaxValue;
@@ -1135,6 +1171,11 @@ public class PhxBF3AIController : PhxAIController
             {
                 bestDist = d;
                 best = station.transform.position;
+
+                // Stand well inside the trigger volume, not on its lip. The
+                // margin is what stops a soldier that stopped exactly at the
+                // boundary being jostled out of the field it is waiting on.
+                RetreatDwellRadius = Mathf.Max(1.5f, station.Radius.Get() * 0.6f);
             }
         }
 
