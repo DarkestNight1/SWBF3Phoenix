@@ -275,6 +275,81 @@ public class PhxSceneAnimator
                 }
             }
         }
+
+        ApplyAnimationHierarchies(worlds);
+    }
+
+    /// <summary>
+    /// Make the objects an animated root carries move with it.
+    /// </summary>
+    /// <remarks>
+    /// A world can declare that one instance is the root of others - when the
+    /// root animates, the children go with it. LibSWBF2 parses that and exposes
+    /// it as GetAnimationHierarchies, and nothing in the project read it, so the
+    /// children stayed where they were placed while the root moved out from
+    /// under them.
+    ///
+    /// It is rare: exactly one across the nine stock maps checked - the Death
+    /// Star's bridge platform brd_plat carrying brd_hang and brd_fcr. Worth
+    /// doing anyway, because that is a large visible piece of machinery, and
+    /// because the alternative is leaving a documented piece of the format
+    /// unread.
+    ///
+    /// Reparenting keeps world position, so nothing moves on load; the child
+    /// simply inherits the root's motion from then on.
+    /// </remarks>
+    void ApplyAnimationHierarchies(World[] worlds)
+    {
+        int applied = 0;
+
+        foreach (World world in worlds)
+        {
+            WorldAnimationHierarchy[] hierarchies;
+            try { hierarchies = world.GetAnimationHierarchies(); }
+            catch { continue; }
+            if (hierarchies == null) continue;
+
+            foreach (WorldAnimationHierarchy hierarchy in hierarchies)
+            {
+                if (hierarchy == null || string.IsNullOrEmpty(hierarchy.RootName)) continue;
+
+                GameObject root = ResolveInstance(hierarchy.RootName);
+                if (root == null)
+                {
+                    // Same rule as the animation groups: a root belonging to a
+                    // layer this game mode did not mount is absent by design.
+                    continue;
+                }
+
+                // The root may already sit under an _animroot created above.
+                // Children attach to the root itself, which is what actually
+                // moves.
+                if (hierarchy.ChildrenNames == null) continue;
+
+                foreach (string childName in hierarchy.ChildrenNames)
+                {
+                    if (string.IsNullOrEmpty(childName)) continue;
+
+                    GameObject child = ResolveInstance(childName);
+                    if (child == null || child == root) continue;
+
+                    // Static batching bakes a renderer's transform into the
+                    // combined mesh, so anything that is about to be carried
+                    // has to be excluded from it - exactly as the animated
+                    // instances themselves are.
+                    child.isStatic = false;
+
+                    child.transform.SetParent(root.transform, true);
+                    ++applied;
+                }
+            }
+        }
+
+        if (applied > 0)
+        {
+            Debug.Log($"[PhxAnimation] {applied} instance(s) attached to an animated parent " +
+                      "via the world's animation hierarchy.");
+        }
     }
 
     // GameObject.Find walks every root object in the scene, matches on name

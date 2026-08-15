@@ -82,6 +82,29 @@ namespace SkelProbe
                 }
             }
 
+            // Hierarchies say which objects follow an animated root. Nothing in
+            // the project reads them, so if maps use them their children never
+            // move - the same shape of bug as collision meshes ignoring their
+            // authored node.
+            int totalHierarchies = 0;
+            foreach (World w in worlds)
+            {
+                WorldAnimationHierarchy[] hierarchies;
+                try { hierarchies = w.GetAnimationHierarchies(); } catch { continue; }
+                if (hierarchies == null) continue;
+
+                foreach (WorldAnimationHierarchy hier in hierarchies)
+                {
+                    if (hier == null) continue;
+                    ++totalHierarchies;
+                    int kids = hier.ChildrenNames == null ? 0 : hier.ChildrenNames.Length;
+                    Console.WriteLine($"    HIERARCHY in '{w.Name}': root '{hier.RootName}' " +
+                                      $"-> {kids} child(ren): " +
+                                      (kids > 0 ? string.Join(", ", hier.ChildrenNames) : ""));
+                }
+            }
+            Console.WriteLine($"--- {totalHierarchies} animation hierarchy/ies total");
+
             foreach (World w in worlds)
             {
                 WorldAnimationGroup[] groups;
