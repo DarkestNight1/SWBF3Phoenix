@@ -50,6 +50,12 @@ public sealed class BFMapFillLights : MonoBehaviour
         new FillUnder
         {
             ScriptPrefix = "kas",
+            // Verified against the shipped data, not guessed: enumerating
+            // kas2.lvl gives the class as "kas2_bldg_platform_roof.msh" - WITH
+            // the .msh suffix - at 4 instances. Matching is StartsWith, so this
+            // prefix covers the suffixed name; an exact-match table keyed on the
+            // unsuffixed string silently matches nothing, which is how this went
+            // unnoticed the first time.
             InstancePrefix = "kas2_bldg_platform_roof",
             // Warm, because the light this stands in for would have bounced off
             // wooden decking. A neutral fill under a timber roof reads as
