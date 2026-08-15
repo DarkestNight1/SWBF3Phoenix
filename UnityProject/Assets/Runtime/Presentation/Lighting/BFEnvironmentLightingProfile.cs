@@ -110,6 +110,35 @@ public sealed class BFEnvironmentLightingProfile
     /// <summary>Mie scattering, which is haze and light shafts around the sun.</summary>
     public float AerosolDensity = 0.012f;
 
+    // -------------------------------------------------------- clouds
+
+    /// <summary>
+    /// Cloud cover, 0 for a clear sky.
+    /// </summary>
+    /// <remarks>
+    /// Only consulted on <see cref="BFSkyKind.PhysicallyBased"/> maps. An
+    /// interior has no sky to put clouds in, a space map has no atmosphere to
+    /// hold them, and on an authored dome the artist already painted whatever
+    /// weather the map is supposed to have - drawing volumetric clouds over
+    /// that paints a second, disagreeing sky on top of the first.
+    /// </remarks>
+    [Range(0f, 1f)]
+    public float CloudCoverage;
+
+    /// <summary>Base of the cloud layer in metres above the camera.</summary>
+    public float CloudAltitude = 2000f;
+
+    /// <summary>Thickness of the cloud layer in metres.</summary>
+    public float CloudThickness = 3000f;
+
+    /// <summary>How much of the sun the clouds are allowed to take away.</summary>
+    /// <remarks>
+    /// Clouds shadow the world beneath them, which is correct and also the
+    /// fastest way to make a map unplayably dark. Capped rather than trusted.
+    /// </remarks>
+    [Range(0f, 1f)]
+    public float CloudShadowOpacity = 0.35f;
+
     // ------------------------------------------------------------ fog / vol
 
     /// <summary>Enable volumetric (light-scattering) fog rather than flat fog.</summary>

@@ -71,6 +71,7 @@ public static class BFPresentation
         Host.AddComponent<BFSnowAccumulation>();
         Host.AddComponent<BFPresentationMapHook>();
         Host.AddComponent<BFMapCollisionOverrides>();
+        Host.AddComponent<BFMapFillLights>();
         Host.AddComponent<BFDynamicResolution>();
 
         // Last on purpose: the report measures what everything above produced,

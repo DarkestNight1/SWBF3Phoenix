@@ -114,6 +114,21 @@ public static class BFPresentationQuality
     public static bool ScreenSpaceReflections => tier >= BFQualityTier.High;
 
     /// <summary>
+    /// Volumetric clouds. High and above.
+    /// </summary>
+    /// <remarks>
+    /// A raymarched cloud layer is the single most expensive thing the sky can
+    /// do, and it buys nothing on the maps that are not looking at a sky - so
+    /// it is gated twice: here on the tier, and per-map on whether the map has
+    /// a simulated atmosphere at all. Ultra earns the higher-quality preset
+    /// rather than a different feature.
+    /// </remarks>
+    public static bool VolumetricClouds => tier >= BFQualityTier.High;
+
+    /// <summary>Cloud preset quality, only meaningful when the above is true.</summary>
+    public static bool HighQualityClouds => tier >= BFQualityTier.Ultra;
+
+    /// <summary>
     /// Screen-space global illumination.
     /// </summary>
     /// <remarks>

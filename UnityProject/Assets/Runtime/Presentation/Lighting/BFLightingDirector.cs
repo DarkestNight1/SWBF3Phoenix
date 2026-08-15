@@ -52,6 +52,7 @@ public class BFLightingDirector : MonoBehaviour
     IndirectLightingController IndirectLighting;
     PhysicallyBasedSky PhysicalSky;
     GradientSky GradientSky;
+    VolumetricClouds Clouds;
     VisualEnvironment VisualEnvironment;
     GlobalIllumination GlobalIllumination;
     HDShadowSettings ShadowSettings;
@@ -98,6 +99,7 @@ public class BFLightingDirector : MonoBehaviour
         VisualEnvironment = Profile.Add<VisualEnvironment>(true);
         PhysicalSky = Profile.Add<PhysicallyBasedSky>(true);
         GradientSky = Profile.Add<GradientSky>(true);
+        Clouds = Profile.Add<VolumetricClouds>(true);
         Fog = Profile.Add<Fog>(true);
         Exposure = Profile.Add<Exposure>(true);
         AmbientOcclusion = Profile.Add<ScreenSpaceAmbientOcclusion>(true);
@@ -231,7 +233,76 @@ public class BFLightingDirector : MonoBehaviour
                 break;
         }
 
+        ApplyClouds(p, kind);
+
         Debug.Log($"[BFLightingDirector] Sky: {kind} - {BFSkydomeReconciler.LastDecision}");
+    }
+
+    /// <summary>
+    /// A cloud layer, on the maps that have a sky to put one in.
+    /// </summary>
+    /// <remarks>
+    /// Gated three ways, because each rules out a different kind of wrong:
+    ///
+    ///   Tier, so a machine that cannot afford a raymarched sky is not billed
+    ///   for one. Clouds are the most expensive thing the sky can do.
+    ///
+    ///   Sky kind, because only PhysicallyBased is a simulated atmosphere. An
+    ///   interior has no sky, space has no air, and on an authored dome the
+    ///   artist already painted the weather - clouds there would be a second
+    ///   sky disagreeing with the first.
+    ///
+    ///   Per-map coverage, which defaults to 0. Adding this feature therefore
+    ///   changes nothing until a map profile opts in, rather than quietly
+    ///   putting weather on forty maps that never asked for it.
+    /// </remarks>
+    void ApplyClouds(BFEnvironmentLightingProfile p,
+                     BFEnvironmentLightingProfile.BFSkyKind kind)
+    {
+        bool wanted = BFPresentationQuality.VolumetricClouds
+                   && kind == BFEnvironmentLightingProfile.BFSkyKind.PhysicallyBased
+                   && p.CloudCoverage > 0f;
+
+        Clouds.enable.Override(wanted);
+        if (!wanted) return;
+
+        // Preset FIRST: its setter runs ApplyCurrentCloudPreset, which writes
+        // densityMultiplier and the shape parameters, so anything assigned
+        // before this line is silently overwritten by the preset's own values.
+        //
+        // Coverage picks the preset because how cloudy a sky looks is a
+        // property of the planet. The tier picks Performance vs Quality below,
+        // which is the same sky rendered for less - hardware should not change
+        // what a map looks like, only what it costs.
+        Clouds.cloudPreset =
+            p.CloudCoverage >= 0.75f ? VolumetricClouds.CloudPresets.Overcast :
+            p.CloudCoverage >= 0.40f ? VolumetricClouds.CloudPresets.Cloudy :
+                                       VolumetricClouds.CloudPresets.Sparse;
+
+        Clouds.cloudSimpleMode.Override(BFPresentationQuality.HighQualityClouds
+            ? VolumetricClouds.CloudSimpleMode.Quality
+            : VolumetricClouds.CloudSimpleMode.Performance);
+
+        Clouds.densityMultiplier.Override(Mathf.Clamp01(p.CloudCoverage));
+        Clouds.bottomAltitude.Override(Mathf.Max(0.01f, p.CloudAltitude));
+        Clouds.altitudeRange.Override(Mathf.Max(100f, p.CloudThickness));
+
+        // Clouds shadow the ground beneath them. Correct, and also the quickest
+        // route to a map nobody can see - so the map's cap is honoured rather
+        // than HDRP's default of 1.0, and the extra shadow pass is only taken
+        // at the tier that can afford it alongside the clouds themselves.
+        bool shadows = BFPresentationQuality.HighQualityClouds && p.CloudShadowOpacity > 0f;
+        Clouds.shadows.Override(shadows);
+        if (shadows)
+        {
+            Clouds.shadowOpacity.Override(Mathf.Clamp01(p.CloudShadowOpacity));
+        }
+
+        Debug.Log($"[BFLightingDirector] Clouds: {Clouds.cloudPreset}, " +
+                  $"coverage {p.CloudCoverage:F2}, base {p.CloudAltitude:F0}m, " +
+                  $"range {p.CloudThickness:F0}m, " +
+                  $"{(BFPresentationQuality.HighQualityClouds ? "quality" : "performance")}, " +
+                  $"shadows {(shadows ? $"{p.CloudShadowOpacity:F2}" : "off")}.");
     }
 
     /// <summary>
