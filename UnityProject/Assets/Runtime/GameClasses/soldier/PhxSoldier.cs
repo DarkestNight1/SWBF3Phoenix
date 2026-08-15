@@ -1462,7 +1462,12 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         {
             foreach (string clip in clips)
             {
-                PhxPoser candidate = new PhxPoser(bank, clip, transform, isStatic);
+                // Quiet: this is a search, and a miss is the search working.
+                // Left noisy, twenty combinations per mount each logged an
+                // ERROR, so every turret a soldier sat on buried the console in
+                // failures that were all expected - which is worse than useless
+                // when the console is the only way to see what else is wrong.
+                PhxPoser candidate = new PhxPoser(bank, clip, transform, isStatic, quiet: true);
                 if (candidate.HasPose) return candidate;
             }
         }

@@ -103,6 +103,46 @@ public class PhxCamera : MonoBehaviour
         TrackableInstance = Track;
     }
 
+    /// <summary>
+    /// Whether the thing being tracked still exists.
+    /// </summary>
+    /// <remarks>
+    /// This used to be <c>TrackableInstance as MonoBehaviour</c>, treated as
+    /// null-means-gone. The intent was right - a vehicle exploding under the
+    /// player is ordinary, and a plain <c>!= null</c> on an interface does not
+    /// invoke Unity's overloaded null check for a destroyed object.
+    ///
+    /// But <see cref="PhxSeat"/> is a plain C# class, not a MonoBehaviour. The
+    /// cast therefore returned null for every perfectly live seat, so the very
+    /// next LateUpdate after mounting anything called Free() and dropped out of
+    /// Track mode. That is the whole "camera is broken in vehicles and turrets"
+    /// report: the camera never attached at all. It worked for
+    /// <see cref="PhxShipTurretStation"/> only because that one IS a
+    /// MonoBehaviour, which is why the fault looked selective.
+    ///
+    /// So the Unity null check is applied only to things Unity actually owns,
+    /// and a seat is checked through the transform it reads its camera from -
+    /// which is what goes away when its vehicle is destroyed.
+    /// </remarks>
+    bool TrackableAlive()
+    {
+        if (TrackableInstance == null) return false;
+
+        // A destroyed UnityEngine.Object compares equal to null through its own
+        // operator; the pattern match is what makes that operator apply.
+        if (TrackableInstance is MonoBehaviour behaviour)
+        {
+            return behaviour != null;
+        }
+
+        if (TrackableInstance is PhxSeat seat)
+        {
+            return seat.Owner != null && seat.Owner.GetRootTransform() != null;
+        }
+
+        return true;
+    }
+
 
     public void Follow(IPhxControlableInstance follow)
     {
@@ -363,8 +403,7 @@ public class PhxCamera : MonoBehaviour
             // is an interface, so a plain != null would not have caught a
             // destroyed Unity object either; the cast is what makes Unity's own
             // null check apply.
-            var tracked = TrackableInstance as MonoBehaviour;
-            if (TrackableInstance == null || tracked == null)
+            if (!TrackableAlive())
             {
                 // Nothing left to watch. Free leaves the view where it is
                 // rather than snapping to the origin.

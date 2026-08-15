@@ -110,7 +110,16 @@ public class PhxPoser
 
     bool ReportedNoPose;
 
-    public PhxPoser(string animBankName, string animName, Transform objRoot, bool IsStatic = false)
+    /// <param name="quiet">
+    /// Suppress the "pose not found" error. Set when the caller is SEARCHING
+    /// for a pose rather than asserting one exists - PhxSoldier.CreatePilotPoser
+    /// tries up to twenty bank/clip combinations to find the one the data
+    /// actually uses, and a miss there is the search working, not a fault. Left
+    /// noisy by default so a caller that genuinely expected a pose still says
+    /// so.
+    /// </param>
+    public PhxPoser(string animBankName, string animName, Transform objRoot, bool IsStatic = false,
+                    bool quiet = false)
     {
         AnimationBank NinePose = AnimationLoader.Instance.GetRawAnimationBank(animBankName);
         NumFrames = IsStatic ? 1 : 9;
@@ -158,7 +167,10 @@ public class PhxPoser
         }
         else
         {
-            Debug.LogErrorFormat("Pose not found... ({0}, {1})", animBankName, animName);
+            if (!quiet)
+            {
+                Debug.LogErrorFormat("Pose not found... ({0}, {1})", animBankName, animName);
+            }
         }
     }
 
