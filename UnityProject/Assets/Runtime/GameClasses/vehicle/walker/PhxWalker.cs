@@ -29,7 +29,16 @@ public class PhxWalker : PhxVehicle
     {
         public PhxProp<float> MaxSpeed = new PhxProp<float>(4f);
         public PhxProp<float> MaxTurnSpeed = new PhxProp<float>(0.8f);
-        public PhxProp<float> Acceleration = new PhxProp<float>(2f);
+        /// <summary>
+        /// Yes, "acceleraton". The stock odfs misspell it and every walker and
+        /// flyer in the game declares it that way, so binding the correct
+        /// spelling bound nothing at all - PhxProp matches on field name, and a
+        /// miss is a silent default. Every walker was accelerating at the
+        /// hardcoded 2f below regardless of what its own data asked for.
+        /// (Hovers are the exception and do spell it correctly, which is why
+        /// PhxHover keeps Acceleration.)
+        /// </summary>
+        public PhxProp<float> Acceleraton = new PhxProp<float>(2f);
 
         // Height the body rides above the ground (legs' length)
         public PhxProp<float> WalkerHeight = new PhxProp<float>(4f);
@@ -182,7 +191,7 @@ public class PhxWalker : PhxVehicle
         float mobility = MobilityFactor;
 
         float targetSpeed = drive * W.MaxSpeed * mobility;
-        CurrentSpeed = Mathf.MoveTowards(CurrentSpeed, targetSpeed, W.Acceleration * mobility * deltaTime);
+        CurrentSpeed = Mathf.MoveTowards(CurrentSpeed, targetSpeed, W.Acceleraton * mobility * deltaTime);
 
         // tank steering
         if (Mathf.Abs(steer) > 0.001f)

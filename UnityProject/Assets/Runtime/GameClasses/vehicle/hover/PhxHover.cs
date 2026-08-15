@@ -604,6 +604,14 @@ public class PhxHover : PhxVehicle
         float strafe = DriverController.MoveDirection.x;
         float drive  = DriverController.MoveDirection.y;
 
+        // Boost. BoostSpeed and BoostAcceleration were parsed here and read by
+        // nothing, so a speeder was permanently capped at its cruise speed and
+        // the boost key did not exist. See PhxVehicle.TickBoost for the bar.
+        bool boosting = TickBoost(deltaTime, WantsBoost(DriverController));
+
+        float accel = boosting ? H.BoostAcceleration : H.Acceleration;
+        float topSpeed = boosting ? H.BoostSpeed : H.ForwardSpeed;
+
         float forwardForce, strafeForce;
 
         // If moving in opposite direction of current vel...
@@ -613,7 +621,7 @@ public class PhxHover : PhxVehicle
         }
         else
         {
-            forwardForce = drive * H.Acceleration;
+            forwardForce = drive * accel;
         }
 
         // ''
@@ -623,7 +631,7 @@ public class PhxHover : PhxVehicle
         }
         else 
         {
-            strafeForce = strafe * H.Acceleration;
+            strafeForce = strafe * accel;
         }
 
         // engine accel, don't add force here because we want to limit local velocity manually
@@ -631,7 +639,7 @@ public class PhxHover : PhxVehicle
 
         // clamp speeds by ODF vals, for now doesn't damp
         LocalVel.x = Mathf.Clamp(LocalVel.x, -H.StrafeSpeed, H.StrafeSpeed);
-        LocalVel.z = Mathf.Clamp(LocalVel.z, -H.ReverseSpeed, H.ForwardSpeed);
+        LocalVel.z = Mathf.Clamp(LocalVel.z, -H.ReverseSpeed, topSpeed);
 
         Body.velocity = transform.localToWorldMatrix * LocalVel;
     }

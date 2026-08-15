@@ -71,6 +71,34 @@ public class PhxVehicleProperties : PhxClass
     public PhxProp<string> HealthType = new PhxProp<string>("vehicle");
     public PhxProp<float>  MaxHealth = new PhxProp<float>(100.0f);
 
+    // --- Boost -------------------------------------------------------------
+    //
+    // Boost was entirely absent: BoostSpeed and BoostAcceleration were parsed
+    // on both PhxHover and PhxFlyer and consumed by neither, so every speeder
+    // and starfighter in the game was capped at its cruise speed. The energy
+    // side was not parsed at all.
+    //
+    // Measured from the stock fighters, which specify the whole mechanic:
+    //
+    //   rep_fly_anakinstarfighter_sc  maxspeed 105  boostspeed 170
+    //                                 boostacceleration 80
+    //                                 energybar 100  energyboostdrain 20
+    //                                 energyautorestore 10
+    //
+    // Which reads: five seconds of boost from full, ten to refill.
+
+    /// <summary>Boost energy capacity. 0 means this vehicle cannot boost.</summary>
+    public PhxProp<float> EnergyBar = new PhxProp<float>(0f);
+
+    /// <summary>Energy per second consumed while boosting.</summary>
+    public PhxProp<float> EnergyBoostDrain = new PhxProp<float>(20f);
+
+    /// <summary>
+    /// Energy per second regained. Negative on some ordnance classes, which
+    /// means the bar only ever drains - a guided rocket gets one burn.
+    /// </summary>
+    public PhxProp<float> EnergyAutoRestore = new PhxProp<float>(10f);
+
     // The odf's own death explosion. Vehicle deaths previously produced no
     // blast at all - a tank could be destroyed while a soldier stood against
     // it and the soldier was unharmed.
@@ -201,6 +229,7 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         // Health has to start full here: CurHealth's declared default is 100,
         // which is only right for a vehicle whose MaxHealth happens to be 100.
         CurHealth.Set(C.MaxHealth.Get());
+        CurEnergy = C.EnergyBar.Get();
 
         // Per-part damage, built from the model's own MSH segment tags. A
         // vehicle whose model carries no recognisable parts gets a single hull
@@ -212,6 +241,66 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
 
     public virtual void TickPhysics(float deltaTime){}
+    // --- Boost -------------------------------------------------------------
+
+    /// <summary>Boost energy remaining, 0..EnergyBar.</summary>
+    public float CurEnergy { get; private set; }
+
+    /// <summary>Whether boost is active this tick. Read by the movement code.</summary>
+    public bool IsBoosting { get; private set; }
+
+    /// <summary>Whether this vehicle has a boost at all.</summary>
+    public bool CanBoost => C != null && C.EnergyBar > 0f;
+
+    /// <summary>Boost energy as a fraction, for the HUD.</summary>
+    public float GetEnergyFraction()
+    {
+        if (C == null || C.EnergyBar <= 0f) return 0f;
+        return Mathf.Clamp01(CurEnergy / C.EnergyBar);
+    }
+
+    /// <summary>
+    /// Run the boost bar for a tick and decide whether boost is on.
+    /// </summary>
+    /// <remarks>
+    /// Called by each vehicle's own movement code rather than from Tick, so
+    /// that the speed limits it changes are read in the same tick they are
+    /// decided rather than one behind.
+    ///
+    /// The bar has to be non-empty to START a boost but is allowed to run to
+    /// zero during one, which is what stops a tapped boost key from stuttering
+    /// on and off at the bottom of the bar.
+    /// </remarks>
+    protected bool TickBoost(float deltaTime, bool wantBoost)
+    {
+        if (!CanBoost)
+        {
+            IsBoosting = false;
+            return false;
+        }
+
+        bool canStart = CurEnergy > 0f;
+        IsBoosting = wantBoost && canStart;
+
+        if (IsBoosting)
+        {
+            CurEnergy = Mathf.Max(CurEnergy - C.EnergyBoostDrain * deltaTime, 0f);
+        }
+        else
+        {
+            // A negative AutoRestore is the odf saying "never refills" - the
+            // guided-rocket classes use it for a one-shot burn - so clamping at
+            // zero rather than letting it go negative keeps the bar meaningful.
+            CurEnergy = Mathf.Clamp(CurEnergy + C.EnergyAutoRestore * deltaTime,
+                                    0f, C.EnergyBar);
+        }
+
+        return IsBoosting;
+    }
+
+    /// <summary>Whoever is driving wants to boost. Sprint, same as on foot.</summary>
+    protected bool WantsBoost(PhxPawnController driver) => driver != null && driver.Sprint;
+
     public virtual void Tick(float deltaTime)
     {
         // Update damage effects

@@ -20,7 +20,12 @@ public class PhxFlyer : PhxVehicle
         public PhxProp<float> MaxSpeed = new PhxProp<float>(5.0f);
 
         public PhxProp<float> BoostSpeed = new PhxProp<float>(5.0f);
-        public PhxProp<float> BoostAcceleraton = new PhxProp<float>(5.0f);
+        /// <summary>
+        /// Correctly spelled, unlike Acceleraton above: the stock flyers misspell
+        /// the plain one and spell the boost one properly. Binding this as
+        /// "BoostAcceleraton" matched nothing.
+        /// </summary>
+        public PhxProp<float> BoostAcceleration = new PhxProp<float>(5.0f);
 
         public PhxProp<float> GravityScale = new PhxProp<float>(.5f);
 
@@ -539,30 +544,42 @@ public class PhxFlyer : PhxVehicle
                 Fwd = DriverController.MoveDirection.y;
             }
 
+            // Boost. BoostSpeed was parsed and read by nothing, so a
+            // starfighter was permanently capped at cruise and the boost key
+            // did not exist. BoostAcceleration was misspelled in the binding on
+            // top of that, so even reading it would have got the default.
+            //
+            // Boost only applies with the throttle forward: it is an
+            // afterburner, not a way to decelerate faster.
+            bool boosting = TickBoost(deltaTime, WantsBoost(DriverController) && Fwd > 0f);
+
+            float accel = boosting ? F.BoostAcceleration : F.Acceleraton;
+            float topSpeed = boosting ? F.BoostSpeed : F.MaxSpeed;
+
             float Speed = LocalVel.z;
             if (Fwd < 0f)
             {
                 if (Speed > F.MinSpeed)
                 {
-                    Speed -= F.Acceleraton * deltaTime;
+                    Speed -= accel * deltaTime;
                 }
             }
             else if (Fwd == 0f)
             {
                 if (Speed > F.MidSpeed)
                 {
-                    Speed -= F.Acceleraton * deltaTime;
+                    Speed -= accel * deltaTime;
                 }
                 else 
                 {
-                    Speed += F.Acceleraton * deltaTime;
+                    Speed += accel * deltaTime;
                 }
             }
             else 
             {
-                if (Speed < F.MaxSpeed)
+                if (Speed < topSpeed)
                 {
-                    Speed += F.Acceleraton * deltaTime;
+                    Speed += accel * deltaTime;
                 }
             }
 

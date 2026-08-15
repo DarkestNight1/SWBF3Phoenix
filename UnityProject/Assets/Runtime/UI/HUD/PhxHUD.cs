@@ -533,8 +533,17 @@ public class PhxHUD : PhxMenuInterface
         // replaces this corner of the HUD, so hide it rather than show a stale
         // reading from the body we left behind.
         PhxSoldier soldier = Match.Player.Pawn?.GetInstance() as PhxSoldier;
-        StatusPanel.gameObject.SetActive(soldier != null);
-        if (soldier == null) return;
+
+        // A vehicle shows health and BOOST in the same corner. It used to hide
+        // the panel outright when not on foot, which was right while vehicles
+        // had no boost bar to show and is not any more.
+        if (soldier == null)
+        {
+            UpdateVehicleStatus(Match.Player.Pawn?.GetInstance() as PhxVehicle);
+            return;
+        }
+
+        StatusPanel.gameObject.SetActive(true);
 
         float health = soldier.HealthFraction;
         SetFill(HealthFill, health);
@@ -553,6 +562,44 @@ public class PhxHUD : PhxMenuInterface
 
         UpdateAmmoText(soldier);
         UpdateItemsText(soldier);
+    }
+
+    /// <summary>
+    /// Health and boost for whatever the player is driving.
+    /// </summary>
+    /// <remarks>
+    /// The stamina bar is reused for boost energy rather than adding a second
+    /// one: it occupies the same place, means the same thing (a spendable
+    /// resource that refills), and a vehicle has no stamina of its own to
+    /// compete with it.
+    /// </remarks>
+    void UpdateVehicleStatus(PhxVehicle vehicle)
+    {
+        if (vehicle == null)
+        {
+            StatusPanel.gameObject.SetActive(false);
+            return;
+        }
+
+        StatusPanel.gameObject.SetActive(true);
+
+        float maxHealth = vehicle.GetMaxHealth();
+        float health = maxHealth > 0f ? Mathf.Clamp01(vehicle.GetHealth() / maxHealth) : 0f;
+        SetFill(HealthFill, health);
+        HealthFill.GetComponent<Image>().color = health > 0.5f
+            ? Color.Lerp(HealthMid, HealthHigh, (health - 0.5f) * 2f)
+            : Color.Lerp(HealthLow, HealthMid, health * 2f);
+
+        // Only vehicles that actually have a boost get the bar.
+        bool hasBoost = vehicle.CanBoost;
+        StaminaBackground.gameObject.SetActive(hasBoost);
+        if (hasBoost)
+        {
+            SetFill(StaminaFill, vehicle.GetEnergyFraction());
+        }
+
+        ClipsText.text = "";
+        AmmoPrim.text = "-";
     }
 
     void UpdateAmmoText(PhxSoldier soldier)
