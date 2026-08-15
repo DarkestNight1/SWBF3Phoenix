@@ -70,6 +70,14 @@ public static class PhxExplosionManager
         // Play effect
         Scene.EffectsManager.PlayEffectOnce(Exp.Effect.Get(), Position, Rotation);
 
+        // AI hear it. ExplosionLoudness had been declared for this and never
+        // reported by anything, so an explosion beside a squad was silent to
+        // them - they reacted only to being hit by it. Team comes from the
+        // originator so the noise is attributed; an unowned blast reports team
+        // -1, which no listener matches as friendly.
+        PhxAIPerception.Report(Position, Originator != null ? Originator.Team : -1,
+                               PhxAIPerception.ExplosionLoudness);
+
         // And what the ground it went off on does about it: crater, displaced
         // material, scorch, flash. Driven off the surface under the blast, so
         // snow, sand, metal and water each answer in their own terms rather

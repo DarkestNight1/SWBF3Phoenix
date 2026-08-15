@@ -38,11 +38,11 @@ public static class PhxAIPerception
     /// <summary>How long a noise stays audible to a listener that hasn't sampled it yet.</summary>
     public const float Lifetime = 3f;
 
-    /// <summary>Roughly how far a rifle shot carries.</summary>
-    public const float GunshotLoudness = 60f;
+    /// <summary>Roughly how far a rifle shot carries. Config-driven.</summary>
+    public static float GunshotLoudness => PhxBF3.Config.GunshotHearingRange;
 
     /// <summary>Explosions carry considerably further.</summary>
-    public const float ExplosionLoudness = 120f;
+    public static float ExplosionLoudness => PhxBF3.Config.ExplosionHearingRange;
 
     public static void Report(Vector3 position, int team, float loudness)
     {

@@ -175,7 +175,7 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
             else
             {
                 IPhxDamageableInstance damageable = hit.collider.GetComponentInParent<IPhxDamageableInstance>();
-                damageable?.AddDamage(GunShotDamage);
+                damageable?.AddDamage(GunShotDamage, Operator?.GetController());
             }
         }
 
@@ -280,7 +280,7 @@ public class PhxShipTurretStation : MonoBehaviour, IPhxTrackable
         }
         else if (Target is IPhxDamageableInstance dmgable)
         {
-            dmgable.AddDamage(dmg);
+            dmgable.AddDamage(dmg, Operator?.GetController());
         }
     }
 

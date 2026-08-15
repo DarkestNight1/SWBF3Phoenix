@@ -488,9 +488,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     }
 
     // IPhxDamageableInstance - projectile impacts etc.
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
-        AddDamageFrom(damage, transform.position, false);
+        AddDamageFrom(damage, transform.position, false, instigator);
     }
 
     // Who last damaged us, for kill credit. BF2 credits the last attacker

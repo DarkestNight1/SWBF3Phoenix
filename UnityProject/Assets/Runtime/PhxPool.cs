@@ -79,7 +79,12 @@ public class PhxPool : IPhxInstantiable, IPhxTickable, IPhxTickablePhysics
 
         int idx = InactiveIndices.Dequeue();
 
-        LifeTimes[idx] = GeneralLifeTime;
+        // Honour the requested lifetime. This was assigning GeneralLifeTime
+        // and ignoring the argument, which made the parameter a lie: an
+        // ordnance that manages its own fuse had no way to ask the pool to
+        // stand back, and the pool's sweep raced the ordnance's own expiry
+        // for who got to end the object first.
+        LifeTimes[idx] = lifeTime;
         ObjectStateChanged(ref Objects[idx], true);
 
         if (Objects[idx] is IPhxTickable)
@@ -164,10 +169,39 @@ public class PhxPool : IPhxInstantiable, IPhxTickable, IPhxTickablePhysics
         }
     }
 
+    // Reused across frames so the snapshot below never allocates.
+    int[] PhysicsTickScratch = System.Array.Empty<int>();
+
+    /// <remarks>
+    /// Iterates a snapshot rather than the live set. An object is allowed to
+    /// free itself from inside its own TickPhysics - a grenade detonating on
+    /// its fuse does exactly that - and Free mutates TickablePhysicsIndices,
+    /// which throws if it happens mid-enumeration. Tick() already defers its
+    /// frees for this reason; this did not, so the crash was there the whole
+    /// time and simply needed something that expires during a physics tick to
+    /// reach it.
+    /// </remarks>
     public void TickPhysics(float deltaTime)
     {
-        foreach (int idx in TickablePhysicsIndices)
+        if (Objects == null) return;
+
+        int count = TickablePhysicsIndices.Count;
+        if (count == 0) return;
+
+        if (PhysicsTickScratch.Length < count)
         {
+            PhysicsTickScratch = new int[Mathf.NextPowerOfTwo(count)];
+        }
+        TickablePhysicsIndices.CopyTo(PhysicsTickScratch, 0);
+
+        for (int i = 0; i < count; ++i)
+        {
+            int idx = PhysicsTickScratch[i];
+
+            // Freed earlier in this same loop - one projectile's explosion can
+            // recycle another - so it is no longer live.
+            if (!ActiveIndices.Contains(idx)) continue;
+
             ((IPhxTickablePhysics)Objects[idx]).TickPhysics(deltaTime);
         }
     }

@@ -13,7 +13,21 @@ public class PhxOrdnancePool : PhxComponentPool<PhxOrdnance>
         CallObjectInit = false;
 
         OrdnanceClass = ordClass;
+
+        // A bolt has no tick of its own, so the pool's sweep is its only
+        // expiry. A missile counts its own TimeAlive and acts on it - and for
+        // a grenade that action is the explosion - so if the pool reclaimed it
+        // on the same clock the two would race, decided by whether Update or
+        // FixedUpdate got there first that frame. Give the self-expiring kinds
+        // a margin so the ordnance always wins and the pool is only a backstop
+        // for the case where its tick stopped running.
+        PoolLifeSpan = prefab is IPhxTickablePhysics
+            ? ordClass.LifeSpan + 0.5f
+            : ordClass.LifeSpan.Get();
     }
+
+    /// <summary>How long the pool waits before reclaiming one of these.</summary>
+    public float PoolLifeSpan { get; }
 
     public override void Init()
     {
@@ -132,7 +146,7 @@ public class PhxProjectiles : IPhxTickable, IPhxTickablePhysics
             PoolDB[OrdnanceClass] = Pool;
         }
         
-        if (Pool.Alloc(out PhxOrdnance Ordnance, OrdnanceClass.LifeSpan))
+        if (Pool.Alloc(out PhxOrdnance Ordnance, Pool.PoolLifeSpan))
         {
             Ordnance.Setup(OriginatorWeapon, Pos, Rot); 
         }           

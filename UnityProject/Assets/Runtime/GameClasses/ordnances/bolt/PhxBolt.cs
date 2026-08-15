@@ -50,6 +50,20 @@ public class PhxBolt : PhxOrdnance
     {
         gameObject.SetActive(true);
 
+        // Remember the weapon that fired this, which is where the kill credit
+        // comes from at impact.
+        //
+        // This was never assigned. The comment further down claimed it was
+        // "set in Setup()" and it was not - the only write in the file is in
+        // TryDeflect, when a saber takes the bolt over. So the instigator
+        // lookup at impact was always null, and fixing the weapon end alone
+        // would have changed nothing.
+        //
+        // It also closes a pooling leak: with no assignment here, a bolt that
+        // had once been deflected kept the saber as its owner into every later
+        // reuse, since Destroy() clears only the ignored colliders.
+        OwnerWeapon = Originator;
+
         //Originator.GetFirePoint(out Vector3 Pos, out Quaternion Rot);
         
         Body.transform.position = Pos;
@@ -170,9 +184,8 @@ public class PhxBolt : PhxOrdnance
         ContactPoint contact = coll.GetContact(0);
 
         // The firing controller, so the kill is credited to whoever pulled the
-        // trigger. OwnerWeapon is set in Setup() from the weapon that spawned
-        // this bolt; a weapon with no controller (a map turret firing on its
-        // own) leaves this null, which ReportKill treats as unattributed.
+        // trigger. A weapon with no controller - a map turret firing on its
+        // own - leaves this null, which ReportKill treats as unattributed.
         PhxPawnController instigator = OwnerWeapon?.GetOwnerController();
 
         // A saber wielder gets first refusal on the bolt. Asked here rather
@@ -218,11 +231,6 @@ public class PhxBolt : PhxOrdnance
                 SCENE.EffectsManager.PlayEffectOnce(BoltClass.ImpactEffectRigid.Get(), Point.point, Quaternion.identity);                
             }
 
-
-            if (BoltClass.ExplosionName.Get() != null)
-            {
-                PhxExplosionManager.AddExplosion(null, BoltClass.ExplosionName.Get() as PhxExplosionClass, Point.point, Quaternion.identity);
-            }
 
             // Surface response on top of the ordnance's own authored effects:
             // the flash that lights the wall around the hit, the scorch mark,

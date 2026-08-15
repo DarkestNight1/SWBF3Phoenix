@@ -122,7 +122,7 @@ public class PhxBeacon : PhxInstance<PhxBeacon.ClassProperties>,
                          "exists. Call in a new beacon instead.");
     }
 
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (Finished) return;
 
@@ -134,7 +134,7 @@ public class PhxBeacon : PhxInstance<PhxBeacon.ClassProperties>,
         Finished = true;
         StopEffect();
 
-        PhxExplosionManager.AddExplosion(null, C.ExplosionName.Get() as PhxExplosionClass,
+        PhxExplosionManager.AddExplosion(instigator, C.ExplosionName.Get() as PhxExplosionClass,
                                          transform.position, transform.rotation);
 
         int? objIdx = SCENE?.GetInstanceIndex(this);

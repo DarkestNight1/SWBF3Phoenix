@@ -74,7 +74,7 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance, IP
         Invulnerable = value;
     }
 
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (!IsAlive || Invulnerable || Ship == null) return;
 

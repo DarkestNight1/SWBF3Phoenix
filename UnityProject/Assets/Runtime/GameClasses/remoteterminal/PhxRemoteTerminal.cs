@@ -181,7 +181,7 @@ public class PhxRemoteTerminal : PhxInstance<PhxRemoteTerminal.ClassProperties>,
         PhxDestructionRegistry.Register(this);
     }
 
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (Destroyed) return;
 
@@ -190,7 +190,7 @@ public class PhxRemoteTerminal : PhxInstance<PhxRemoteTerminal.ClassProperties>,
 
         Destroyed = true;
         SetEffectPlaying(false);
-        PhxExplosionManager.AddExplosion(null, C.ExplosionName.Get() as PhxExplosionClass,
+        PhxExplosionManager.AddExplosion(instigator, C.ExplosionName.Get() as PhxExplosionClass,
                                          transform.position, transform.rotation);
         PhxDestructionRegistry.NotifyDestroyed(this);
 

@@ -68,11 +68,23 @@ public class PhxSticky : PhxShell
         transform.SetParent(null, true);
     }
 
+
     public override void TickPhysics(float deltaTime)
     {
-        if (Stuck) return;      // attached: no gravity, no drag, no motion
+        // Attached: no gravity, no drag, no motion - but the fuse keeps
+        // running. It was previously returning before the base tick, which
+        // meant TimeAlive stopped accumulating the instant a grenade stuck to
+        // anything, so a stuck grenade counted down forever and never went off.
+        if (Stuck)
+        {
+            TickLifespan(deltaTime);
+            return;
+        }
 
         base.TickPhysics(deltaTime);
+
+        // Freed on the tick the fuse ran out; nothing left to damp.
+        if (!gameObject.activeSelf) return;
 
         // Contact friction, applied as damping rather than through a physic
         // material so it matches the odf's single scalar and does not depend on
@@ -85,15 +97,49 @@ public class PhxSticky : PhxShell
     }
 
     /// <summary>
+    /// The fuse running out is what detonates a grenade.
+    /// </summary>
+    /// <remarks>
+    /// The base class frees the ordnance here, which is right for a rocket that
+    /// flew past its target and wrong for a thrown explosive: for a grenade the
+    /// fuse IS the weapon. This was the missing half - the bounce, the stick
+    /// and the fuse all worked, and then the grenade was quietly recycled at
+    /// the end of its life without ever exploding.
+    ///
+    /// ExplosionExpire first, since that is the odf's name for exactly this
+    /// case, falling back to the general one that stock grenades actually set.
+    /// </remarks>
+    protected override void OnLifespanExpired()
+    {
+        PhxStickyClass cls = OrdnanceClass as PhxStickyClass;
+
+        PhxClass exp = cls?.ExplosionExpire.Get();
+        if (exp == null) exp = cls?.ExplosionName.Get();
+        if (exp == null) exp = cls?.ExplosionImpact.Get();
+
+        // Owner is the controller that threw it, so the kill is credited and
+        // the team-kill check has something to test.
+        PhxExplosionManager.AddExplosion(Owner, exp as PhxExplosionClass,
+                                         transform.position, Quaternion.identity);
+
+        // Detached before recycling: Stick() parents it to whatever it landed
+        // on, and a pooled object left as a child of a destroyed vehicle is
+        // destroyed with it.
+        Stuck = false;
+        transform.SetParent(null, true);
+        Body.isKinematic = false;
+
+        base.OnLifespanExpired();
+    }
+
+    /// <summary>
     /// Bounce or stick - but do not detonate. The fuse owns that.
     /// </summary>
     /// <remarks>
-    /// PhxMissile explodes in OnCollisionEnter, which is right for a shell and
-    /// wrong for a grenade, so this deliberately does not call up to it. The
-    /// base class already counts TimeAlive against LifeSpan every tick and
-    /// detonates there, which is exactly the fuse behaviour wanted.
+    /// The base class explodes on contact, which is right for a shell and wrong
+    /// for a grenade, so this deliberately does not call up to it.
     /// </remarks>
-    new void OnCollisionEnter(Collision collision)
+    protected override void OnImpact(Collision collision)
     {
         if (Stuck || StickyClass == null) return;
 

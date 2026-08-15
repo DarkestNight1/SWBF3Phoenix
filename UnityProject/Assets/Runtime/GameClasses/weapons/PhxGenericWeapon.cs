@@ -217,9 +217,18 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
     }
 
 
+    /// <summary>Whether the weapon is part-way through a shot.</summary>
+    /// <remarks>
+    /// Was a hardcoded `true`, which made it useless to ask. The meaning here
+    /// matches PhxMeleeWeapon's "mid swing": the shot delay and the salvo
+    /// delay are both parts of a shot already under way, and a held trigger on
+    /// a free weapon is the moment before the next one.
+    /// </remarks>
     public bool IsFiring()
     {
-        return true;
+        return WeaponState == PhxWeaponState.ShotDelayed
+            || WeaponState == PhxWeaponState.SalvoDelayed
+            || (IsTriggerPressed && CanFire && WeaponState == PhxWeaponState.Free);
     }
 
 
@@ -267,6 +276,21 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
 
 	public virtual bool Fire(PhxPawnController owner, Vector3 targetPos)
     {
+        // Remember who pulled the trigger. This is the whole attribution
+        // chain, and it was missing: Fire took an owner and dropped it, so
+        // OwnerController stayed null, so every bolt reported a null
+        // instigator. Which meant no kill was ever credited for gunfire, no
+        // team kill was ever detected, no hit marker appeared, the death
+        // camera never knew who to look at, and - because the perception call
+        // below is gated on this field - the AI could not hear a shot fired.
+        // Saber kills worked the whole time, because PhxMeleeWeapon captures
+        // its owner. That is the contract; this is it applied here.
+        //
+        // The ?? matters. Tick re-enters Fire with a null owner on the
+        // salvo-delay and trigger-held paths, so a plain assignment would
+        // credit the first round of a burst and orphan the rest.
+        OwnerController = owner ?? OwnerController;
+
         if (WeaponState == PhxWeaponState.Free)
         {
             SalvoTargetPosition = targetPos;

@@ -188,12 +188,41 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         TrailEffect?.Stop();
     }
 
-    public virtual void TickPhysics(float deltaTime)
+    /// <summary>
+    /// Advance the fuse. Returns true if it expired and the ordnance is gone.
+    /// </summary>
+    /// <remarks>
+    /// Separate from TickPhysics so a subclass that has stopped simulating can
+    /// still keep its clock running - a grenade stuck to a wall must not stop
+    /// counting down just because it stopped moving.
+    /// </remarks>
+    protected bool TickLifespan(float deltaTime)
     {
         TimeAlive += deltaTime;
-        if (TimeAlive > MissileClass.LifeSpan)
+        if (TimeAlive <= MissileClass.LifeSpan) return false;
+
+        OnLifespanExpired();
+        return true;
+    }
+
+    /// <summary>
+    /// What to do when the ordnance runs out of life without hitting anything.
+    /// </summary>
+    /// <remarks>
+    /// Default is to vanish, which is right for a missile or shell that flew
+    /// past its target: the shot missed and nothing should happen where it
+    /// happens to run out. A grenade is the opposite case - the fuse IS the
+    /// weapon - so PhxSticky overrides this.
+    /// </remarks>
+    protected virtual void OnLifespanExpired()
+    {
+        ParentPool.Free(this);
+    }
+
+    public virtual void TickPhysics(float deltaTime)
+    {
+        if (TickLifespan(deltaTime))
         {
-            ParentPool.Free(this);
             return;
         }
 
@@ -216,27 +245,44 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
     }
 
 
+    /// <summary>
+    /// Unity's collision message. Deliberately the only one in the hierarchy.
+    /// </summary>
+    /// <remarks>
+    /// A subclass wanting different impact behaviour overrides OnImpact rather
+    /// than declaring its own OnCollisionEnter. Unity dispatches these by name
+    /// through the type, so a `new` method in a subclass leaves it ambiguous
+    /// which of the two the engine will call - and for a grenade the wrong
+    /// answer is "the base one", which detonates it against the first surface
+    /// it touches instead of on its fuse.
+    /// </remarks>
     void OnCollisionEnter(Collision coll)
     {
-        if (gameObject.activeSelf)
+        if (!gameObject.activeSelf) return;
+        OnImpact(coll);
+    }
+
+    protected virtual void OnImpact(Collision coll)
+    {
+        ContactPoint Contact = coll.GetContact(0);
+
+        /*
+        EXPLOSION
+
+        TODO: Figure out what explosion param to use when...
+        */
+
+        PhxClass Exp = MissileClass.ExplosionImpact.Get();
+        if (Exp == null)
         {
-            ContactPoint Contact = coll.GetContact(0);
-
-            /*
-            EXPLOSION
-
-            TODO: Figure out what explosion param to use when...
-            */
-
-            PhxClass Exp = MissileClass.ExplosionImpact.Get();
-            if (Exp == null)
-            {
-                Exp = MissileClass.ExplosionName.Get();
-            }
-            
-            PhxExplosionManager.AddExplosion(null, Exp as PhxExplosionClass, Contact.point, Quaternion.identity);
-
-            ParentPool.Free(this);
+            Exp = MissileClass.ExplosionName.Get();
         }
+
+        // Owner is the controller that fired this, set in Setup. Passing null
+        // here threw the kill credit away on every rocket and shell in the
+        // game while the field sat populated on the same object.
+        PhxExplosionManager.AddExplosion(Owner, Exp as PhxExplosionClass, Contact.point, Quaternion.identity);
+
+        ParentPool.Free(this);
     }
 }

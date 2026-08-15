@@ -176,7 +176,7 @@ public static class PhxDamage
             if (scaled <= 0f) return 0f;
         }
 
-        damageable.AddDamage(scaled);
+        damageable.AddDamage(scaled, instigator);
         return scaled;
     }
 

@@ -459,6 +459,24 @@ public class PhxBF3Config
     public float CrosshairSize = 0f;
 
     /// <summary>
+    /// How far a rifle shot carries to AI ears, in metres. 0 makes them deaf
+    /// to gunfire.
+    /// </summary>
+    /// <remarks>
+    /// Tunable because it is the single loudest knob in the AI. Gunfire
+    /// reporting had no effect for as long as weapons failed to record who
+    /// fired them, so 60 m is an untested default rather than a measured one -
+    /// the AI has only now started hearing anything at all. Too high and every
+    /// firefight drags the whole map toward it, abandoning objectives; too low
+    /// and they stand with their backs to a shooter. Turn it down first if
+    /// bots start mobbing noise.
+    /// </remarks>
+    public float GunshotHearingRange = 60f;
+
+    /// <summary>How far an explosion carries to AI ears, in metres.</summary>
+    public float ExplosionHearingRange = 120f;
+
+    /// <summary>
     /// Re-compress imported world textures to DXT on upload.
     /// </summary>
     /// <remarks>

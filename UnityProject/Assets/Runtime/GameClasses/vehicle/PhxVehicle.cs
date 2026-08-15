@@ -308,9 +308,15 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
     /// applies to CurHealth (odf MaxHealth), and destruction KILLS everyone
     /// aboard - as BF2 does - before the wreck is removed.
     /// </summary>
-    public virtual void AddDamage(float damage)
+    public virtual void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (IsDestroyed || damage <= 0f) return;
+
+        // Remember the last attacker so the destruction can be credited. BF2
+        // credits the last hit, same rule PhxSoldier already uses, and it is
+        // the only way a vehicle learns who killed it - nothing else in its
+        // lifetime is told.
+        if (instigator != null) LastAttacker = instigator;
 
         CurHealth.Set(Mathf.Max(CurHealth.Get() - damage, 0f));
         if (CurHealth.Get() <= 0f)
@@ -319,8 +325,8 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         }
     }
 
-    /// <summary>
-    /// Nothing to restore: a destroyed vehicle's wreck is removed.
+    /// <summary>Who last damaged this vehicle, for crediting its destruction.</summary>
+    PhxPawnController LastAttacker;
     /// </summary>
     /// <remarks>
     /// Missions that want a vehicle back use the map's own vehicle spawner,
@@ -359,10 +365,11 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
                 // seat's rider can cascade into the seat list.
                 if (seat.Occupant.GetInstance() is PhxSoldier rider && !rider.IsDead)
                 {
-                    // Uncredited: IPhxDamageableInstance.AddDamage carries only a
-                    // float, so the vehicle never learns who destroyed it.
-                    // Crediting these kills means widening that interface.
-                    rider.KillInPlace(null);
+                    // Credited to whoever destroyed the vehicle. Blowing up a
+                    // full transport is five kills, and they used to go to
+                    // nobody: AddDamage carried only a float, so the vehicle
+                    // never learned its killer. It takes an instigator now.
+                    rider.KillInPlace(LastAttacker);
                 }
                 else
                 {
@@ -378,7 +385,9 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         Vector3 velocity = body != null && !body.isKinematic ? body.velocity : Vector3.zero;
         PhxChunkSpawner.Spawn(C?.ChunkSection, transform, velocity);
 
-        PhxExplosionManager.AddExplosion(null, C?.ExplosionName.Get() as PhxExplosionClass,
+        // Credited for the same reason the occupants are - and it matters more
+        // here, because the wreck's blast is what kills anyone standing near it.
+        PhxExplosionManager.AddExplosion(LastAttacker, C?.ExplosionName.Get() as PhxExplosionClass,
                                          transform.position, transform.rotation);
 
         OnDeath?.Invoke(this);

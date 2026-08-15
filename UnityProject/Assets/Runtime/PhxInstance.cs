@@ -127,7 +127,17 @@ public interface IPhxControlableInstance
 
 public interface IPhxDamageableInstance
 {
-    public void AddDamage(float Damage);
+    /// <summary>Damage this thing, optionally recording who caused it.</summary>
+    /// <remarks>
+    /// The instigator is what lets a kill be credited. It used to carry only
+    /// an amount, so anything that was not a soldier - vehicles, buildings,
+    /// mines, capital-ship subsystems - died without the game ever learning
+    /// who killed it, and the explosion a destroyed vehicle throws was
+    /// unattributed along with every occupant it took with it.
+    /// Optional because plenty of damage has no author: falling, drowning,
+    /// a script.
+    /// </remarks>
+    public void AddDamage(float Damage, PhxPawnController Instigator = null);
 }
 
 

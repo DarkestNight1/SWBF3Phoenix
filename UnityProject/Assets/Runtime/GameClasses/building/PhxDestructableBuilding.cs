@@ -274,7 +274,7 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
     /// first scratch it took - a single rifle round destroyed a bunker - and
     /// the next hit rebuilt it. MaxHealth was authored and never consulted.
     /// </remarks>
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (damage <= 0f || !IsBuilt) return;
 

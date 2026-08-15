@@ -14,7 +14,12 @@ public class PhxOrdnanceClass : PhxClass
     // odf", which lets the legacy HealthScale/ArmorScale values below take
     // effect; PhxDamage.Resolve() collapses these to real numbers.
     public PhxProp<float> VehicleScale =  new PhxProp<float>(-1f);
-    public PhxProp<float> ShieldScale =   new PhxProp<float>(1f);
+    // ShieldScale was parsed here and used by nothing: it is absent from
+    // GetDamageScales, PhxDamage has no shield health type, and there is no
+    // shield concept in the runtime for it to scale. Removed rather than left
+    // sitting in the class looking wired - a property that is parsed and
+    // ignored is a smaller lie than one that appears to be connected. It comes
+    // back when shields do.
     public PhxProp<float> PersonScale =   new PhxProp<float>(-1f);
     public PhxProp<float> AnimalScale =   new PhxProp<float>(-1f);
     public PhxProp<float> DroidScale =    new PhxProp<float>(-1f);

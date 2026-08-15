@@ -187,7 +187,7 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
                          "when it detonated. Spawn a new mine instead.");
     }
 
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (Detonated) return;
 

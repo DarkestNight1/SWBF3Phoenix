@@ -46,7 +46,7 @@ public interface IPhxDestructible
     float GetMaxHealth();
     bool IsDestroyed { get; }
 
-    void AddDamage(float damage);
+    void AddDamage(float damage, PhxPawnController instigator = null);
 
     /// <summary>
     /// Return to full health, undoing a destruction.

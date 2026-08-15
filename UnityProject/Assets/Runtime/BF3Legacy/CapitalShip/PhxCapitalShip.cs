@@ -136,7 +136,7 @@ public class PhxCapitalShip : MonoBehaviour, IPhxDamageableInstance, IPhxTickabl
     }
 
     /// <summary>External damage (starfighters, turrets, other capital ships).</summary>
-    public void AddDamage(float damage)
+    public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (State == PhxShipState.Dying || State == PhxShipState.Destroyed) return;
 
