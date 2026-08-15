@@ -14,4 +14,8 @@ EditorBuildSettings:
   - enabled: 0
     path: Assets/Runtime/Scenes/Testing/vehicle/PhxVehicleTesting.unity
     guid: 38518a704b00b3649af4816d670556fb
-  m_configObjects: {}
+  m_configObjects:
+    com.unity.adaptivePerformance.basic.provider_settings: {fileID: 11400000, guid: 8061ca425f3165242851ddf36dce756e, type: 2}
+    com.unity.adaptiveperformance.loader_settings: {fileID: 11400000, guid: 7481da7942ce67c4ab8af0a958009954, type: 2}
+    com.unity.adaptiveperformance.simulator.provider_settings: {fileID: 11400000, guid: b7089bb886cc9384c88e6b519e0ddf2f, type: 2}
+  m_UseUCBPForAssetBundles: 0

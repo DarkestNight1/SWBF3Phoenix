@@ -53,7 +53,7 @@ public class PhxShell : PhxMissile
         transform.position = Position;
         transform.rotation = Rotation;
 
-        Body.velocity = transform.forward * ShellClass.Velocity.Get();
+        Body.linearVelocity = transform.forward * ShellClass.Velocity.Get();
 
         // Will need to unignore these in Release, but how to check
         // if they still exist?  Points to per-weapon pools

@@ -89,9 +89,9 @@ public class PhxSticky : PhxShell
         // Contact friction, applied as damping rather than through a physic
         // material so it matches the odf's single scalar and does not depend on
         // what the surface happens to be made of.
-        if (StickyClass != null && StickyClass.Friction > 0f && Body.velocity.sqrMagnitude > 0.0001f)
+        if (StickyClass != null && StickyClass.Friction > 0f && Body.linearVelocity.sqrMagnitude > 0.0001f)
         {
-            Body.velocity = Vector3.MoveTowards(Body.velocity, Vector3.zero,
+            Body.linearVelocity = Vector3.MoveTowards(Body.linearVelocity, Vector3.zero,
                                                 StickyClass.Friction * deltaTime);
         }
     }
@@ -151,8 +151,8 @@ public class PhxSticky : PhxShell
 
         // Keep a fraction of the incoming speed, reflected about the surface.
         ContactPoint contact = collision.GetContact(0);
-        Vector3 reflected = Vector3.Reflect(Body.velocity, contact.normal);
-        Body.velocity = reflected * Mathf.Clamp01(StickyClass.Rebound);
+        Vector3 reflected = Vector3.Reflect(Body.linearVelocity, contact.normal);
+        Body.linearVelocity = reflected * Mathf.Clamp01(StickyClass.Rebound);
 
         PlayBounceSound();
     }
@@ -196,7 +196,7 @@ public class PhxSticky : PhxShell
     void Stick(Collision collision)
     {
         Stuck = true;
-        Body.velocity = Vector3.zero;
+        Body.linearVelocity = Vector3.zero;
         Body.angularVelocity = Vector3.zero;
 
         // Kinematic rather than frozen constraints, so it rides a vehicle that

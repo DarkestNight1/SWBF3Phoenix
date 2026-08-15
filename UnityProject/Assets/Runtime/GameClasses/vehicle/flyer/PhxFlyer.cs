@@ -176,7 +176,7 @@ public class PhxFlyer : PhxVehicle
 
         if (Body != null)
         {
-            Body.velocity = Vector3.zero;
+            Body.linearVelocity = Vector3.zero;
             Body.angularVelocity = Vector3.zero;
         }
 
@@ -220,8 +220,8 @@ public class PhxFlyer : PhxVehicle
         // now agree.
         Body.mass = Mathf.Max(1000f, F.GravityScale * 2000f);
         Body.useGravity = true;
-        Body.drag = 0.2f;
-        Body.angularDrag = 10f;
+        Body.linearDamping = 0.2f;
+        Body.angularDamping = 10f;
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         //Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         Body.isKinematic = true;

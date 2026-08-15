@@ -65,6 +65,19 @@ public struct PhxDamageScales
 
 public static class PhxDamage
 {
+    // TEMPORARY DIAGNOSTIC - remove once the no-damage regression is found.
+    //
+    // Every damage source in the game (bolts, beams, explosions, melee, force
+    // powers) funnels through ApplyToCollider, so one trace here localises the
+    // failure to a branch instead of guessing at five call sites. Off by
+    // default; flip with PhxDamage.Trace = true, or the F9 binding below.
+    public static bool Trace = false;
+
+    static void Log(string msg)
+    {
+        if (Trace) Debug.Log("[PhxDamage] " + msg);
+    }
+
     /// <summary>
     /// Resolve a target's HealthType from its odf class. Falls back to the
     /// documented per-class defaults when the property is absent (soldiers are
@@ -141,18 +154,32 @@ public static class PhxDamage
                                         bool isSaber = false,
                                         PhxPawnController instigator = null)
     {
-        if (collider == null) return 0f;
+        if (collider == null)
+        {
+            Log("collider == null");
+            return 0f;
+        }
+
+        Log($"hit '{collider.name}' layer={LayerMask.LayerToName(collider.gameObject.layer)} "
+            + $"maxDamage={maxDamage} scales(P={scales.Person},V={scales.Vehicle},B={scales.Building})");
 
         PhxSoldier soldier = collider.GetComponentInParent<PhxSoldier>();
         if (soldier != null)
         {
             float dmg = maxDamage * scales.For(GetHealthType(soldier));
+            Log($"  -> soldier '{soldier.name}' team={soldier.Team.Get()} "
+                + $"healthType={GetHealthType(soldier)} dmg={dmg}");
             if (dmg > 0f) soldier.AddDamageFrom(dmg, hitPos, isSaber, instigator);
+            else Log("  -> DROPPED: scaled damage is zero");
             return dmg;
         }
 
         IPhxDamageableInstance damageable = collider.GetComponentInParent<IPhxDamageableInstance>();
-        if (damageable == null) return 0f;
+        if (damageable == null)
+        {
+            Log("  -> DROPPED: no PhxSoldier and no IPhxDamageableInstance above this collider");
+            return 0f;
+        }
 
         PhxHealthType type = damageable is PhxInstance inst
             ? GetHealthType(inst)
@@ -243,6 +270,12 @@ public static class PhxDamage
         if (attacker == null || target == null) return false;
 
         PhxInstance inst = target.GetComponentInParent<PhxInstance>();
-        return inst != null && IsFriendly(attacker, inst);
+        bool blocked = inst != null && IsFriendly(attacker, inst);
+        if (blocked)
+        {
+            Log($"BLOCKED as friendly fire: attackerTeam={attacker.Team} "
+                + $"targetTeam={inst.Team.Get()} target='{inst.name}'");
+        }
+        return blocked;
     }
 }

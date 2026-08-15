@@ -260,7 +260,7 @@ public class PhxBF3AIController : PhxAIController
             // target with no rigidbody is treated as stationary, which is the
             // conservative reading.
             Rigidbody body = target.GetComponent<Rigidbody>();
-            Vector3 velocity = body != null && !body.isKinematic ? body.velocity : Vector3.zero;
+            Vector3 velocity = body != null && !body.isKinematic ? body.linearVelocity : Vector3.zero;
 
             return Aim.Aim(eye, TargetPawn, targetPos, velocity, Time.deltaTime);
         }

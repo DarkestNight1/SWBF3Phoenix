@@ -1,0 +1,207 @@
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.Rendering.HighDefinition;
+
+/// <summary>
+/// Hangs a practical light inside imported world geometry that shelters the
+/// space under it, where the source data provides no light of its own.
+/// </summary>
+/// <remarks>
+/// SWBF2 lit its interiors with a baked ambient term that had no notion of
+/// occlusion, so a roof cost nothing: the floor under it received the same
+/// ambient as open ground. HDRP's sky occlusion is real, and the result is
+/// that anything with a lid over it goes to near-black - most visibly on
+/// Kashyyyk, where the fight happens on covered platforms several stops below
+/// open sky. <see cref="BFLightingDirector"/> already gives exposure room to
+/// open up for that, but adaptation can only lift what the renderer actually
+/// put there, and under a solid canopy that is almost nothing.
+///
+/// This is deliberately a small keyed table rather than a general "is this
+/// object enclosed" test. Deriving shelter from geometry means measuring
+/// occlusion per instance at load time, and getting it wrong in the permissive
+/// direction puts a light inside every crate and rock on the map. The set of
+/// models that actually roof a playable space is short, known, and per-map -
+/// so it is written down.
+///
+/// The light is created through <see cref="PhxRuntimeAssets.CreatePointLight"/>
+/// and then handed to <see cref="BFLocalLightPolicy"/>, which owns range, fade,
+/// volumetric contribution and the shadow budget. Nothing here sets those
+/// directly: a practical added by this pass has to live under the same rules as
+/// one that arrived from a prefab or from the command post code, or it becomes
+/// the next light that bleeds through a wall.
+/// </remarks>
+public static class BFPracticalLights
+{
+    /// <summary>How a sheltering model should be lit underneath.</summary>
+    public struct Spec
+    {
+        /// <summary>Point light intensity, in lumen.</summary>
+        public float IntensityLumen;
+
+        public Color Color;
+
+        /// <summary>
+        /// How far below the model's highest point the light hangs.
+        /// </summary>
+        /// <remarks>
+        /// Measured from the top rather than the bottom because a roof model
+        /// may or may not include its support posts, and when it does its
+        /// lowest point is the ground rather than the underside of the lid.
+        /// Measuring down from the peak puts the light under the ridge either
+        /// way, which is also where a lantern would hang.
+        /// </remarks>
+        public float DropFromTop;
+
+        /// <summary>
+        /// Range as a multiple of the model's larger horizontal extent, so one
+        /// entry covers a small hut and a large platform without separate
+        /// tuning. Clamped by <see cref="MinRange"/>/<see cref="MaxRange"/>.
+        /// </summary>
+        public float RangeFactor;
+    }
+
+    const float MinRange = 6f;
+    const float MaxRange = 20f;
+
+    /// <summary>
+    /// Lowest the light may sit above the model's base, so a model whose
+    /// bounds are shorter than <see cref="Spec.DropFromTop"/> does not end up
+    /// with its light buried in the floor.
+    /// </summary>
+    const float MinClearance = 0.5f;
+
+    /// <summary>
+    /// Keyed by odf entity class name, lower case - the class, not the
+    /// instance name, because a world file names most instances by number or
+    /// not at all, and every placement of the same model wants the same light.
+    /// </summary>
+    static readonly Dictionary<string, Spec> ByEntityClass = new Dictionary<string, Spec>
+    {
+        // Kashyyyk village platforms. A solid wooden canopy over the walkable
+        // deck, warm because the map's own light is warm and a neutral fill
+        // under it reads as moonlight at midday.
+        ["kas2_bldg_platform_roof"] = new Spec
+        {
+            IntensityLumen = 2500f,
+            Color = new Color(1f, 0.86f, 0.7f),
+            DropFromTop = 1.2f,
+            RangeFactor = 1.8f,
+        },
+
+        // The Kashyyyk main doorway. Dimmer and tighter than the platform: a
+        // door is a threshold rather than a room, and the job is to stop the
+        // opening reading as a black rectangle, not to light what is behind
+        // it. DropFromTop puts it just inside the head of the frame.
+        //
+        // NOTE: unverified class name - see the report below. If this key is
+        // wrong the entry is a silent no-op, which is exactly what the load
+        // report exists to catch.
+        ["door_main"] = new Spec
+        {
+            IntensityLumen = 1800f,
+            Color = new Color(1f, 0.89f, 0.76f),
+            DropFromTop = 0.8f,
+            RangeFactor = 2.2f,
+        },
+    };
+
+    /// <summary>How many instances each entry actually matched this load.</summary>
+    /// <remarks>
+    /// A key that matches nothing is indistinguishable from a key that matches
+    /// something unlit, because both produce no visible change - and the odf
+    /// class names these are keyed on are not discoverable from the Unity side
+    /// at all. Counting matches turns "the light did not appear" into either
+    /// "0 instances, the name is wrong" or "12 instances, the name is right and
+    /// the light needs tuning", which are different problems.
+    /// </remarks>
+    static readonly Dictionary<string, int> MatchCounts = new Dictionary<string, int>();
+
+    /// <summary>
+    /// Add the practical for this entity class, if it has one. Safe to call
+    /// for every imported instance; classes with no entry cost a dictionary
+    /// miss.
+    /// </summary>
+    public static void TryAttach(GameObject instance, string entityClassName)
+    {
+        if (instance == null || string.IsNullOrEmpty(entityClassName)) return;
+
+        string key = entityClassName.ToLowerInvariant();
+        if (!ByEntityClass.TryGetValue(key, out Spec spec))
+        {
+            return;
+        }
+
+        MatchCounts.TryGetValue(key, out int seen);
+        MatchCounts[key] = seen + 1;
+
+        // Bounds come from the renderers rather than the colliders: the
+        // collision mesh of a roof is frequently a simplified box that extends
+        // to the ground, which would put the light at the wrong height.
+        Renderer[] renderers = instance.GetComponentsInChildren<Renderer>();
+        if (renderers.Length == 0) return;
+
+        Bounds bounds = renderers[0].bounds;
+        for (int i = 1; i < renderers.Length; ++i)
+        {
+            bounds.Encapsulate(renderers[i].bounds);
+        }
+
+        float y = Mathf.Max(bounds.max.y - spec.DropFromTop,
+                            bounds.min.y + MinClearance);
+
+        float footprint = Mathf.Max(bounds.extents.x, bounds.extents.z);
+        float range = Mathf.Clamp(footprint * spec.RangeFactor, MinRange, MaxRange);
+
+        GameObject go = new GameObject("PracticalLight");
+        go.transform.SetParent(instance.transform, false);
+        // Set in world space, then let the transform work out the local offset.
+        // The instance is reparented under the world root after this runs, and
+        // a local offset survives that where a world position would not.
+        go.transform.position = new Vector3(bounds.center.x, y, bounds.center.z);
+
+        Light light = PhxRuntimeAssets.CreatePointLight(go, spec.Color, range,
+                                                       spec.IntensityLumen,
+                                                       castShadows: true);
+        if (light == null) return;
+
+        HDAdditionalLightData data = go.GetComponent<HDAdditionalLightData>();
+        if (data == null) return;
+
+        // maxIntensity is the value we just asked for, not the policy default.
+        // Apply's ceiling is expressed in the light's own unit and its default
+        // is sized for the command post projectors, which are authored an order
+        // of magnitude dimmer than a room light in lumen - passing it through
+        // unchanged would clamp this to a glow.
+        BFLocalLightPolicy.Apply(data, range, maxIntensity: spec.IntensityLumen,
+                                 castShadows: true);
+    }
+
+    /// <summary>Clear the per-load match tally. Call before importing a world.</summary>
+    public static void ResetReport()
+    {
+        MatchCounts.Clear();
+    }
+
+    /// <summary>
+    /// One line per configured entry, after the world is in: how many
+    /// instances it lit. A zero means the odf class name is wrong for this
+    /// map and the entry did nothing.
+    /// </summary>
+    public static void Report()
+    {
+        foreach (KeyValuePair<string, Spec> entry in ByEntityClass)
+        {
+            MatchCounts.TryGetValue(entry.Key, out int count);
+            if (count > 0)
+            {
+                Debug.Log($"[BFPracticalLights] '{entry.Key}': lit {count} instance(s).");
+            }
+            else
+            {
+                Debug.LogWarning($"[BFPracticalLights] '{entry.Key}': matched NO instances " +
+                                 "on this map - either the odf class name is wrong, or this " +
+                                 "map does not use it.");
+            }
+        }
+    }
+}

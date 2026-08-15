@@ -29,6 +29,7 @@ Material:
   m_ModifiedSerializedProperties: 0
   m_ValidKeywords: []
   m_InvalidKeywords:
+  - _CAPTUREDISPUTE_ON
   - _DISABLE_SSR_TRANSPARENT
   - _NORMALMAP_TANGENT_SPACE
   m_LightmapFlags: 4
@@ -175,8 +176,8 @@ Material:
     - _Anisotropy: 0
     - _BlendMode: 0
     - _CPTexSize: 1
-    - _CaptureDispute: 0
-    - _CaptureProgress: 0.94875973
+    - _CaptureDispute: 1
+    - _CaptureProgress: 0.5714979
     - _CoatMask: 0
     - _CullMode: 2
     - _CullModeForward: 2
@@ -293,7 +294,7 @@ Material:
     m_Colors:
     - _BaseColor: {r: 1, g: 1, b: 1, a: 1}
     - _BaseColorMap_MipInfo: {r: 0, g: 0, b: 0, a: 0}
-    - _CaptureColor: {r: 0, g: 1, b: 0, a: 1}
+    - _CaptureColor: {r: 1, g: 0, b: 0, a: 1}
     - _Color: {r: 1, g: 1, b: 1, a: 1}
     - _DiffusionProfileAsset: {r: 0, g: 0, b: 0, a: 0}
     - _DoubleSidedConstants: {r: 1, g: 1, b: -1, a: 0}

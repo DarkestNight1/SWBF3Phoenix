@@ -68,7 +68,7 @@ public class PhxBolt : PhxOrdnance
         
         Body.transform.position = Pos;
         Body.transform.rotation = Rot;
-        Body.velocity = Body.transform.forward * BoltClass.Velocity;
+        Body.linearVelocity = Body.transform.forward * BoltClass.Velocity;
 
         // A bolt must not hit the shooter it just left, so the firer's own
         // colliders are ignored - but bolts are POOLED, and Physics.IgnoreCollision
@@ -147,8 +147,8 @@ public class PhxBolt : PhxOrdnance
         PhxSaberDeflect deflector = PhxSaberDeflect.Find(coll.collider);
         if (deflector == null) return false;
 
-        Vector3 direction = Body.velocity.sqrMagnitude > 0.0001f
-            ? Body.velocity.normalized
+        Vector3 direction = Body.linearVelocity.sqrMagnitude > 0.0001f
+            ? Body.linearVelocity.normalized
             : transform.forward;
 
         Vector3 shooterPosition = instigator?.Pawn?.GetInstance() != null
@@ -168,7 +168,7 @@ public class PhxBolt : PhxOrdnance
         }
 
         Body.transform.rotation = Quaternion.LookRotation(deflected.Value);
-        Body.velocity = deflected.Value * BoltClass.Velocity;
+        Body.linearVelocity = deflected.Value * BoltClass.Velocity;
 
         SCENE.EffectsManager.PlayEffectOnce(BoltClass.ImpactEffectShield.Get(),
                                             transform.position,
@@ -181,6 +181,16 @@ public class PhxBolt : PhxOrdnance
         // Damage is the ordnance odf's MaxDamage scaled by the scale matching
         // the TARGET'S HealthType (person/animal/droid/vehicle/building) -
         // not by what C# type it happens to be. See PhxDamage.
+        // TEMPORARY DIAGNOSTIC - remove with the rest of the PhxDamage.Trace
+        // instrumentation. Proves whether bolts are colliding at all, which is
+        // the fork between a physics problem and a damage-routing one.
+        if (PhxDamage.Trace)
+        {
+            Debug.Log($"[PhxBolt] OnCollisionEnter with '{coll.collider.name}' "
+                      + $"layer={LayerMask.LayerToName(coll.gameObject.layer)} "
+                      + $"contacts={coll.contactCount} ownerWeapon={(OwnerWeapon == null ? "null" : "set")}");
+        }
+
         ContactPoint contact = coll.GetContact(0);
 
         // The firing controller, so the kill is credited to whoever pulled the
@@ -248,8 +258,8 @@ public class PhxBolt : PhxOrdnance
             // artistic answer - this adds only what the 2005 format had no way
             // to express.
             BFImpactResponse.Play(Point.point, Point.normal,
-                                  Body.velocity.sqrMagnitude > 0.0001f
-                                      ? Body.velocity.normalized
+                                  Body.linearVelocity.sqrMagnitude > 0.0001f
+                                      ? Body.linearVelocity.normalized
                                       : transform.forward,
                                   BFSurfaceQuery.Resolve(coll.collider, Point.point),
                                   scale: 1f, instigator: gameObject,

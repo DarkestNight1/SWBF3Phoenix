@@ -471,7 +471,7 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
         // reparents the pieces it takes off this model, so it has to run while
         // the model is still here.
         Rigidbody body = GetComponent<Rigidbody>();
-        Vector3 velocity = body != null && !body.isKinematic ? body.velocity : Vector3.zero;
+        Vector3 velocity = body != null && !body.isKinematic ? body.linearVelocity : Vector3.zero;
         PhxChunkSpawner.Spawn(C?.ChunkSection, transform, velocity);
 
         // Credited for the same reason the occupants are - and it matters more

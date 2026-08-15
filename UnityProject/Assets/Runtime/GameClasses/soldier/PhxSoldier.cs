@@ -1027,8 +1027,8 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     {
         Body = gameObject.AddComponent<Rigidbody>();
         Body.mass = 80f;
-        Body.drag = 0.2f;
-        Body.angularDrag = 10f;
+        Body.linearDamping = 0.2f;
+        Body.angularDamping = 10f;
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         Body.constraints = RigidbodyConstraints.FreezeRotationX | RigidbodyConstraints.FreezeRotationZ;

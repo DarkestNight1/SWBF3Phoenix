@@ -93,7 +93,7 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         Light.intensity = 3f;
 
         Body.useGravity = false;
-        Body.drag = 0f;
+        Body.linearDamping = 0f;
 
         // Not 1e-10.
         //
@@ -104,7 +104,7 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         // it with "Inertia tensor must be larger than zero in all
         // coordinates" - once per missile impact, for the whole match.
         Body.mass = 0.01f;
-        Body.angularDrag = 0f;
+        Body.angularDamping = 0f;
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
@@ -158,7 +158,7 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         transform.position = Position;
         transform.rotation = Rotation;
 
-        Body.velocity = transform.forward * MissileClass.MinSpeed.Get();
+        Body.linearVelocity = transform.forward * MissileClass.MinSpeed.Get();
 
         // Will need to unignore these in Release, but how to check
         // if they still exist?  Points to per-weapon pools
@@ -229,9 +229,9 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         // Don't think missiles actually use gravity, shells do though
         // Body.AddForce(9.8f * MissileClass.Gravity * Vector3.down, ForceMode.Acceleration);
 
-        if (Vector3.Magnitude(Body.velocity) > MissileClass.Velocity)
+        if (Vector3.Magnitude(Body.linearVelocity) > MissileClass.Velocity)
         {
-            Body.velocity = MissileClass.Velocity * Vector3.Normalize(Body.velocity);
+            Body.linearVelocity = MissileClass.Velocity * Vector3.Normalize(Body.linearVelocity);
         }
         else 
         {

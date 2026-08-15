@@ -78,6 +78,8 @@ public class WorldLoader : Loader
                 GameObject instancesRoot = new GameObject("Instances");
                 instancesRoot.transform.parent = worldRoot.transform;
 
+                BFPracticalLights.ResetReport();
+
                 Instance[] instances = world.GetInstances();
                 for (int i = 0; i < instances.Length; i++)
                 {
@@ -92,6 +94,7 @@ public class WorldLoader : Loader
                 }
                
                 ReportUnbuiltInstances();
+                BFPracticalLights.Report();
 
                 BatchProgress = 0.6f;
                 yield return new LoadStatus(BatchProgress,world.Name + ": Terrain");
@@ -263,7 +266,12 @@ public class WorldLoader : Loader
         instanceObject.transform.rotation = UnityUtils.QuatFromLibWorld(inst.Rotation);
         instanceObject.transform.position = UnityUtils.Vec3FromLibWorld(inst.Position);
         instanceObject.transform.localScale = new Vector3(1.0f,1.0f,1.0f);
-        
+
+        // After the transform is final: the light is placed from the model's
+        // world bounds, which are meaningless until the instance is where it
+        // belongs.
+        BFPracticalLights.TryAttach(instanceObject, entityClassName);
+
         return instanceObject;
     }
 

@@ -204,8 +204,8 @@ public class PhxHover : PhxVehicle
         // GravityScale expresses while making vehicles immovable on foot.
         Body.mass = Mathf.Max(1000f, H.GravityScale * 2000f);
         Body.useGravity = true;
-        Body.drag = 0.2f;
-        Body.angularDrag = 10f;
+        Body.linearDamping = 0.2f;
+        Body.angularDamping = 10f;
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         Body.isKinematic = false;
@@ -561,7 +561,7 @@ public class PhxHover : PhxVehicle
                     SpringForces[CurrSpringIndex].ZDamp = ZRotDampCoeff;
 
                     Vector3 VelSpringForce = Vector3.up * H.VelocitySpring;
-                    Vector3 VelDampForce = .3f * Vector3.up * H.VelocityDamp * -Body.velocity.y;
+                    Vector3 VelDampForce = .3f * Vector3.up * H.VelocityDamp * -Body.linearVelocity.y;
                     Body.AddForce(80f * Penetration * deltaTime * (VelSpringForce + VelDampForce), ForceMode.Acceleration);                
 
                     SpringForces[CurrSpringIndex].VelForce = VelSpringForce.y;
@@ -583,7 +583,7 @@ public class PhxHover : PhxVehicle
 
     void UpdatePhysics(float deltaTime)
     {
-        LocalVel = transform.worldToLocalMatrix * Body.velocity;
+        LocalVel = transform.worldToLocalMatrix * Body.linearVelocity;
         LocalAngVel = transform.worldToLocalMatrix * Body.angularVelocity;
     
         UpdateSprings(deltaTime);
@@ -641,7 +641,7 @@ public class PhxHover : PhxVehicle
         LocalVel.x = Mathf.Clamp(LocalVel.x, -H.StrafeSpeed, H.StrafeSpeed);
         LocalVel.z = Mathf.Clamp(LocalVel.z, -H.ReverseSpeed, topSpeed);
 
-        Body.velocity = transform.localToWorldMatrix * LocalVel;
+        Body.linearVelocity = transform.localToWorldMatrix * LocalVel;
     }
 
 

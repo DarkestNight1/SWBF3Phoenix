@@ -88,7 +88,7 @@ public class PhxChunk : MonoBehaviour
             outward = new Vector3(Random.Range(-1f, 1f), 0f, Random.Range(-1f, 1f));
         }
         Vector3 launch = (outward.normalized + Vector3.up * upFactor).normalized * speed;
-        Body.velocity = inheritedVelocity + launch;
+        Body.linearVelocity = inheritedVelocity + launch;
 
         // ChunkOmega is authored as a per-axis spin rate. Its parsed form is a
         // multi-value property whose exact units are not documented, so it is
@@ -155,11 +155,11 @@ public class PhxChunk : MonoBehaviour
             // the opposite control and damps what is left.
             if (collision.contactCount > 0 && Bounciness > 0f)
             {
-                Body.velocity += collision.GetContact(0).normal * Bounciness;
+                Body.linearVelocity += collision.GetContact(0).normal * Bounciness;
             }
             if (Stickiness > 0f)
             {
-                Body.velocity *= Mathf.Clamp01(1f - Stickiness);
+                Body.linearVelocity *= Mathf.Clamp01(1f - Stickiness);
             }
             return;
         }
@@ -179,7 +179,7 @@ public class PhxChunk : MonoBehaviour
         // Kinematic rather than destroying the Rigidbody: a wreck field of
         // dozens of chunks per vehicle is a real solver cost, and none of them
         // need to keep moving once they have come to rest.
-        Body.velocity = Vector3.zero;
+        Body.linearVelocity = Vector3.zero;
         Body.angularVelocity = Vector3.zero;
         Body.isKinematic = true;
 

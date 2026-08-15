@@ -24,7 +24,7 @@ public class PhxResolutionManager : MonoBehaviour
         Screen.SetResolution(best.width, best.height, FullScreenMode.FullScreenWindow);
 
         // Full-resolution textures, best filtering
-        QualitySettings.masterTextureLimit = 0;
+        QualitySettings.globalTextureMipmapLimit = 0;
         QualitySettings.anisotropicFiltering = AnisotropicFiltering.ForceEnable;
         // lodBias is set by BFPresentationQuality.Apply, per tier, so that it
         // stays with the other budgets rather than being a constant here that

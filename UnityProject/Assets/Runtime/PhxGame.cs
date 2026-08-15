@@ -638,6 +638,15 @@ public class PhxGame : MonoBehaviour
 
     void Update()
     {
+        // TEMPORARY DIAGNOSTIC - remove with the rest of the PhxDamage.Trace
+        // instrumentation. F9 toggles the damage trace in-game so the log can
+        // be armed for one burst of fire rather than spamming the whole match.
+        if (Input.GetKeyDown(KeyCode.F9))
+        {
+            PhxDamage.Trace = !PhxDamage.Trace;
+            Debug.Log($"[PhxDamage] trace {(PhxDamage.Trace ? "ON" : "OFF")}");
+        }
+
         Env?.Tick(Time.deltaTime);
 
         while (LibLog.GetNextLog(out LibLogEntry entry))
