@@ -73,10 +73,34 @@ public static class PhxClassRegister
         // x52 on Naboo, yav_prop_grass_tall x10 and yav_prop_grass x4 on Yavin.
         { "grasspatch",     new GameBaseClass(typeof(PhxGrassPatchClass),                typeof(PhxGrassPatch))     },
 
+        // Light shafts through a canopy - 135 instances, 134 of them on Endor.
+        // The only one of these gaps that was genuinely invisible rather than
+        // merely inert: a godray odf has no GeometryName, so unlike a flag or a
+        // trap there was no model for the class loader to build in the absence
+        // of a runtime type.
+        { "godray",         new GameBaseClass(typeof(PhxGodRayClass),                    typeof(PhxGodRay))         },
+
+        // The world object under PhxFlag's rules. Without it no PhxInstance was
+        // created for a flag, so PhxLuaAPI.ResolveFlag found nothing to attach
+        // to and every AddFlag ended at its own warning - CTF, 1-flag and Hunt
+        // had no flag on any of the 24 maps that place one.
+        { "flag",           new GameBaseClass(typeof(PhxFlagItem.ClassProperties),       typeof(PhxFlagItem))       },
+
+        // Endor's Ewok tree smash, and nothing else in the stock game.
+        // Springs and resets; deliberately does not damage - see PhxTrap.
+        { "trap",           new GameBaseClass(typeof(PhxTrap.ClassProperties),           typeof(PhxTrap))           },
+
         // Positional ambience: machinery, shield hums, water, tractor beams.
         // Unregistered until now, so every map imported its soundemitters
         // world as a few hundred silent empties.
         { "soundambiencestatic", new GameBaseClass(typeof(PhxSoundAmbienceStatic.ClassProperties), typeof(PhxSoundAmbienceStatic)) },
+
+        // One instance in the stock game, on Yavin. Shares the static emitter's
+        // properties and its behaviour: what the two base classes distinguish
+        // is a memory-budget decision about long clips that does not survive
+        // into Unity, where load type belongs to the imported asset rather than
+        // to the emitter placing it.
+        { "soundambiencestreaming", new GameBaseClass(typeof(PhxSoundAmbienceStatic.ClassProperties), typeof(PhxSoundAmbienceStreaming)) },
 
         // Drifting dust and mist volumes, and the periodic ambient rumble that
         // goes with them. Both were unregistered.

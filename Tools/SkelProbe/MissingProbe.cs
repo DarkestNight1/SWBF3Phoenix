@@ -40,6 +40,7 @@ namespace SkelProbe
             "building", "animatedbuilding", "mine", "beacon", "remoteterminal",
             "detonator", "repair", "leafpatch", "soundambiencestatic", "dusteffect",
             "rumbleeffect", "commandpost", "hologram", "soldier", "powerupstation", "grasspatch",
+            "godray", "flag", "trap", "soundambiencestreaming",
             "hover", "commandhover", "flyer", "commandflyer", "walker", "commandwalker",
             "vehiclespawn", "turret", "weapon", "grenade", "launcher", "cannon",
             "melee", "missile", "sticky", "shell", "beam", "bolt", "bullet", "explosion",
@@ -89,6 +90,18 @@ namespace SkelProbe
                 Harvest(p);
             }
 
+
+            // Sides: the faction and turret levels under side/, which define
+            // every tur_* and the unit classes. Without these a map's turrets
+            // come back with no base class and look like a gap they are not.
+            string sides = Path.Combine(root, "side");
+            if (Directory.Exists(sides))
+            {
+                foreach (string p in Directory.GetFiles(sides, "*.lvl", SearchOption.TopDirectoryOnly))
+                {
+                    Harvest(p);
+                }
+            }
             Console.WriteLine($"[library] {BaseOf.Count} entity class(es) resolved from shared levels");
             Console.WriteLine();
         }
@@ -197,8 +210,11 @@ namespace SkelProbe
 
             if (unresolved.Count > 0)
             {
-                Console.WriteLine($"  (base class unknown to the probe for {unresolved.Count} " +
-                                  "class(es) - defined in a level not loaded here, not necessarily a gap)");
+                Console.WriteLine($"  base class unknown to the probe for {unresolved.Count} class(es):");
+                foreach (var u in unresolved.OrderByDescending(x => x.Value))
+                {
+                    Console.WriteLine($"      {u.Key,-36} x{u.Value}");
+                }
             }
             Console.WriteLine();
         }
