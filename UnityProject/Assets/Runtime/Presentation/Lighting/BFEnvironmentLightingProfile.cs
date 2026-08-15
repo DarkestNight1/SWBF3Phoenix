@@ -743,14 +743,80 @@ public sealed class BFEnvironmentLightingProfile
         },
 
         // Death Star / Polis Massa / Tantive: interiors. No sky, no sun worth
-        // the name, everything lit by fixtures the map already places.
-        { "dea", Interior("Death Star") },
-        { "pol", Interior("Polis Massa") },
-        { "tan", Interior("Tantive IV") },
+        // the name, everything lit by fixtures the map already places - but
+        // three very different interiors, so each adjusts the shared base
+        // rather than all three reading identically.
+        { "dea", DeathStar() },
+        { "pol", PolisMassa() },
+        { "tan", TantiveIV() },
 
         // Space maps: no atmosphere at all, extreme contrast.
         { "spa", Space("Space") },
     };
+
+    /// <summary>
+    /// The Death Star: cold, enormous, and lit like a machine.
+    /// </summary>
+    /// <remarks>
+    /// Hard white fixtures on grey panel, and almost no haze - the Empire does
+    /// not have dust in its corridors. Reflections matter more here than
+    /// anywhere else indoors because every surface is polished panel, so the
+    /// smoothness gate opens further than the shared interior's.
+    /// </remarks>
+    static BFEnvironmentLightingProfile DeathStar()
+    {
+        BFEnvironmentLightingProfile p = Interior("Death Star");
+        p.FogMeanFreePath = 260f;
+        p.FogTint = new Color(0.78f, 0.80f, 0.86f);
+        p.VolumetricLightingMultiplier = 0.9f;
+        p.AmbientIntensity = 0.42f;
+        p.ReflectionMinSmoothness = 0.3f;
+        p.AmbientOcclusionIntensity = 1.5f;
+        return p;
+    }
+
+    /// <summary>
+    /// Polis Massa: an asteroid dig, half base and half rock.
+    /// </summary>
+    /// <remarks>
+    /// The one "interior" in the game that keeps opening onto excavated rock
+    /// and vacuum, so it wants more shadow range than a corridor and a colder,
+    /// dimmer ambient than a lit facility. Measured terrain runs 0 to 86.8 m,
+    /// which is why the cascades are not as tightly packed as the shared
+    /// interior's.
+    /// </remarks>
+    static BFEnvironmentLightingProfile PolisMassa()
+    {
+        BFEnvironmentLightingProfile p = Interior("Polis Massa");
+        p.ShadowDistance = 260f;
+        p.CascadeSplits = new Vector3(0.05f, 0.16f, 0.38f);
+        p.FogMeanFreePath = 180f;
+        p.FogTint = new Color(0.62f, 0.66f, 0.74f);
+        p.AmbientIntensity = 0.38f;
+        p.DominantSurface = BFSurfaceType.Rock;
+        return p;
+    }
+
+    /// <summary>
+    /// Tantive IV: a warm, narrow, lived-in ship.
+    /// </summary>
+    /// <remarks>
+    /// The tightest space in the game and the only one that is meant to feel
+    /// warm rather than institutional. Short sightlines, so shadow distance
+    /// drops further still and the contact detail carries the corridors.
+    /// </remarks>
+    static BFEnvironmentLightingProfile TantiveIV()
+    {
+        BFEnvironmentLightingProfile p = Interior("Tantive IV");
+        p.ShadowDistance = 80f;
+        p.CascadeSplits = new Vector3(0.08f, 0.22f, 0.48f);
+        p.FogMeanFreePath = 90f;
+        p.FogTint = new Color(0.82f, 0.76f, 0.66f);
+        p.AmbientIntensity = 0.55f;
+        p.ExposureCompensation = 0.3f;
+        p.ContactShadowLength = 0.9f;
+        return p;
+    }
 
     static BFEnvironmentLightingProfile Interior(string name) => new BFEnvironmentLightingProfile
     {
