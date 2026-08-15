@@ -235,6 +235,15 @@ public interface IPhxWeapon
     /// a rocket launcher's from having to mean the same number of rounds.
     /// </remarks>
     public void AddAmmo(float magazines);
+
+    /// <summary>Magnification levels this weapon offers, least first. Empty if it does not zoom.</summary>
+    public float[] GetZoomLevels();
+
+    /// <summary>Magnification per second when sweeping between levels; 0 means step, do not sweep.</summary>
+    public float GetZoomRate();
+
+    /// <summary>Whether zoom brings up a scope overlay and hides the reticle.</summary>
+    public bool HasSniperScope();
     public float GetReloadTime();
     public float GetReloadProgress();
 }

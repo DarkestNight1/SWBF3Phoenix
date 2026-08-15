@@ -490,6 +490,23 @@ public class PhxBF3Config
     public bool FriendlyFire = false;
 
     /// <summary>
+    /// How quickly the view settles into and out of zoom. Higher is snappier.
+    /// </summary>
+    public float ZoomTransitionSpeed = 14f;
+
+    /// <summary>
+    /// How much zoom slows turning, 0 to 1.
+    /// </summary>
+    /// <remarks>
+    /// 1 makes turn rate fully proportional to magnification, so an 8x scope
+    /// turns an eighth as fast - correct for aiming and unpleasant if you need
+    /// to react. 0 leaves turn rate alone. Applied against the soldier's own
+    /// MaxTurnSpeed, which is rewritten every tick, so it has to be reapplied
+    /// there rather than set once.
+    /// </remarks>
+    public float ZoomTurnSlowdown = 0.75f;
+
+    /// <summary>
     /// Re-compress imported world textures to DXT on upload.
     /// </summary>
     /// <remarks>

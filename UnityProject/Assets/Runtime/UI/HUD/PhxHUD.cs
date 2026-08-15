@@ -79,6 +79,11 @@ public class PhxHUD : PhxMenuInterface
             ObjectiveFeed = CreateObjectiveFeedText();
         }
 
+        if (ScopeOverlay == null)
+        {
+            BuildScopeOverlay();
+        }
+
         BuildStatusPanel();
         BuildCombatFeedback();
 
@@ -121,6 +126,99 @@ public class PhxHUD : PhxMenuInterface
         text.horizontalOverflow = HorizontalWrapMode.Wrap;
         text.verticalOverflow = VerticalWrapMode.Overflow;
         return text;
+    }
+
+    // ---------------------------------------------------------------------
+    // Sniper scope
+    //
+    // Built in code, same as the objective feed above and for the same reason:
+    // the prefab has no slot for it.
+    //
+    // Deliberately a vignette and crosshair drawn from primitives rather than
+    // the stock com_1st_scope_universal model. The stock scope is a first
+    // person mesh attached to the weapon, and there is no first-person weapon
+    // rendering path here to hang it on - a flat overlay is what this codebase
+    // can actually honour, and it is what the player reads anyway.
+    // ---------------------------------------------------------------------
+
+    RectTransform ScopeOverlay;
+    Image ScopeVignette;
+
+    void BuildScopeOverlay()
+    {
+        GameObject root = new GameObject("SniperScope", typeof(RectTransform));
+        root.transform.SetParent(Crosshair.transform.parent, false);
+        // Behind nothing in particular, but before the crosshair in the
+        // hierarchy so the reticle would draw over it if both were ever shown.
+        root.transform.SetSiblingIndex(Crosshair.transform.GetSiblingIndex());
+
+        ScopeOverlay = (RectTransform)root.transform;
+        ScopeOverlay.anchorMin = Vector2.zero;
+        ScopeOverlay.anchorMax = Vector2.one;
+        ScopeOverlay.offsetMin = Vector2.zero;
+        ScopeOverlay.offsetMax = Vector2.zero;
+
+        // The darkened surround. One stretched image tinted almost black: with
+        // no scope texture to import, the readable cue is that everything
+        // outside the sight picture goes dark.
+        GameObject vignette = new GameObject("Vignette", typeof(RectTransform));
+        vignette.transform.SetParent(ScopeOverlay, false);
+        RectTransform vrect = (RectTransform)vignette.transform;
+        vrect.anchorMin = Vector2.zero;
+        vrect.anchorMax = Vector2.one;
+        vrect.offsetMin = Vector2.zero;
+        vrect.offsetMax = Vector2.zero;
+
+        ScopeVignette = vignette.AddComponent<Image>();
+        ScopeVignette.color = new Color(0f, 0f, 0f, 0.55f);
+        ScopeVignette.raycastTarget = false;
+
+        // Crosshair lines, four thin bars leaving a gap at the centre so the
+        // target is never covered by the sight.
+        AddScopeBar(new Vector2(0.5f, 0.5f), new Vector2(2f, 220f), new Vector2(0f, 150f));
+        AddScopeBar(new Vector2(0.5f, 0.5f), new Vector2(2f, 220f), new Vector2(0f, -150f));
+        AddScopeBar(new Vector2(0.5f, 0.5f), new Vector2(220f, 2f), new Vector2(150f, 0f));
+        AddScopeBar(new Vector2(0.5f, 0.5f), new Vector2(220f, 2f), new Vector2(-150f, 0f));
+
+        ScopeOverlay.gameObject.SetActive(false);
+    }
+
+    void AddScopeBar(Vector2 anchor, Vector2 size, Vector2 offset)
+    {
+        GameObject bar = new GameObject("ScopeBar", typeof(RectTransform));
+        bar.transform.SetParent(ScopeOverlay, false);
+
+        RectTransform rect = (RectTransform)bar.transform;
+        rect.anchorMin = anchor;
+        rect.anchorMax = anchor;
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.sizeDelta = size;
+        rect.anchoredPosition = offset;
+
+        Image img = bar.AddComponent<Image>();
+        img.color = new Color(0f, 0f, 0f, 0.85f);
+        img.raycastTarget = false;
+    }
+
+    void UpdateScope()
+    {
+        if (ScopeOverlay == null) return;
+
+        PhxSoldier soldier = Match.Player.Pawn?.GetInstance() as PhxSoldier;
+        bool scoped = soldier != null && soldier.IsScoped();
+
+        if (ScopeOverlay.gameObject.activeSelf != scoped)
+        {
+            ScopeOverlay.gameObject.SetActive(scoped);
+        }
+
+        // The reticle and the scope are alternatives, never both: the scope
+        // has its own sight, and leaving the ammo ring floating in the middle
+        // of it would be worse than either alone.
+        if (Crosshair.enabled == scoped)
+        {
+            Crosshair.enabled = !scoped;
+        }
     }
 
     // ---------------------------------------------------------------------
@@ -727,6 +825,7 @@ public class PhxHUD : PhxMenuInterface
         ReinforcementTeam2.text = Match.GetReinforcementCount(2).ToString();
 
         UpdateObjectiveFeed();
+        UpdateScope();
         UpdateStatusPanel();
         UpdateCombatFeedback();
 

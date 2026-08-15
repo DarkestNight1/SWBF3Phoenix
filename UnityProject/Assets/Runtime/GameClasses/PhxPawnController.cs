@@ -39,6 +39,19 @@ public abstract class PhxPawnController
     /// drain the same stamina bar that sprinting uses.
     /// </summary>
     public bool UseForceJump;
+
+    /// <summary>
+    /// A zoom press this frame. Edge-triggered: it cycles through the weapon's
+    /// magnification levels and then back out.
+    /// </summary>
+    /// <remarks>
+    /// Written from the same button as ShootSecondary on purpose. In BF2 right
+    /// mouse zooms on foot and fires the vehicle's second weapon group when
+    /// seated, and that is exactly how it lands here: PhxSoldier reads this,
+    /// PhxSeat and PhxFlyerMainSection read ShootSecondary, and neither sees
+    /// the other's context. No rebinding, no conflict.
+    /// </remarks>
+    public bool ZoomPressed;
     public bool Enter;
 
     public Vector2 MoveDirection;

@@ -78,6 +78,7 @@ public class PhxPlayerController : PhxPawnController
         NextSecondaryWeapon = Input.GetAxis("WeaponChange") > 0;
         ShootPrimary = Input.GetButton("Fire1");
         ShootSecondary = Input.GetButton("Fire2");
+        ZoomPressed = Input.GetButtonDown("Fire2");
 
         if (Input.GetButtonDown("Crouch"))
         {

@@ -703,6 +703,113 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     const float DeathCamSeconds = 2.5f;
 
+    // ---------------------------------------------------------------------
+    // Zoom
+    // ---------------------------------------------------------------------
+    // -1 is "not zoomed"; otherwise an index into the equipped weapon's
+    // GetZoomLevels(). Kept as an index rather than a magnification so
+    // switching weapons cannot leave a rifle wearing a sniper's 8x.
+    int ZoomLevel = -1;
+
+    /// <summary>Where the sweep has got to, for weapons with a non-zero ZoomRate.</summary>
+    float ZoomMagnification = 1f;
+
+    /// <summary>Current magnification, 1 when not zoomed. Read by the HUD.</summary>
+    public float GetZoomMagnification() => ZoomLevel < 0 ? 1f : ZoomMagnification;
+
+    /// <summary>Whether a scope overlay should be drawn right now.</summary>
+    public bool IsScoped()
+    {
+        if (ZoomLevel < 0) return false;
+        IPhxWeapon weapon = GetEquippedWeapon(0);
+        return weapon != null && weapon.HasSniperScope();
+    }
+
+    void TickZoom(float deltaTime)
+    {
+        // Scoping is a standing act. Sprinting, jumping, dying or riding
+        // something all drop it, which is also the only thing stopping a
+        // player from sprinting around at 8x.
+        bool canZoom = !IsDead
+                       && Controller != null
+                       && Context != PhxSoldierContext.Pilot
+                       && (State == PhxControlState.Stand || State == PhxControlState.Crouch);
+
+        if (!canZoom)
+        {
+            if (ZoomLevel >= 0)
+            {
+                ZoomLevel = -1;
+                ZoomMagnification = 1f;
+                CAM?.SetZoom(1f);
+            }
+            return;
+        }
+
+        IPhxWeapon weapon = GetEquippedWeapon(0);
+        float[] levels = weapon != null ? weapon.GetZoomLevels() : null;
+
+        // No weapon, or one that does not zoom (saber, fusioncutter, detpack).
+        if (levels == null || levels.Length == 0)
+        {
+            ZoomLevel = -1;
+        }
+        else if (Controller.ZoomPressed)
+        {
+            // Cycle: out -> nearest level -> ... -> furthest -> out. One
+            // button, and it matches the stock scope, which steps rather than
+            // holding.
+            ZoomLevel = ZoomLevel + 1 >= levels.Length ? -1 : ZoomLevel + 1;
+            if (ZoomLevel >= 0)
+            {
+                ZoomMagnification = levels[ZoomLevel];
+            }
+        }
+        else if (ZoomLevel >= levels.Length)
+        {
+            // Switched to a weapon with fewer levels while zoomed.
+            ZoomLevel = levels.Length - 1;
+            ZoomMagnification = levels[ZoomLevel];
+        }
+
+        if (ZoomLevel < 0)
+        {
+            ZoomMagnification = 1f;
+        }
+        else
+        {
+            // A non-zero ZoomRate sweeps toward the furthest level instead of
+            // stepping. Only the autoturret sets one in stock data, but a mod
+            // that does gets the behaviour its odf asks for.
+            float rate = weapon.GetZoomRate();
+            if (rate > 0f)
+            {
+                ZoomMagnification = Mathf.MoveTowards(ZoomMagnification,
+                                                      levels[levels.Length - 1],
+                                                      rate * deltaTime);
+            }
+        }
+
+        CAM?.SetZoom(ZoomMagnification);
+    }
+
+    /// <summary>
+    /// How much zoom should slow turning right now. 1 when not zoomed.
+    /// </summary>
+    /// <remarks>
+    /// Applied where MaxTurnSpeed is rewritten each tick rather than set once
+    /// on the controller - the soldier overwrites it every frame, so anything
+    /// set outside would last exactly one frame.
+    /// </remarks>
+    float GetZoomTurnFactor()
+    {
+        float magnification = GetZoomMagnification();
+        if (magnification <= 1f) return 1f;
+
+        float slowdown = Mathf.Clamp01(PhxBF3.Config.ZoomTurnSlowdown);
+        return Mathf.Lerp(1f, 1f / magnification, slowdown);
+    }
+
     void TickForcePowers()
     {
         // Looked up per press rather than cached. PhxHeroLoadout adds the
@@ -1341,6 +1448,12 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
         TickEnergy(deltaTime);
 
+        // Outside the Stand/Crouch block below on purpose: zoom has to be
+        // DROPPED when the soldier sprints, jumps, dies or gets into a
+        // vehicle, and a call sited inside that block would simply stop
+        // running and leave the camera scoped.
+        TickZoom(deltaTime);
+
         if (Controller == null)
         {
             return;
@@ -1416,7 +1529,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 Vector3 moveDirWorld = LookRot * moveDirLocal;
 
                 // TODO: base turn speed in degreees/sec really 45?
-                MaxTurnSpeed.y = 45f * C.MaxTurnSpeed * turnFactor;
+                MaxTurnSpeed.y = 45f * C.MaxTurnSpeed * turnFactor * GetZoomTurnFactor();
 
                 if (moveDirLocal.magnitude == 0f)
                 {

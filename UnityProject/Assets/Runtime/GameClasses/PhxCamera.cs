@@ -33,6 +33,64 @@ public class PhxCamera : MonoBehaviour
     public float      DeathCamDriftDegrees       = 8f;
 
 
+    // ---------------------------------------------------------------------
+    // Zoom
+    // ---------------------------------------------------------------------
+    // There was no FOV code anywhere in the runtime, so the zoom values every
+    // stock weapon carries had nothing to act on. Held here rather than in the
+    // soldier because the camera is the only thing that owns a FOV, and
+    // applied at the very end of LateUpdate so it composes with whichever mode
+    // ran and with ApplyShake.
+
+    Camera Cam;
+
+    /// <summary>Unzoomed field of view, captured once so zoom is always relative to it.</summary>
+    float BaseFOV;
+
+    float TargetMagnification = 1f;
+    float CurrentMagnification = 1f;
+
+    void Awake()
+    {
+        Cam = GetComponent<Camera>();
+        BaseFOV = Cam != null ? Cam.fieldOfView : 60f;
+    }
+
+    /// <summary>
+    /// Set the magnification. 1 is unzoomed; 2.5 is a rifle's aim mode.
+    /// </summary>
+    public void SetZoom(float magnification)
+    {
+        TargetMagnification = Mathf.Max(1f, magnification);
+    }
+
+    /// <summary>Current magnification, for anything scaling itself to the zoom (turn rate).</summary>
+    public float GetZoom() => CurrentMagnification;
+
+    void ApplyZoom(float deltaTime)
+    {
+        if (Cam == null) return;
+
+        // Eased rather than snapped even where the weapon's ZoomRate is 0:
+        // the rate governs travel between a weapon's own levels, and a hard
+        // FOV cut reads as a rendering fault regardless.
+        float speed = Mathf.Max(0.01f, PhxBF3.Config.ZoomTransitionSpeed);
+        CurrentMagnification = Mathf.Lerp(CurrentMagnification, TargetMagnification,
+                                          1f - Mathf.Exp(-speed * deltaTime));
+
+        if (Mathf.Abs(CurrentMagnification - TargetMagnification) < 0.001f)
+        {
+            CurrentMagnification = TargetMagnification;
+        }
+
+        // Magnification is a linear factor on the tangent of the half-angle,
+        // not on the angle itself. Dividing the FOV directly would make a 8x
+        // sniper scope noticeably weaker than the data asks for.
+        float halfBase = BaseFOV * 0.5f * Mathf.Deg2Rad;
+        float halfZoom = Mathf.Atan(Mathf.Tan(halfBase) / CurrentMagnification);
+        Cam.fieldOfView = halfZoom * 2f * Mathf.Rad2Deg;
+    }
+
     IPhxControlableInstance FollowInstance;
 
     IPhxTrackable TrackableInstance;
@@ -286,7 +344,8 @@ public class PhxCamera : MonoBehaviour
             transform.position = TrackableInstance.GetCameraPosition();
         }
 
-        // Last, so it offsets whatever the active mode decided.
+        // Last, so they apply on top of whatever the active mode decided.
         ApplyShake(deltaTime);
+        ApplyZoom(deltaTime);
     }
 }

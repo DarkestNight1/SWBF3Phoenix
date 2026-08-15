@@ -95,6 +95,31 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
         public PhxProp<float> SpreadThreshold = new PhxProp<float>(0f); 
         public PhxProp<float> SpreadLimit = new PhxProp<float>(0f);
 
+        // Zoom. Measured from the stock data, not guessed: it is NOT a sniper
+        // feature. Nearly every infantry weapon declares it - rifle and pistol
+        // 2.5x, shotgun and rocket 2.0x - and it is the aim mode for all of
+        // them. Only where Min differs from Max is it variable: sniper rifle
+        // 2-8, bowcaster 2-5, autoturret 2-8 at a rate of 2.0.
+        //
+        // ZoomRate is 0.0 on everything except the autoturret, so it is the
+        // speed of travel BETWEEN levels rather than the speed of entering
+        // zoom: with no rate, a weapon steps between Min and Max instead of
+        // sweeping.
+        public PhxProp<float> ZoomMin = new PhxProp<float>(0f);
+        public PhxProp<float> ZoomMax = new PhxProp<float>(0f);
+        public PhxProp<float> ZoomRate = new PhxProp<float>(0f);
+
+        /// <summary>Zoom drops to a first-person view rather than staying behind the shoulder.</summary>
+        public PhxProp<bool> ZoomFirstPerson = new PhxProp<bool>(false);
+
+        /// <summary>Draw a scope overlay and hide the reticle while zoomed.</summary>
+        /// <remarks>
+        /// This, not the zoom values, is what makes a weapon "a sniper": set on
+        /// the sniper rifle, the bowcaster, the award pistol and sniper, and
+        /// the hero target pistol - and on nothing else.
+        /// </remarks>
+        public PhxProp<bool> SniperScope = new PhxProp<bool>(false);
+
         // Applied before or after spread?
         public PhxProp<float> ShotElevate = new PhxProp<float>(0f);        
 	}
@@ -488,6 +513,56 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
     /// is for, and topping it up here would let a player skip the reload by
     /// standing on the pad.
     /// </remarks>
+    // Built once: the values never change and the array is handed out on every
+    // zoom press.
+    float[] ZoomLevels;
+
+    /// <summary>Magnification steps. See <see cref="IPhxWeapon.GetZoomLevels"/>.</summary>
+    /// <remarks>
+    /// One level where Min equals Max, which is most weapons - a rifle has a
+    /// single 2.5x aim mode. Two where they differ, which is the sniper rifle,
+    /// the bowcaster, the hero target pistol and the autoturret: press to
+    /// scope, press again for the far level, press again to come out.
+    ///
+    /// A weapon whose odf sets neither returns nothing and simply does not
+    /// zoom, which is correct for sabers, fusioncutters and detpacks.
+    /// </remarks>
+    public float[] GetZoomLevels()
+    {
+        if (ZoomLevels != null) return ZoomLevels;
+
+        float min = C.ZoomMin;
+        float max = C.ZoomMax;
+
+        // 1.0 or below is not magnification, and the buff weapon declares a
+        // flat 0.0 - both mean "no zoom" rather than "zoom out".
+        bool hasMin = min > 1f;
+        bool hasMax = max > 1f;
+
+        if (!hasMin && !hasMax)
+        {
+            ZoomLevels = System.Array.Empty<float>();
+        }
+        else if (!hasMax || Mathf.Approximately(min, max))
+        {
+            ZoomLevels = new[] { hasMin ? min : max };
+        }
+        else if (!hasMin)
+        {
+            ZoomLevels = new[] { max };
+        }
+        else
+        {
+            ZoomLevels = new[] { min, max };
+        }
+
+        return ZoomLevels;
+    }
+
+    public float GetZoomRate() => C.ZoomRate;
+
+    public bool HasSniperScope() => C.SniperScope;
+
     public void AddAmmo(float magazines)
     {
         if (magazines <= 0f) return;

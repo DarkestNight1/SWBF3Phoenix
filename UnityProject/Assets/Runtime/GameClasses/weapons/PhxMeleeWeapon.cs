@@ -283,4 +283,9 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
     public float GetReloadTime() => 0f;
     public float GetReloadProgress() => 1f;
     public void AddAmmo(float magazines) { }
+
+    // A saber has no optics.
+    public float[] GetZoomLevels() => System.Array.Empty<float>();
+    public float GetZoomRate() => 0f;
+    public bool HasSniperScope() => false;
 }
