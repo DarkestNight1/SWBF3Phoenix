@@ -70,7 +70,30 @@ public class PhxCharacterSelect : PhxMenuInterface
                                $"added to character selection and was skipped: {e}");
             }
         }
-        //charSel.Add(team.HeroClass);
+
+        // The hero, when the team has earned one and nobody has taken it. This
+        // was a commented-out line referring to a variable that does not exist
+        // in this scope, which is the whole reason heroes have never been
+        // playable - the combat side of them has worked all along.
+        //
+        // Routed through GetAvailableHeroClass rather than reading HeroClass
+        // directly, so PhxHeroRules decides: hero points, the unlock threshold,
+        // one hero per team, and the slot being spent on death. The
+        // AlwaysAllowHeroes testing override goes live with this, since it had
+        // nothing to affect before.
+        try
+        {
+            PhxClass hero = Match.GetAvailableHeroClass(teamNum);
+            if (hero != null)
+            {
+                Add(hero);
+            }
+        }
+        catch (System.Exception e)
+        {
+            Debug.LogError($"Hero class for team {teamNum} could not be added to " +
+                           $"character selection and was skipped: {e}");
+        }
 
         // An empty roster means every AddUnitClass call for this team failed to
         // resolve. Report it loudly and leave the list empty: the stock game

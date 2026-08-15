@@ -418,16 +418,39 @@ public class PhxMatch
             RTS.DestroyInstance(old.GetInstance());
         }
 
+        // If this is the team's hero, claim the single slot before anything is
+        // built. TryClaimHero had no callers at all, so the slot was never
+        // taken and never spent - the rules existed and decided nothing.
+        //
+        // Re-checked here rather than trusted from the menu because the menu
+        // may have been open while someone else took the hero, the same
+        // staleness the command-post re-check in PhxCharacterSelect handles.
+        bool claimedHero = false;
+        if (IsHeroClass(cl, Player.Team))
+        {
+            if (!PhxHeroRules.TryClaimHero(Player.Team))
+            {
+                Debug.Log($"Hero spawn refused for team {Player.Team}: the slot was taken " +
+                          "while the selection screen was open.");
+                return null;
+            }
+            claimedHero = true;
+        }
+
         PhxInstance created = RTS.CreateInstance(cl, "player" + NameCounter++, position, rotation, false);
         if (created == null)
         {
             Debug.LogError($"Failed to create an instance of spawn class '{cl.Name}'!");
+            if (claimedHero) PhxHeroRules.NotifyHeroLost(Player.Team);
             return null;
         }
         IPhxControlableInstance pawn = created as IPhxControlableInstance;
         if (pawn == null)
         {
             Debug.LogError($"Given spawn class '{cl.Name}' is not a IPhxControlableInstance!");
+            // Claimed above and nothing was built, so give the slot back rather
+            // than locking the team out of its hero for the round.
+            if (claimedHero) PhxHeroRules.NotifyHeroLost(Player.Team);
             return null;
         }
 
@@ -1229,6 +1252,23 @@ public class PhxMatch
     /// be fielded. Null otherwise - which is the normal case for a map that
     /// enables neither hero mode.
     /// </summary>
+    /// <summary>Whether this odf is the given team's hero class.</summary>
+    /// <remarks>
+    /// Compared against the team's stored HeroClass rather than derived from
+    /// what the unit carries. PhxHeroLoadout infers "is a hero" from the
+    /// presence of force powers and saber deflection, which is the right test
+    /// for granting hero equipment and the wrong one for spending a hero slot:
+    /// a mission that hands a saber to a regular trooper must not consume the
+    /// team's hero for the round.
+    /// </remarks>
+    public bool IsHeroClass(PhxClass cl, int teamIdx)
+    {
+        if (cl == null || !CheckTeamIdx(teamIdx - 1)) return false;
+
+        PhxClass hero = Teams[teamIdx - 1].HeroClass;
+        return hero != null && ReferenceEquals(hero, cl);
+    }
+
     public PhxClass GetAvailableHeroClass(int teamIdx)
     {
         if (!CheckTeamIdx(teamIdx - 1)) return null;

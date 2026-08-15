@@ -603,6 +603,18 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         // individual who fired rather than guessed from the team.
         MTC?.ReportKill(LastAttacker, Controller, Team);
 
+        // A hero dying frees the team's slot. NotifyHeroLost had no callers, so
+        // once a hero was claimed the team could never field another - and
+        // under hero rules the points have to be earned again, which this is
+        // what triggers.
+        //
+        // Asked of the match rather than inferred from the equipment, so a
+        // trooper handed a saber by a mission script does not spend the slot.
+        if (MTC != null && MTC.IsHeroClass(GetClassRef(), Team.Get()))
+        {
+            PhxHeroRules.NotifyHeroLost(Team.Get());
+        }
+
         // Mission scripts hook these to drive mode logic (hunt counters,
         // scripted events, campaign objectives). Instance indices are the
         // "character" handles scripts pass around, same convention as
@@ -690,6 +702,30 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     }
 
     const float DeathCamSeconds = 2.5f;
+
+    void TickForcePowers()
+    {
+        // Looked up per press rather than cached. PhxHeroLoadout adds the
+        // component after Init, so a value cached in Init would be null for
+        // every hero - and caching the null would make it permanent. This runs
+        // on a key press, not per frame.
+        PhxForcePowers powers = GetComponent<PhxForcePowers>();
+        if (powers == null) return;
+
+        if (Controller.UseForceJump)
+        {
+            powers.Use(PhxForcePower.Jump);
+        }
+
+        if (Controller.UseForcePower)
+        {
+            PhxForcePower power = powers.GetPrimaryOffensivePower();
+            if (power != PhxForcePower.None)
+            {
+                powers.Use(power);
+            }
+        }
+    }
 
     /// <summary>
     /// Resupply every weapon carried, in magazines.
@@ -1514,6 +1550,21 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 // loaded side lvls ("Cannot find weapon class ..."), which
                 // leaves a null slot. Reaching through it threw a
                 // NullReferenceException every frame an AI held secondary fire.
+                // ---------------------------------------------------------------------------------------------
+                // Force powers
+                // ---------------------------------------------------------------------------------------------
+                // Here rather than anywhere in the hero code because this is
+                // the Stand/Crouch block: a power cannot be thrown mid-jump or
+                // while sprinting, which is what BF2 does and what keeps force
+                // jump from being chainable off itself.
+                //
+                // Costs, cooldowns and the stamina check all live in Use().
+                // Nothing had ever called it.
+                if (Controller.UseForcePower || Controller.UseForceJump)
+                {
+                    TickForcePowers();
+                }
+
                 IPhxWeapon primary = GetEquippedWeapon(0);
                 IPhxWeapon secondary = GetEquippedWeapon(1);
 

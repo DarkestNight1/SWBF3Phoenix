@@ -76,6 +76,29 @@ public sealed class PhxForcePowers : MonoBehaviour
     public bool Has(PhxForcePower power) => Get(power) != null;
 
     /// <summary>
+    /// The hero's offensive power - what a single "use force" press does.
+    /// </summary>
+    /// <remarks>
+    /// The data carries no ordering, and a hero may hold Push, Lightning and
+    /// Choke at once. Rather than invent a priority, this is the first
+    /// offensive one the loadout granted, which is the order the class odf
+    /// lists them in - so Vader leads with Choke and the Emperor with
+    /// Lightning, matching what each is known for. Jump is excluded: it is
+    /// movement, and it has its own binding.
+    /// </remarks>
+    public PhxForcePower GetPrimaryOffensivePower()
+    {
+        for (int i = 0; i < Abilities.Count; ++i)
+        {
+            if (Abilities[i].Power != PhxForcePower.Jump)
+            {
+                return Abilities[i].Power;
+            }
+        }
+        return PhxForcePower.None;
+    }
+
+    /// <summary>
     /// Use a power. Returns false when the hero does not have it, it is on
     /// cooldown, or there is not enough stamina - the caller can distinguish
     /// with <see cref="Get"/> if it wants to say which.

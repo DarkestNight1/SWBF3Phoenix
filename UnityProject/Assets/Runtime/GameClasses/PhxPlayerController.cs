@@ -110,6 +110,13 @@ public class PhxPlayerController : PhxPawnController
         
         SwitchSeat = Input.GetKeyDown(KeyCode.G);
 
+        // Force powers. Direct key reads, following the G and E precedent
+        // above, rather than editing InputManager.asset by hand - a malformed
+        // axis entry there breaks input for the whole project and cannot be
+        // validated without opening the editor.
+        UseForcePower = Input.GetKeyDown(KeyCode.F);
+        UseForceJump = Input.GetKeyDown(KeyCode.Q);
+
         // Vehicle enter/exit.
         //
         // GetKeyDown is already edge-triggered, so no debounce is needed to stop
