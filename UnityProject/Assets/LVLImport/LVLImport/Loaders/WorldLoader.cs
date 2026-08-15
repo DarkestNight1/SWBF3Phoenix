@@ -506,18 +506,85 @@ public class WorldLoader : Loader
             }
         }
 
-        // The blend textures are created without requesting a linear read
-        // (Texture2D(w,h) defaults to sRGB), same as they always were - this
-        // is pre-existing behaviour for the blend weights themselves, not
-        // something introduced here. Bending the stored value by gamma
-        // approximately compensates so the on-screen darkening tracks the
-        // baked luma rather than reading lighter than intended.
-        for (int i = 0; i < scale.Length; ++i)
-        {
-            scale[i] = Mathf.Pow(Mathf.Clamp01(scale[i]), 2.2f);
-        }
+        // Normalise into a darkening band, per map, instead of using the baked
+        // luma as an absolute multiplier.
+        //
+        // The gamma step that used to live here is gone. Its comment said the
+        // blend textures are "created without requesting a linear read
+        // (Texture2D(w,h) defaults to sRGB)" - but both terrain paths now build
+        // them with the linear flag set (see the RGBA32 constructors above), so
+        // the compensation was correcting a condition that no longer holds and
+        // simply darkened every map by an extra power of 2.2. On Kashyyyk that
+        // took a mean luma of 0.38 down to 0.11.
+        //
+        // Using the value absolutely was the deeper fault, and it fails at both
+        // ends. Measured mean baked luma across the shipped terrains:
+        //
+        //     nab2 0.007   yav1 0.99   hot1 0.99   geo1 0.96
+        //     fel1 0.21    pol1 0.26   kas2 0.38   dag1 0.75
+        //
+        // Naboo's 0.007 multiplies its ground to black. Hoth, Yavin and
+        // Geonosis sit so close to white that the term carries no variation at
+        // all, which is the "terrain reads flat" report. Both are the same
+        // mistake: treating an artist's absolute exposure choice from 2005 as a
+        // physical occlusion factor.
+        //
+        // What the data genuinely contains is RELATIVE structure - which parts
+        // of this map are shaded relative to the rest of it. So each map is
+        // normalised against its own range: its darkest ground takes the full
+        // darkening, its lightest takes none, everything else lands between.
+        // Occlusion only ever darkens, so the band tops out at 1.
+        NormaliseToBand(scale);
 
         return scale;
+    }
+
+    /// <summary>Strongest darkening the baked terrain term may apply.</summary>
+    /// <remarks>
+    /// Occlusion, not exposure - so this is a floor on brightness rather than a
+    /// free multiplier. 0.55 is dark enough to read as shade under a canopy and
+    /// short of the black the raw values produced on Naboo.
+    /// </remarks>
+    const float TerrainBakedFloor = 0.55f;
+
+    /// <summary>
+    /// Remap a per-texel darkening array onto [<see cref="TerrainBakedFloor"/>, 1]
+    /// using the map's own 5th and 95th percentiles.
+    /// </summary>
+    /// <remarks>
+    /// Percentiles rather than min/max: a single stray texel at either end
+    /// would otherwise set the scale for the whole map, and the dilation pass
+    /// above can leave outliers along patch seams.
+    ///
+    /// A map whose baked lighting is genuinely uniform has no structure to
+    /// recover, and stretching near-zero range would amplify quantisation noise
+    /// into visible banding. That case returns no darkening at all, which is
+    /// honest: the data says nothing, so the term says nothing.
+    /// </remarks>
+    static void NormaliseToBand(float[] scale)
+    {
+        if (scale == null || scale.Length == 0) return;
+
+        float[] sorted = (float[])scale.Clone();
+        Array.Sort(sorted);
+
+        float low = sorted[Mathf.Clamp(Mathf.RoundToInt((sorted.Length - 1) * 0.05f),
+                                       0, sorted.Length - 1)];
+        float high = sorted[Mathf.Clamp(Mathf.RoundToInt((sorted.Length - 1) * 0.95f),
+                                        0, sorted.Length - 1)];
+
+        float span = high - low;
+        if (span < 0.01f)
+        {
+            for (int i = 0; i < scale.Length; ++i) scale[i] = 1f;
+            return;
+        }
+
+        for (int i = 0; i < scale.Length; ++i)
+        {
+            float t = Mathf.Clamp01((scale[i] - low) / span);
+            scale[i] = Mathf.Lerp(TerrainBakedFloor, 1f, t);
+        }
     }
 
     public GameObject ImportTerrainAsMesh(LibTerrain terrain, string name)
