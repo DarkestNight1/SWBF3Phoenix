@@ -38,6 +38,36 @@ $BF3Components = [ordered]@{
     "BF3Cato-Hunt"    = "Cato Neimoidia: Hunt"
 }
 
+# ---- Battlefront Conversion Pack ----
+# One folder ("BF1" as shipped) with all 25 maps, the KOTOR era and the extra
+# units. Mirrors PhxConversionPackContent on the runtime side, including its
+# install check: SIDE\patch.lvl and SIDE\patch2.lvl are what 2.0 + the 2.2
+# patch put there, and every side the pack's maps ask for comes out of them.
+function Test-ConversionPack([string]$dir) {
+    if (-not $dir -or -not (Test-Path $dir)) { return $false }
+    $name = (Split-Path -Leaf $dir).ToLower() -replace '[ \-]', ''
+    if ($name -eq "bf1" -or $name -like "*conversionpack*" -or $name -like "*conv_pack*" -or
+        $name -like "*convpack*") {
+        return $true
+    }
+    return ((Test-Path (Join-Path $dir "data\_lvl_pc\side\patch.lvl")) -and
+            (Test-Path (Join-Path $dir "data\_lvl_pc\side\patch2.lvl")))
+}
+
+function Get-ConversionPackIssues([string]$dir) {
+    $issues = @()
+    if (-not ((Test-Path (Join-Path $dir "data\_lvl_pc\side\patch.lvl")) -and
+              (Test-Path (Join-Path $dir "data\_lvl_pc\side\patch2.lvl")))) {
+        $issues += "SIDE\patch.lvl or SIDE\patch2.lvl is missing. Install Conversion Pack 2.0 " +
+                   "first, then the 2.2 patch over it - without them the pack's units, heroes " +
+                   "and vehicles will not load."
+    }
+    if (-not (Test-Path (Join-Path $dir "data\_lvl_pc\mission.lvl"))) {
+        $issues += "data\_LVL_PC\mission.lvl is missing - the pack's maps cannot load."
+    }
+    return $issues
+}
+
 # Installers disagree on the folder name - Steam uses roman numerals, GOG ships
 # "Star Wars - Battlefront 2". Keep in sync with PhxGamePathDetector.
 $InstallNames = @(
@@ -140,11 +170,14 @@ function Get-ModRows([string]$addon) {
         elseif (Test-Path (Join-Path $_.FullName "addme.script.off"))  { $state = "disabled" }
         else                                                          { $state = "no addme" }
         $isLink = ($_.Attributes -band [System.IO.FileAttributes]::ReparsePoint) -ne 0
+        $isCP = Test-ConversionPack $_.FullName
         $rows += [pscustomobject]@{
             Name      = $_.Name
             State     = $state
             Linked    = $isLink
             Component = $BF3Components[$_.Name]
+            IsCP      = $isCP
+            CPIssues  = @(if ($isCP) { Get-ConversionPackIssues $_.FullName })
         }
     }
     return $rows
@@ -216,9 +249,12 @@ if ($Verify) {
         Write-Host "  (no mods installed yet)"
     } else {
         foreach ($r in $rows) {
-            $tag = if ($r.Component) { " - BF3 Legacy: $($r.Component)" } else { "" }
+            $tag = ""
+            if ($r.Component)  { $tag = " - BF3 Legacy: $($r.Component)" }
+            elseif ($r.IsCP)   { $tag = " - Battlefront Conversion Pack" }
             $lnk = if ($r.Linked) { " (linked)" } else { "" }
             Write-Host "  [$($r.State)] $($r.Name)$lnk$tag"
+            foreach ($issue in $r.CPIssues) { Write-Host "    WARNING: $issue" -ForegroundColor Yellow }
         }
         $have = ($rows | Where-Object { $_.Component -and $_.State -eq "enabled " }).Count
         if ($have -gt 0) {
@@ -251,9 +287,12 @@ if ($List) {
     $rows = Get-ModRows $Addon
     if ($rows.Count -eq 0) { Write-Host "(none installed yet)"; exit 0 }
     foreach ($r in $rows) {
-        $tag = if ($r.Component) { " - BF3 Legacy: $($r.Component)" } else { "" }
+        $tag = ""
+        if ($r.Component)  { $tag = " - BF3 Legacy: $($r.Component)" }
+        elseif ($r.IsCP)   { $tag = " - Battlefront Conversion Pack" }
         $lnk = if ($r.Linked) { " (linked)" } else { "" }
         Write-Host "  [$($r.State)] $($r.Name)$lnk$tag"
+        foreach ($issue in $r.CPIssues) { Write-Host "    WARNING: $issue" -ForegroundColor Yellow }
     }
     exit 0
 }
@@ -368,6 +407,19 @@ try {
         Write-Host ""
         Write-Host "You do NOT need the 1.3 patch or the UI Remaster the pack's readme asks for -"
         Write-Host "Phoenix provides those shell helpers itself."
+    }
+
+    $cp = $rows | Where-Object { $_.IsCP }
+    if ($cp) {
+        Write-Host ""
+        Write-Host "Battlefront Conversion Pack installed. Phoenix recognizes it natively: its maps,"
+        Write-Host "its Knights of the Old Republic era and its extra game modes appear in Instant"
+        Write-Host "Action without the 1.3 patch. Install order matters - 2.0 first, then the 2.2"
+        Write-Host "patch over it. Galactic Conquest is not implemented in Phoenix, so the pack's"
+        Write-Host "KotOR GC download has no effect here. See docs/ConversionPack.md."
+        foreach ($r in $cp) {
+            foreach ($issue in $r.CPIssues) { Write-Host "  WARNING: $issue" -ForegroundColor Yellow }
+        }
     }
 
     if (-not $NoUnitySetup) {

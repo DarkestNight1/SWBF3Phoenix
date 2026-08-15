@@ -138,6 +138,23 @@ public class PhxVerticalBattlefront : MonoBehaviour
             }
         }
 
+        // The Conversion Pack's own maps, likewise before the stock prefixes:
+        // its ids are its own (and several of them are ship and station
+        // interiors), so which world a script belongs to is read from the pack
+        // rather than assumed from a stock prefix that may not mean the same
+        // thing - a pack map named "dea..." is a Death Star interior, not a
+        // surface to hang cruisers over.
+        PhxConversionPackContent.PhxCPMapInfo cp = PhxConversionPackContent.GetMapInfo(mapScript);
+        if (cp != null)
+        {
+            switch (cp.Layer)
+            {
+                case PhxBF3LegacyContent.PhxBF3Layer.Interior: return PhxSpaceLayerKind.None;
+                case PhxBF3LegacyContent.PhxBF3Layer.Space:    return PhxSpaceLayerKind.Orbit;
+                default:                                       return PhxSpaceLayerKind.Atmosphere;
+            }
+        }
+
         foreach (KeyValuePair<string, PhxSpaceLayerKind> kv in StockMapKinds)
         {
             if (mapScript.StartsWith(kv.Key)) return kv.Value;

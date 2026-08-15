@@ -453,16 +453,14 @@ public class PhxEnvironment
 
         if (AddonDataPath != null)
         {
-            PhxPath addonBank = AddonDataPath / relPath;
-            if (addonBank.Exists() && addonBank.IsFile())
+            if (ExistsOnDisk(AddonDataPath / relPath, out _))
             {
                 ScheduleRel(relPath, null, true);
                 return;
             }
         }
 
-        PhxPath stockBank = GameDataPath / relPath;
-        if (stockBank.Exists() && stockBank.IsFile())
+        if (ExistsOnDisk(GameDataPath / relPath, out _))
         {
             ScheduleRel(relPath, null, false);
             return;
@@ -506,8 +504,7 @@ public class PhxEnvironment
 
         for (int i = 0; i < candidates.Count; ++i)
         {
-            PhxPath candidate = candidates[i];
-            if (!candidate.Exists() || !candidate.IsFile())
+            if (!ExistsOnDisk(candidates[i], out PhxPath candidate))
             {
                 continue;
             }
@@ -535,18 +532,13 @@ public class PhxEnvironment
         relPath = relPath.ToString().ToLower();
         if (AddonDataPath != null)
         {
-            PhxPath path = (AddonDataPath / relPath);
-            if (path.Exists() && path.IsFile())
+            if (ExistsOnDisk(AddonDataPath / relPath, out _))
             {
                 SWBF2Handle addonHandle = ScheduleRel(relPath, subLVLs, true);
 
-                if (alsoStock)
+                if (alsoStock && ExistsOnDisk(GameDataPath / relPath, out _))
                 {
-                    PhxPath stockPath = GameDataPath / relPath;
-                    if (stockPath.Exists() && stockPath.IsFile())
-                    {
-                        ScheduleRel(relPath, subLVLs, false);
-                    }
+                    ScheduleRel(relPath, subLVLs, false);
                 }
 
                 return addonHandle;
@@ -733,9 +725,57 @@ public class PhxEnvironment
         return absPath.ToString() + "|" + string.Join(",", sorted);
     }
 
+    // Paths already reported as case-corrected, so a map that mounts a dozen
+    // files out of one mod folder logs the folder once instead of a dozen times.
+    readonly HashSet<string> CaseCorrected = new HashSet<string>();
+
+    /// <summary>
+    /// <paramref name="path"/> as it exists on disk, ignoring case.
+    /// </summary>
+    /// <remarks>
+    /// Returns the path unchanged when it exists as given (every Windows
+    /// lookup, and every stock-data lookup anywhere) or when nothing matches -
+    /// a genuinely missing file still has to reach the caller's own error
+    /// path, which says far more about what was wanted than this could.
+    /// </remarks>
+    PhxPath ResolveOnDisk(PhxPath path)
+    {
+        if (path == null || path.Exists()) return path;
+
+        PhxPath resolved = path.ResolveCaseInsensitive();
+        if (resolved == null) return path;
+
+        if (CaseCorrected.Add(resolved.ToString()))
+        {
+            Debug.Log($"Resolved '{path}' to '{resolved}' (differs in case only).");
+        }
+        return resolved;
+    }
+
+    /// <summary>True if the path exists in any casing; hands back what does.</summary>
+    bool ExistsOnDisk(PhxPath path, out PhxPath resolved)
+    {
+        resolved = path;
+        if (path == null) return false;
+        if (path.Exists()) return path.IsFile();
+
+        PhxPath onDisk = path.ResolveCaseInsensitive();
+        if (onDisk == null) return false;
+
+        resolved = onDisk;
+        return onDisk.IsFile();
+    }
+
     bool Schedule(PhxPath absPath, out SWBF2Handle handle, string[] subLVLs = null)
     {
         Debug.Assert(CanSchedule);
+
+        // Resolve casing BEFORE the cache key is built, so the same file asked
+        // for as 'side/rep.lvl' and as 'SIDE/rep.lvl' is one entry rather than
+        // two mounts of the same data. See PhxPath.ResolveCaseInsensitive:
+        // mods ship the casing the mod tools wrote, and relative requests are
+        // lower-cased, which only agree on a case-insensitive file system.
+        absPath = ResolveOnDisk(absPath);
 
         string key = ScheduleKey(absPath, subLVLs);
 

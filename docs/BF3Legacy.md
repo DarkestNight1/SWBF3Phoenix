@@ -25,6 +25,7 @@ All new code lives in `UnityProject/Assets/Runtime/BF3Legacy/`.
 | 4K graphics mode | Implemented | `Graphics/PhxResolutionManager.cs` |
 | Mod support (load order, toggling, detection) | Implemented | `Mods/PhxModManager.cs` |
 | BF3 Legacy 3.1 pack support (components, modes, eras, maps) | Implemented | `Mods/PhxBF3LegacyContent.cs`, `Mods/PhxBF3LegacyCompat.cs` |
+| Battlefront Conversion Pack support (detection, era/modes, names, diagnostics) | Implemented, see [ConversionPack.md](ConversionPack.md) | `Mods/PhxConversionPackContent.cs` |
 | BF2 install auto-detection + mod installer scripts | Implemented | `Mods/PhxGamePathDetector.cs`, `Tools/` |
 | AI boarding parties, defense, vehicles, grenades, stuck recovery | Implemented | `AI/` |
 | Vehicle AI: ground driving, flyer combat, capital ship attack runs | Implemented | `AI/PhxAIVehicleOperator.cs` |
@@ -315,6 +316,17 @@ per swing and damages everything in reach. Soldier damage flow is now real:
   the runtime loads them through the standard lvl pipeline. See
   [Running the BF3 Legacy 3.1 pack](#running-the-bf3-legacy-31-pack) for what
   that takes.
+- The community
+  [Battlefront Conversion Pack](https://www.moddb.com/mods/star-wars-battlefront-conversion-pack)
+  is supported natively as well: it is detected, its install is checked, and
+  its third era and extra game modes are selectable without the 1.3 patch —
+  see [ConversionPack.md](ConversionPack.md).
+
+Two fixes made for the Conversion Pack apply to **every** mod:
+`core.lvl` from each addon is now mounted into the main menu, so a mod's own
+map, mode and era names are used instead of raw script ids; and lvl lookups
+resolve case-insensitively, so addon data shipped as `data/_LVL_PC` is found on
+Linux instead of silently degrading to stock data.
 
 ## Running the BF3 Legacy 3.1 pack
 

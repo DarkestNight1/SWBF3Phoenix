@@ -45,6 +45,35 @@ bf3_component() {
 }
 BF3_COMPONENT_COUNT=7
 
+# ---- Battlefront Conversion Pack ----
+# One folder ("BF1" as shipped) holding all 25 maps, the KOTOR era and the
+# extra units. Mirrors PhxConversionPackContent on the runtime side, including
+# its install check: SIDE/patch.lvl and SIDE/patch2.lvl are what 2.0 + the 2.2
+# patch put there, and every side the pack's maps ask for comes out of them.
+# Files are matched case-insensitively - the pack ships "data/_LVL_PC/SIDE".
+cp_file() { find "$1" -maxdepth 4 -ipath "$1/data/_lvl_pc/$2" -print -quit 2>/dev/null; }
+
+is_conversion_pack() {
+  local dir="$1" name
+  name="$(basename "$dir" | tr '[:upper:]' '[:lower:]' | tr -d ' -')"
+  case "$name" in
+    bf1|*conversionpack*|*conv_pack*|*convpack*) return 0 ;;
+  esac
+  [[ -n "$(cp_file "$dir" "side/patch.lvl")" && -n "$(cp_file "$dir" "side/patch2.lvl")" ]]
+}
+
+cp_issues() {
+  local dir="$1"
+  if [[ -z "$(cp_file "$dir" "side/patch.lvl")" || -z "$(cp_file "$dir" "side/patch2.lvl")" ]]; then
+    echo "    WARNING: SIDE/patch.lvl or SIDE/patch2.lvl is missing. Install Conversion"
+    echo "             Pack 2.0 first, then the 2.2 patch over it - without them the"
+    echo "             pack's units, heroes and vehicles will not load."
+  fi
+  if [[ -z "$(cp_file "$dir" "mission.lvl")" ]]; then
+    echo "    WARNING: data/_LVL_PC/mission.lvl is missing - the pack's maps cannot load."
+  fi
+}
+
 is_game_dir() { [[ -f "$1/GameData/data/_lvl_pc/common.lvl" ]]; }
 
 search_roots() {
@@ -180,6 +209,9 @@ list_mods() {
       echo "  [$state] $name$link - BF3 Legacy: $comp"
       known=$((known + 1))
       [[ "$name" == "BF3" ]] && have_base=1
+    elif is_conversion_pack "${d%/}"; then
+      echo "  [$state] $name$link - Battlefront Conversion Pack"
+      cp_issues "${d%/}"
     else
       echo "  [$state] $name$link"
     fi
@@ -285,9 +317,11 @@ mkdir -p "$ADDON"
 # Find every addon folder anywhere in the tree (releases nest differently),
 # so the user doesn't have to know the archive's internal layout.
 installed=0
+cp_installed=0
 while IFS= read -r script; do
   d="$(dirname "$script")"
   name="$(basename "$d")"
+  is_conversion_pack "$d" && cp_installed=1
   rm -rf "${ADDON:?}/$name"
   if [[ "$LINK" == 1 ]]; then
     ln -s "$(cd "$d" && pwd)" "$ADDON/$name"
@@ -314,6 +348,15 @@ if [[ -n "$(bf3_component "$(basename "$(dirname "$(find "$MOD_DIR" -maxdepth 4 
   echo
   echo "You do NOT need the 1.3 patch or the UI Remaster the pack's readme asks for -"
   echo "Phoenix provides those shell helpers itself."
+fi
+
+if [[ "$cp_installed" == 1 ]]; then
+  echo
+  echo "Battlefront Conversion Pack installed. Phoenix recognizes it natively: its maps,"
+  echo "its Knights of the Old Republic era and its extra game modes appear in Instant"
+  echo "Action without the 1.3 patch. Install order matters - 2.0 first, then the 2.2"
+  echo "patch over it. Galactic Conquest is not implemented in Phoenix, so the pack's"
+  echo "KotOR GC download has no effect here. See docs/ConversionPack.md."
 fi
 
 cfg="$(set_unity_game_path "$GAME_DIR")"

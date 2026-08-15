@@ -113,6 +113,92 @@ public class PhxPath
         return P.IndexOf(p.P, StringComparison.InvariantCultureIgnoreCase) != -1;
     }
 
+    /// <summary>
+    /// The same path as it actually exists on disk, ignoring case, or null if
+    /// no such file or directory exists.
+    /// </summary>
+    /// <remarks>
+    /// Mods are authored on Windows, where case never mattered, and they ship
+    /// the casing the mod tools produced: the Conversion Pack installs
+    /// <c>addon/BF1/data/_LVL_PC/SIDE/patch.lvl</c>. The runtime asks for
+    /// <c>data/_lvl_pc/side/patch.lvl</c> (relative paths are lower-cased on
+    /// purpose, see <see cref="PhxEnvironment.ScheduleRel"/>), which resolves
+    /// on Windows and on a case-sensitive file system does not - so on Linux
+    /// every addon's data root simply "did not exist" and its maps loaded with
+    /// stock data only, or not at all.
+    ///
+    /// Walks node by node and only enumerates a directory when the exact name
+    /// misses, so the fast path costs one existence check. Callers should try
+    /// the path as given first; this is the fallback.
+    /// </remarks>
+    public PhxPath ResolveCaseInsensitive()
+    {
+        if (Exists()) return this;
+
+        string[] nodes = P.Split('/');
+        if (nodes.Length == 0) return null;
+
+        // An absolute path splits with an empty first node ("/a/b" -> "", "a", "b").
+        bool absolute = nodes[0].Length == 0;
+        string current = absolute ? "/" : nodes[0];
+
+        if (!absolute && !Directory.Exists(current) && !File.Exists(current))
+        {
+            // A relative root we cannot even find the start of - not worth
+            // guessing what the working directory meant.
+            return null;
+        }
+
+        for (int i = 1; i < nodes.Length; ++i)
+        {
+            if (nodes[i].Length == 0) continue;
+
+            string exact = current.EndsWith("/") ? current + nodes[i] : current + "/" + nodes[i];
+            if (Directory.Exists(exact) || File.Exists(exact))
+            {
+                current = exact;
+                continue;
+            }
+
+            if (!Directory.Exists(current)) return null;
+
+            string match = null;
+            try
+            {
+                foreach (string entry in Directory.GetFileSystemEntries(current))
+                {
+                    string leaf = Path.GetFileName(entry.TrimEnd('/', '\\'));
+                    if (string.Equals(leaf, nodes[i], StringComparison.OrdinalIgnoreCase))
+                    {
+                        match = entry;
+                        break;
+                    }
+                }
+            }
+            catch (Exception)
+            {
+                // Unreadable directory (permissions, a dangling symlink into a
+                // mod that was moved) is a miss, not a crash.
+                return null;
+            }
+
+            if (match == null) return null;
+            current = match.Replace('\\', '/');
+        }
+
+        return new PhxPath(current);
+    }
+
+    /// <summary>
+    /// This path if it exists, otherwise the case-corrected one, otherwise
+    /// this path unchanged so callers can report what was actually asked for.
+    /// </summary>
+    public PhxPath OnDisk()
+    {
+        if (Exists()) return this;
+        return ResolveCaseInsensitive() ?? this;
+    }
+
     public override int GetHashCode()
     {
         return P.GetHashCode();

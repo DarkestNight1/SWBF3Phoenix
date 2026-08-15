@@ -256,6 +256,11 @@ public class PhxMainMenu : PhxMenuInterface
         BtnStart.onClick.AddListener(StartRotation);
         BtnQuit.onClick.AddListener(Quit);
 
+        // The shell's data - including any addon core.lvl - is mounted by now,
+        // so a mod that ships its own names for the eras and modes it invented
+        // gets to use them instead of our fallbacks.
+        PhxConversionPackContent.RefreshLocalizedNames();
+
         bool bForMP = false;
         RT.CallLuaFunction("missionlist_ExpandMaplist", 0, bForMP);
         PhxLuaRuntime.Table spMissions = RT.GetTable("missionselect_listbox_contents");
@@ -267,12 +272,13 @@ public class PhxMainMenu : PhxMenuInterface
             bool bIsModLevel  = map.Get<bool>("isModLevel");
             string mapName    = ENV.GetLocalizedMapName(mapluafile);
 
-            // Mod maps often ship no localized name; fall back to what the BF3
-            // Legacy content table knows rather than showing a raw key.
+            // Mod maps often ship no localized name; fall back to what the mod
+            // content tables know rather than showing a raw key.
             if (string.IsNullOrEmpty(mapName))
             {
                 PhxBF3LegacyContent.PhxBF3MapInfo info = PhxBF3LegacyContent.GetMapInfo(mapluafile);
-                mapName = info != null ? info.DisplayName : mapluafile;
+                mapName = info != null ? info.DisplayName
+                                       : (PhxConversionPackContent.GetMapDisplayName(mapluafile) ?? mapluafile);
             }
 
             LstMaps.AddItem(mapName, bIsModLevel);

@@ -77,6 +77,9 @@ public class PhxGame : MonoBehaviour
     // Used only when registering addons
     PhxPath CurrentAddonFolder;
 
+    // Every addon folder with an addme.script, as found by ExploreAddons.
+    List<PhxPath> AddonFolders = new List<PhxPath>();
+
     PhxLoadscreen    CurrentLS;
     PhxMenuInterface CurrentMenu;
 
@@ -270,7 +273,14 @@ public class PhxGame : MonoBehaviour
         if (ScriptRoots.TryGetValue(scriptKey, out PhxPath scriptRoot))
         {
             RegisteredAddons.TryGetValue(scriptKey, out string addonName);
-            addonPath = AddonPath / scriptRoot / "data/_lvl_pc";
+
+            // Mods ship the casing their tools wrote ("data/_LVL_PC"), which
+            // only matches a lower-cased request on a case-insensitive file
+            // system - so on Linux this root "did not exist" for every addon
+            // and its maps fell back to stock data. OnDisk() corrects the
+            // casing when it can and returns the path unchanged when it
+            // cannot, leaving the error below to report what was asked for.
+            addonPath = (AddonPath / scriptRoot / "data/_lvl_pc").OnDisk();
 
             // A wrong path here silently degrades to stock-only data, which
             // surfaces much later as "Couldn't find script '<map>'".
@@ -477,15 +487,79 @@ public class PhxGame : MonoBehaviour
         if (!AddonPath.Exists()) return;
 
         string[] addons = System.IO.Directory.GetDirectories(AddonPath);
-        
+        AddonFolders.Clear();
+
         foreach (PhxPath addon in addons)
         {
-            PhxPath addme = addon / "addme.script";
+            PhxPath addme = (addon / "addme.script").OnDisk();
             if (addme.Exists() && addme.IsFile())
             {
                 Env.ScheduleAbs(addme);
+                AddonFolders.Add(addon);
             }
         }
+    }
+
+    /// <summary>
+    /// Mount each addon's core.lvl into the SHELL environment, if it ships one.
+    /// </summary>
+    /// <remarks>
+    /// The main menu is created from stock data only (see EnterMainMenu), so
+    /// nothing a mod authored used to be readable while the mission list was on
+    /// screen. That is where a SWBF2 mod puts the strings and icons the shell
+    /// needs: core.lvl carries the Localize chunks for its map names and for any
+    /// mode or era it invents, plus the UI textures those name. Without it a
+    /// modded map is listed by its raw script id ("bes2c_con") and a modded mode
+    /// or era by a generated placeholder - which is why the BF3 Legacy support
+    /// had to carry a fallback name table, and why the Conversion Pack's 25 maps
+    /// would arrive nameless.
+    ///
+    /// Deliberately called from OnMainMenuExecution rather than at schedule
+    /// time: the container registers the FIRST level to claim a name, and
+    /// levels load in parallel, so scheduling a mod's core.lvl alongside stock
+    /// core/shell/mission would let it win that race for a stock name. By this
+    /// point the base levels are loaded and registered, which makes stock
+    /// precedence a fact rather than a hope - the addon can only fill in names
+    /// stock does not define.
+    /// </remarks>
+    void MountAddonShellData()
+    {
+        int mounted = 0;
+        foreach (PhxPath addonFolder in AddonFolders)
+        {
+            PhxPath core = (addonFolder / "data/_lvl_pc/core.lvl").OnDisk();
+            if (!core.Exists() || !core.IsFile()) continue;
+
+            Env.ScheduleAbs(core);
+            mounted++;
+        }
+
+        if (mounted > 0)
+        {
+            Debug.Log($"[Mods] Mounted shell data from {mounted} addon(s) - their maps, " +
+                      "modes and eras can now show their own names.");
+        }
+    }
+
+    /// <summary>
+    /// The addon folder that registered <paramref name="mapScript"/> via
+    /// AddDownloadableContent, or null for stock maps and unknown scripts.
+    /// </summary>
+    /// <remarks>
+    /// Lets mod support ask "is this map mine?" without guessing from the
+    /// script name - map ids collide between mods, and a mod is free to name
+    /// its maps anything at all.
+    /// </remarks>
+    public string GetAddonFolderForScript(string mapScript)
+    {
+        if (string.IsNullOrEmpty(mapScript)) return null;
+        return ScriptRoots.TryGetValue(mapScript.ToLower(), out PhxPath root) ? root.ToString() : null;
+    }
+
+    /// <summary>Every mission script registered by an addon this session.</summary>
+    public IEnumerable<string> GetRegisteredAddonScripts()
+    {
+        return ScriptRoots.Keys;
     }
 
     void OnMainMenuExecution()
@@ -509,7 +583,12 @@ public class PhxGame : MonoBehaviour
 
         foreach (var lvl in Env.Loaded)
         {
-            if (lvl.DisplayPath.GetLeaf() == "addme.script")
+            // Matched case-insensitively, and the folder derived from the leaf
+            // as it actually is on disk: a mod that ships "AddMe.script" is
+            // found by the scheduler now (see PhxPath.ResolveCaseInsensitive),
+            // and would otherwise be loaded here and then never executed.
+            string leaf = lvl.DisplayPath.GetLeaf().ToString();
+            if (string.Equals(leaf, "addme.script", StringComparison.OrdinalIgnoreCase))
             {
                 var addme = lvl.Level.Get<LibSWBF2.Wrappers.Script>("addme");
                 if (addme == null)
@@ -518,10 +597,19 @@ public class PhxGame : MonoBehaviour
                     continue;
                 }
 
-                CurrentAddonFolder = lvl.DisplayPath - "addme.script";
+                CurrentAddonFolder = lvl.DisplayPath - leaf;
                 Env.Execute(addme);
             }
         }
+
+        // Mod-supplied shell strings, now that stock data is registered and
+        // cannot be shadowed by them.
+        MountAddonShellData();
+
+        // Which addon owns which map script is only known now, after every
+        // addme.script has registered its content.
+        PhxModManager.EnsureScanned();
+        PhxConversionPackContent.OnAddonScriptsExecuted();
     }
 
     void OnMainMenuLoaded()

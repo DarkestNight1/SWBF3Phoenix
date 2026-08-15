@@ -1198,12 +1198,25 @@ public class PhxMatch
         if (!CheckTeamIdx(--teamIdx)) return;
 
         // Stock BF2 scripts ask for small squads because the 2005 engine was
-        // budgeted for consoles - typically 8-16 a side. TeamSize overrides
-        // whatever the mission asked for; 0 keeps the map's own value. The
-        // count is inclusive of the player, who occupies one of their team's
-        // slots (see TickAISpawn), matching how BF2 counts a side.
+        // budgeted for consoles - typically 8-16 a side. TeamSize raises that;
+        // 0 keeps the map's own value. The count is inclusive of the player,
+        // who occupies one of their team's slots (see TickAISpawn), matching
+        // how BF2 counts a side.
+        //
+        // A FLOOR, not a cap: a script asking for more than TeamSize is doing
+        // it on purpose, and that intent is the mode. The Conversion Pack's XL
+        // mode is nothing BUT a raised unit count - clamping it to TeamSize
+        // deleted the mode while leaving it selectable, which is the worst of
+        // both. Same reasoning as SetReinforcementCount below.
         int configured = PhxBF3.Config.TeamSize;
-        Teams[teamIdx].UnitCount = configured > 0 ? configured : unitCount;
+        int wanted = configured > 0 ? Mathf.Max(configured, unitCount) : unitCount;
+
+        if (wanted > configured && configured > 0)
+        {
+            Debug.Log($"[PhxMatch] Team {teamIdx + 1}: the mission asks for {unitCount} units, " +
+                      $"more than the configured team size of {configured} - honoring the mission.");
+        }
+        Teams[teamIdx].UnitCount = wanted;
     }
 
     // ================= Scoreboard =======================================
@@ -1620,8 +1633,13 @@ public class PhxMatch
         // Negative counts mean "infinite" and are a mode decision, not a
         // tuning number, so they are always left alone. A finite count is
         // scaled up to match the enlarged teams - see PhxBF3Config.
+        //
+        // Scaled UP only: a mode that asks for more tickets than the configured
+        // number wants a longer battle (the Conversion Pack's XL mode fields
+        // several times the usual army and pays for it in tickets), and cutting
+        // it back to the configured value would end that round early.
         int wanted = PhxBF3.Config.Reinforcements;
-        if (reinfCount > 0 && wanted > 0)
+        if (reinfCount > 0 && wanted > reinfCount)
         {
             reinfCount = wanted;
         }

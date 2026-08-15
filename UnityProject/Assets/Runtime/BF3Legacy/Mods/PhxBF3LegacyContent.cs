@@ -310,7 +310,14 @@ public static class PhxBF3LegacyContent
     /// the Lua-side AddNewGameModes() shim; any field left null keeps whatever
     /// the built-in table already had.
     /// </summary>
-    public static void RegisterModeInfo(string key, string displayName, string about, string icon)
+    /// <remarks>
+    /// The registry is the runtime's, not this pack's: every mod's modes and
+    /// eras land here, because the mission list expansion below reads map flags
+    /// for all of them alike. <paramref name="origin"/> only labels the log
+    /// line, so a name that turns up wrong can be traced to whoever set it.
+    /// </remarks>
+    public static void RegisterModeInfo(string key, string displayName, string about, string icon,
+                                        string origin = "BF3Legacy")
     {
         if (string.IsNullOrEmpty(key)) return;
 
@@ -335,7 +342,7 @@ public static class PhxBF3LegacyContent
         if (!string.IsNullOrEmpty(about))       info.About = about;
         if (!string.IsNullOrEmpty(icon))        info.Icon = icon;
 
-        Debug.Log($"[BF3Legacy] Registered {(isEra ? "era" : "mode")} '{key}' " +
+        Debug.Log($"[{origin}] Registered {(isEra ? "era" : "mode")} '{key}' " +
                   $"as '{info.DisplayName}' (subst '{info.Subst}', icon '{info.Icon}')");
     }
 

@@ -104,6 +104,15 @@ the pack's readme asks for. Both work around the retail executable; Phoenix
 reimplements the engine and supplies the shell helpers the mod needs. See
 [docs/BF3Legacy.md](docs/BF3Legacy.md#running-the-bf3-legacy-31-pack).
 
+**Battlefront Conversion Pack.** The same command installs it (it is one addon
+folder, `BF1`). Install **2.0 first, then the 2.2 patch over it** — the
+installer and the runtime both check for the pack's `SIDE/patch.lvl` and
+`patch2.lvl` and warn if they are missing, which is what a half-finished
+install looks like. Its Knights of the Old Republic era and its extra game
+modes are selectable without the 1.3 patch; Galactic Conquest is not
+implemented in Phoenix, so the pack's separate KotOR GC download does nothing
+here. See [docs/ConversionPack.md](docs/ConversionPack.md).
+
 **Load order / disabling:** create `<BF2>/GameData/addon/modorder.txt` — one
 folder name per line, `!foldername` to disable one, `#` for comments. This is
 also the fastest way to bisect a mod that breaks a map.

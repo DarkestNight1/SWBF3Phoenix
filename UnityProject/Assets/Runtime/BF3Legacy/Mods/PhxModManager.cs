@@ -31,6 +31,7 @@ public static class PhxModManager
         public bool HasAddmeScript;
         public bool Enabled;
         public bool IsBF3Legacy;
+        public bool IsConversionPack;
         public long SizeBytes;
 
         // Set when this folder is a recognized component of the BF3 Legacy
@@ -43,6 +44,13 @@ public static class PhxModManager
     public static IReadOnlyList<PhxModInfo> GetMods() => Mods;
 
     public static bool IsBF3LegacyInstalled { get; private set; }
+
+    /// <summary>
+    /// Whether the "Star Wars Battlefront Conversion Pack" is installed, and
+    /// enabled. See <see cref="PhxConversionPackContent"/> for what that
+    /// unlocks.
+    /// </summary>
+    public static bool IsConversionPackInstalled => PhxConversionPackContent.IsInstalled;
 
     /// <summary>Recognized BF3 Legacy pack components that are installed and enabled.</summary>
     public static IReadOnlyList<PhxBF3LegacyContent.PhxBF3ModComponent> BF3LegacyComponents => DetectedComponents;
@@ -81,6 +89,7 @@ public static class PhxModManager
         DetectedComponents.Clear();
         IsBF3LegacyInstalled = false;
         BF3LegacyMissingBaseMod = false;
+        PhxConversionPackContent.BeginScan();
 
         PhxGame game = PhxGame.Instance;
         if (game == null || game.AddonPath == null || !game.AddonPath.Exists())
@@ -96,19 +105,29 @@ public static class PhxModManager
         foreach (string dir in Directory.GetDirectories(addonDir))
         {
             string folder = new DirectoryInfo(dir).Name;
-            bool scriptOn = File.Exists(System.IO.Path.Combine(dir, "addme.script"));
-            bool scriptOff = File.Exists(System.IO.Path.Combine(dir, "addme.script.off"));
+
+            // Case-insensitively, as PhxGame's addon discovery now looks for
+            // them: a mod shipping "AddMe.script" is loaded and executed on a
+            // case-sensitive file system, so it must not be listed as disabled
+            // here.
+            bool scriptOn = HasFile(dir, "addme.script");
+            bool scriptOff = HasFile(dir, "addme.script.off");
 
             PhxBF3LegacyContent.PhxBF3ModComponent component = PhxBF3LegacyContent.GetComponent(folder);
+
+            bool enabled = scriptOn && !disabled.Contains(folder.ToLowerInvariant());
+            bool isConversionPack = PhxConversionPackContent.Recognize(folder, new PhxPath(dir), enabled);
 
             PhxModInfo mod = new PhxModInfo
             {
                 FolderName = folder,
-                DisplayName = component != null ? component.DisplayName : folder,
+                DisplayName = component != null ? component.DisplayName
+                                                : (isConversionPack ? "Battlefront Conversion Pack" : folder),
                 Path = new PhxPath(dir),
                 HasAddmeScript = scriptOn || scriptOff,
-                Enabled = scriptOn && !disabled.Contains(folder.ToLowerInvariant()),
+                Enabled = enabled,
                 IsBF3Legacy = component != null || IsBF3LegacyFolder(folder),
+                IsConversionPack = isConversionPack,
                 BF3Component = component,
                 SizeBytes = 0, // filled lazily; full recursive size is slow on big mods
             };
@@ -123,6 +142,10 @@ public static class PhxModManager
                 DetectedComponents.Add(component);
             }
         }
+
+        // Registers the Conversion Pack's mode/era descriptors and reports any
+        // problem with the install (missing side patches, missing mission.lvl).
+        PhxConversionPackContent.FinishScan();
 
         // Every add-on component (Cato Hunt, Extended Engagements, MoreMaps, ...)
         // is built on top of the main "BF3" folder's sides and scripts.
@@ -142,7 +165,8 @@ public static class PhxModManager
         });
 
         Debug.Log($"[BF3Legacy] Mod scan: {Mods.Count} addon(s) found" +
-                  (IsBF3LegacyInstalled ? ", Battlefront III Legacy detected!" : ""));
+                  (IsBF3LegacyInstalled ? ", Battlefront III Legacy detected!" : "") +
+                  (IsConversionPackInstalled ? ", Battlefront Conversion Pack detected!" : ""));
 
         if (DetectedComponents.Count > 0)
         {
@@ -159,6 +183,12 @@ public static class PhxModManager
                              "folder they depend on. Their maps will load with missing sides and " +
                              "scripts - install the full pack into GameData/addon.");
         }
+    }
+
+    static bool HasFile(string dir, string fileName)
+    {
+        PhxPath path = (new PhxPath(dir) / fileName).OnDisk();
+        return path.Exists() && path.IsFile();
     }
 
     static bool IsBF3LegacyFolder(string folder)

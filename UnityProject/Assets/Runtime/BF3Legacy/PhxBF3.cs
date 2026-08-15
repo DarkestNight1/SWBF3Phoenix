@@ -282,18 +282,24 @@ public class PhxBF3Config
     public bool ProceduralAnimation = true;   // modern lean/recoil layered on stock anims
 
     /// <summary>
-    /// Units per team, player included, overriding whatever the mission script
+    /// Units per team, player included, raising whatever the mission script
     /// asked for. BF2's stock scripts field roughly 8-16 a side; 32 gives the
     /// 32v32 battles the engine can now afford. 0 keeps each map's own value.
     /// </summary>
+    /// <remarks>
+    /// A floor, not a cap. A script asking for MORE than this keeps its own
+    /// number - a mode built on a big army (the Conversion Pack's XL) is
+    /// nothing but that number, and clamping it would quietly delete the mode.
+    /// </remarks>
     public int TeamSize = 32;
 
     /// <summary>
-    /// Reinforcements per team, overriding the mission script's own count.
+    /// Reinforcements per team, raising the mission script's own count.
     /// Stock scripts ask for ~150, which was tuned for BF2's much smaller
     /// squads: at the 32v32 of <see cref="TeamSize"/> every death still costs
     /// one ticket, so the same 150 drains several times faster and rounds end
-    /// almost immediately. 0 keeps each map's own value.
+    /// almost immediately. 0 keeps each map's own value, and a script asking
+    /// for more than this keeps its own (see <see cref="TeamSize"/>).
     /// </summary>
     public int Reinforcements = 400;
 

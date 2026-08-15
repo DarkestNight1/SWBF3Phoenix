@@ -114,6 +114,19 @@ attack/defend ratio whenever a map declares goals.
 - Missing `PhxLuaAPI` functions log warnings instead of hard-failing, so
   partially supported mods still boot. Sweeping the BF3 Legacy mission
   scripts for unimplemented calls remains the active compatibility TODO.
+- **Addon data was case-sensitive.** Mods ship the casing the mod tools wrote
+  (`addon/BF1/data/_LVL_PC/SIDE/patch.lvl`); relative requests are lower-cased
+  on purpose. That agrees only on a case-insensitive file system, so on Linux
+  an addon's data root simply "did not exist" and its maps loaded stock data or
+  none. `PhxPath.ResolveCaseInsensitive` is now the fallback in
+  `PhxEnvironment.Schedule` and on the addon data root; the exact path is still
+  tried first, so Windows behavior is unchanged.
+- **Mod-supplied shell strings were never mounted.** The main menu is built
+  from stock data only, so a mod's `core.lvl` — where SWBF2 mods put the
+  Localize chunks and UI textures for their map, mode and era names — was out
+  of scope while the mission list was on screen, and every modded map showed a
+  raw script id. `PhxGame.MountAddonShellData` now mounts it. Stock data is
+  scheduled first and keeps precedence for any name it already defines.
 
 ## Known intentional deviations
 
