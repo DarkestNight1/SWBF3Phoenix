@@ -393,7 +393,7 @@ public class PhxTextureUpscaler : MonoBehaviour
         RenderTexture result = new RenderTexture(desc);
         result.name = $"{src.name}_x{factor}";
         result.filterMode = FilterMode.Trilinear;
-        result.anisoLevel = 8;
+        result.anisoLevel = 16;
         result.wrapMode = (src is Texture2D t2d) ? t2d.wrapMode : TextureWrapMode.Repeat;
         if (!result.Create())
         {

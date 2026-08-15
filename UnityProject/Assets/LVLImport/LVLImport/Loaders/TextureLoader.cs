@@ -178,7 +178,7 @@ public class TextureLoader : Loader
             newTexture.SetPixelData(data, 0);
             newTexture.Apply(wantMips);
             newTexture.filterMode = FilterMode.Trilinear;
-            newTexture.anisoLevel = 8;
+            newTexture.anisoLevel = 16;
 
             // Sample slightly sharper than 1:1. With TAA resolving the extra
             // aliasing this is the standard way to make minified textures read
@@ -280,7 +280,7 @@ public class TextureLoader : Loader
 
         Texture2DArray textures = new Texture2DArray(maxWidth, maxHeight, names.Length, TextureFormat.RGBA32, true);
         textures.filterMode = FilterMode.Trilinear;
-        textures.anisoLevel = 8;
+        textures.anisoLevel = 16;
         for (int i = 0; i < libTextures.Length; ++i)
         {
             var tex = libTextures[i];

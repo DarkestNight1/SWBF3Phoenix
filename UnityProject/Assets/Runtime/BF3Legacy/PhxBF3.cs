@@ -95,6 +95,12 @@ public static class PhxBF3
             // 8GB hardware it competes with the screen-space history buffers
             // and the reflection probe cache for the same VRAM, and losing
             // that fight costs far more than sharper textures win.
+            //
+            // This guard matters MORE at the Ultra tier, which is now the
+            // default: Ultra doubles the reflection probe budget to 20, so the
+            // probe cache this is competing with is twice the size it was when
+            // the guard was written. Textures are the right thing to give up
+            // here - running out of video memory does not degrade, it stutters.
             if (SystemInfo.graphicsMemorySize > 0 &&
                 SystemInfo.graphicsMemorySize < 10000 &&
                 Config.UpscaleBudgetMB > 768)
@@ -315,7 +321,24 @@ public class PhxBF3Config
     /// probes, terrain deformation resolution, interaction distance, and which
     /// HDRP features are on at all.
     /// </summary>
-    public int PresentationQuality = 2;
+    /// <remarks continued>
+    /// Ultra by default. The budgets in this layer were calibrated against a
+    /// mid-range card carrying a modern workload, and that is not the workload
+    /// this game has: the assets are from 2005 - a few thousand triangles per
+    /// soldier, 256 and 512 textures, maps built for hardware two decades old.
+    /// The geometry is close to free, so spending the headroom on shadow
+    /// resolution, cascades, reflection probes and LOD bias buys visible
+    /// quality at a cost the original content cannot really charge.
+    ///
+    /// Concretely, High to Ultra raises: sun shadows 2048 to 4096, cascades 3
+    /// to 4, shadow distance scale 0.75 to 1.0, shadow-casting punctual lights
+    /// 2 to 4, reflection probes 10 to 20, impact lights 16 to 32, terrain
+    /// deformation 1024 to 2048, LOD bias 1.0 to 1.5, and the minimum radius a
+    /// caster needs from 0.8 m to 0 - meaning everything casts.
+    ///
+    /// Set to 2 for High if the frame rate matters more.
+    /// </remarks>
+    public int PresentationQuality = 3;
 
     /// <summary>
     /// Derive normal and occlusion maps from the stock diffuse textures.
@@ -339,7 +362,18 @@ public class PhxBF3Config
     // number they never saw.
     public int TargetWidth = 2560;
     public int TargetHeight = 1440;
-    public bool UseDynamicResolution = true;
+    /// <remarks continued>
+    /// OFF by default now. Dynamic resolution exists to protect the frame rate
+    /// by rendering fewer pixels, and every pixel it declines to render is
+    /// resolution the upscaler has to invent - on a game whose textures are
+    /// 256 and 512 and whose models are a few thousand triangles, the pixels
+    /// are the fidelity. There is not much else to look at.
+    ///
+    /// It is still fully implemented and still tuned; turn it back on if a
+    /// heavy map cannot hold its frame rate natively, and the floor below is
+    /// what it will settle to.
+    /// </remarks>
+    public bool UseDynamicResolution = false;
 
     /// <summary>
     /// Sync presentation to the display. On by default.
@@ -572,7 +606,23 @@ public class PhxBF3Config
     public bool UpscaleTextures = true;
     public int UpscaleFactor = 2;             // 2 or 4
     public float UpscaleSharpness = 0.5f;     // 0..1
-    public int UpscaleBudgetMB = 1536;        // cap on added VRAM
+    /// <summary>
+    /// VRAM the upscaler may add, in MB.
+    /// </summary>
+    /// <remarks>
+    /// Raised from 1536. The budget is what stops the upscaler part-way
+    /// through a level, and stopping part-way is the worst outcome available:
+    /// it leaves some surfaces sharp and their neighbours native, which reads
+    /// as a bug rather than as a setting. Better to upscale everything at 2x
+    /// than some things at 4x.
+    ///
+    /// CompressTextures is off - it needs an ETextureFormat export that
+    /// LibSWBF2 has natively and does not expose - so these are uncompressed
+    /// RGBA and cost roughly 4x what a DXT copy would. That is the real reason
+    /// this number is large rather than any judgement about how much VRAM a
+    /// card has.
+    /// </remarks>
+    public int UpscaleBudgetMB = 3072;
 
     // Music and voice-over from the mission scripts' audio API
     public bool MusicEnabled = true;
