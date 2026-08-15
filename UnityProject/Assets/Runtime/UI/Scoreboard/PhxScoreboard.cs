@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UI;
@@ -20,9 +21,14 @@ public class PhxScoreboard : MonoBehaviour
     static PhxMatch Match => PhxGame.GetMatch();
 
     // Legacy UnityEngine.UI.Text to match the rest of the UI (PhxHUD,
-    // PhxButton, PhxCharacterItem all use it). Unity 2020.3 still ships the
-    // builtin Arial that those scene objects reference.
-    const string BuiltinFont = "Arial.ttf";
+    // PhxButton, PhxCharacterItem all use it).
+    //
+    // Unity 2022.2 renamed the builtin Arial to LegacyRuntime.ttf, and from
+    // 2022.3.1 asking for the old name THROWS ArgumentException rather than
+    // returning null - so the null check in Awake never got the chance to
+    // run, and the exception took the rest of Awake with it. Newest name
+    // first, so this works on either editor.
+    static readonly string[] BuiltinFontNames = { "LegacyRuntime.ttf", "Arial.ttf" };
 
     const KeyCode ToggleKey = KeyCode.Tab;
 
@@ -67,14 +73,34 @@ public class PhxScoreboard : MonoBehaviour
         public readonly List<Row> Rows = new List<Row>();
     }
 
+    /// <summary>The builtin font, under whichever name this editor knows it by.</summary>
+    static Font LoadBuiltinFont()
+    {
+        foreach (string name in BuiltinFontNames)
+        {
+            try
+            {
+                Font font = Resources.GetBuiltinResource<Font>(name);
+                if (font != null) return font;
+            }
+            catch (ArgumentException)
+            {
+                // This editor rejects the name outright rather than returning
+                // null. Not fatal on its own - try the next name.
+            }
+        }
+        return null;
+    }
+
     void Awake()
     {
-        Font = Resources.GetBuiltinResource<Font>(BuiltinFont);
+        Font = LoadBuiltinFont();
         if (Font == null)
         {
             // Without a font every Text renders blank, which would look like a
             // broken panel rather than a missing resource - say so instead.
-            Debug.LogWarning($"[BF3Legacy] Scoreboard disabled: builtin font '{BuiltinFont}' unavailable.");
+            Debug.LogWarning("[BF3Legacy] Scoreboard disabled: no builtin font available " +
+                             "(tried " + string.Join(", ", BuiltinFontNames) + ").");
             enabled = false;
             return;
         }
