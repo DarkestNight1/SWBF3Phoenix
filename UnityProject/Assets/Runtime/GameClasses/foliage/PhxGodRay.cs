@@ -105,10 +105,16 @@ public class PhxGodRay : PhxInstance<PhxGodRayClass>
         // The quad is stretched into a shaft rather than kept square: Radius is
         // the width and Height the length, and a god ray is much taller than it
         // is wide. startSize3D is the only way to say that per particle.
+        //
+        // .Get() rather than letting the property convert itself: these take a
+        // MinMaxCurve, and reaching it from a PhxProp<float> would need two
+        // user-defined conversions in a row, which C# will not chain. It works
+        // as a constructor argument (as the foliage classes do it) and not as
+        // an assignment, which is the whole difference.
         main.startSize3D = true;
-        main.startSizeX = C.Radius;
-        main.startSizeY = C.Height;
-        main.startSizeZ = C.Radius;
+        main.startSizeX = C.Radius.Get();
+        main.startSizeY = C.Height.Get();
+        main.startSizeZ = C.Radius.Get();
 
         UnityEngine.Color tint = C.Color;
 
