@@ -347,6 +347,7 @@ public sealed class BFEnvironmentLightingProfile
         { "hot", new BFEnvironmentLightingProfile
             {
                 Name = "Hoth",
+                DynamicResolutionFloor = 0.85f,
                 CascadeSplits = new Vector3(0.10f, 0.28f, 0.55f),
                 CascadeBorder = 0.25f,
                 SunIntensityScale = 0.90f,
@@ -377,6 +378,7 @@ public sealed class BFEnvironmentLightingProfile
         { "geo", new BFEnvironmentLightingProfile
             {
                 Name = "Geonosis",
+                DynamicResolutionFloor = 0.78f,
                 CascadeSplits = new Vector3(0.06f, 0.18f, 0.40f),
                 CascadeBorder = 0.20f,
                 SunIntensityScale = 1.15f,
@@ -402,6 +404,7 @@ public sealed class BFEnvironmentLightingProfile
         { "end", new BFEnvironmentLightingProfile
             {
                 Name = "Endor",
+                DynamicResolutionFloor = 0.75f,
                 CascadeSplits = new Vector3(0.03f, 0.09f, 0.22f),
                 CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
@@ -428,6 +431,7 @@ public sealed class BFEnvironmentLightingProfile
         { "tat", new BFEnvironmentLightingProfile
             {
                 Name = "Tatooine",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.12f, 0.32f, 0.60f),
                 CascadeBorder = 0.30f,
                 SunIntensityScale = 1.25f,
@@ -453,6 +457,7 @@ public sealed class BFEnvironmentLightingProfile
         { "mus", new BFEnvironmentLightingProfile
             {
                 Name = "Mustafar",
+                DynamicResolutionFloor = 0.75f,
                 CascadeSplits = new Vector3(0.05f, 0.15f, 0.34f),
                 CascadeBorder = 0.20f,
                 ForceAtmosphere = true,
@@ -482,6 +487,7 @@ public sealed class BFEnvironmentLightingProfile
         { "kam", new BFEnvironmentLightingProfile
             {
                 Name = "Kamino",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.06f, 0.16f, 0.36f),
                 CascadeBorder = 0.22f,
                 ForceAtmosphere = true,
@@ -522,6 +528,7 @@ public sealed class BFEnvironmentLightingProfile
                 // rather than lighting the scene, ambient and the map's own
                 // fixtures carry it, and the surfaces are stone.
                 Name = "Coruscant",
+                DynamicResolutionFloor = 0.78f,
                 CascadeSplits = new Vector3(0.04f, 0.12f, 0.28f),
                 CascadeBorder = 0.15f,
                 Sky = BFSkyKind.Gradient,
@@ -552,6 +559,7 @@ public sealed class BFEnvironmentLightingProfile
         { "nab", new BFEnvironmentLightingProfile
             {
                 Name = "Naboo",
+                DynamicResolutionFloor = 0.82f,
                 CascadeSplits = new Vector3(0.10f, 0.26f, 0.52f),
                 CascadeBorder = 0.28f,
                 SunIntensityScale = 1.10f,
@@ -570,6 +578,7 @@ public sealed class BFEnvironmentLightingProfile
         { "kas", new BFEnvironmentLightingProfile
             {
                 Name = "Kashyyyk",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.04f, 0.11f, 0.26f),
                 CascadeBorder = 0.18f,
                 ForceAtmosphere = true,
@@ -592,6 +601,7 @@ public sealed class BFEnvironmentLightingProfile
         { "fel", new BFEnvironmentLightingProfile
             {
                 Name = "Felucia",
+                DynamicResolutionFloor = 0.78f,
                 CascadeSplits = new Vector3(0.03f, 0.09f, 0.22f),
                 CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
@@ -615,6 +625,7 @@ public sealed class BFEnvironmentLightingProfile
         { "myg", new BFEnvironmentLightingProfile
             {
                 Name = "Mygeeto",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.05f, 0.15f, 0.34f),
                 CascadeBorder = 0.22f,
                 SunIntensityScale = 0.90f,
@@ -637,6 +648,7 @@ public sealed class BFEnvironmentLightingProfile
         { "uta", new BFEnvironmentLightingProfile
             {
                 Name = "Utapau",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.05f, 0.14f, 0.30f),
                 CascadeBorder = 0.20f,
                 SunIntensityScale = 1.00f,
@@ -656,6 +668,7 @@ public sealed class BFEnvironmentLightingProfile
         { "yav", new BFEnvironmentLightingProfile
             {
                 Name = "Yavin 4",
+                DynamicResolutionFloor = 0.80f,
                 CascadeSplits = new Vector3(0.04f, 0.12f, 0.28f),
                 CascadeBorder = 0.18f,
                 SunIntensityScale = 1.05f,
@@ -674,6 +687,7 @@ public sealed class BFEnvironmentLightingProfile
         { "dag", new BFEnvironmentLightingProfile
             {
                 Name = "Dagobah",
+                DynamicResolutionFloor = 0.85f,
                 CascadeSplits = new Vector3(0.05f, 0.14f, 0.32f),
                 CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
@@ -711,6 +725,7 @@ public sealed class BFEnvironmentLightingProfile
         { "rhn", new BFEnvironmentLightingProfile
             {
                 Name = "Rhen Var",
+                DynamicResolutionFloor = 0.82f,
                 CascadeSplits = new Vector3(0.07f, 0.20f, 0.42f),
                 CascadeBorder = 0.22f,
                 SunIntensityScale = 0.8f,
