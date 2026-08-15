@@ -26,8 +26,6 @@ public static class BFTerrainSurfaceMap
     public static void Reset()
     {
         Types = null;
-        CachedWorld = null;
-        CachedGround = BFSurfaceType.Unknown;
         Dimension = 0;
         WorldExtent = 0f;
     }
@@ -120,71 +118,29 @@ public static class BFTerrainSurfaceMap
                   $"layers [{string.Join(", ", layerTypes)}]");
     }
 
-    static string CachedWorld;
-    static BFSurfaceType CachedGround = BFSurfaceType.Unknown;
 
     /// <summary>
     /// What a map's ground is made of, when its layer names will not say.
     /// </summary>
     /// <remarks>
-    /// Keyed by mission-script prefix, which is the same key
-    /// <see cref="BFMapCollisionOverrides"/> and <see cref="BFMapWater"/> use.
-    /// Each entry is the material a soldier is standing on for most of that
-    /// map - not every texel of it, which no single answer could be, but the
-    /// one that decides whether boots leave prints and what a blaster bolt
-    /// throws up.
+    /// Deferred to <see cref="BFSurfaceQuery.MapDefault"/>, which
+    /// <see cref="BFLightingDirector"/> seeds from the map's
+    /// <see cref="BFEnvironmentLightingProfile.DominantSurface"/> on every load.
     ///
-    /// A map not listed keeps Unknown, which is the honest answer for one
-    /// nobody has looked at, and leaves it behaving exactly as it does now.
+    /// This used to be a second prefix table living here, and the two disagreed
+    /// about the same maps: end/yav/kas/dag/fel resolved to Mud here and Grass
+    /// in the profile, pol to Snow here and Metal there. Both feed
+    /// BFSurfaceQuery - the profile as the map-wide default, this as the
+    /// per-texel terrain answer - so footsteps, impact debris and wetness could
+    /// contradict each other on the same ground depending on which path asked.
+    ///
+    /// One table owns this now, and it is the profile, because that is already
+    /// the per-map authority for everything else and is the thing a person
+    /// tuning a map edits. Adding a map here meant remembering two places.
     /// </remarks>
     static BFSurfaceType PlanetGround()
     {
-        string world = PhxGame.GetEnvironment()?.GetWorldName();
-        if (string.IsNullOrEmpty(world)) return BFSurfaceType.Unknown;
-
-        // Sample is on the path of every footstep, impact and query, so the
-        // string work happens once per map rather than once per call.
-        if (world == CachedWorld) return CachedGround;
-
-        CachedWorld = world;
-        CachedGround = Classify(world);
-        return CachedGround;
-    }
-
-    static BFSurfaceType Classify(string world)
-    {
-        string key = world.ToLowerInvariant();
-
-        // Snow, and the reason the user can name Hoth without being told.
-        if (key.StartsWith("hot")) return BFSurfaceType.Snow;
-
-        // Desert.
-        if (key.StartsWith("tat")) return BFSurfaceType.Sand;
-        if (key.StartsWith("geo")) return BFSurfaceType.Sand;
-
-        // Forest floor and jungle. Mud is this codebase's word for loose dark
-        // ground - BFSurfaceQuery already maps the keyword "dirt" onto it - and
-        // it is the deepest print any surface takes, which is right for a
-        // forest floor and wrong for nothing here.
-        if (key.StartsWith("end")) return BFSurfaceType.Mud;
-        if (key.StartsWith("yav")) return BFSurfaceType.Mud;
-        if (key.StartsWith("kas")) return BFSurfaceType.Mud;
-        if (key.StartsWith("dag")) return BFSurfaceType.Mud;
-        if (key.StartsWith("fel")) return BFSurfaceType.Mud;
-
-        // Meadow.
-        if (key.StartsWith("nab")) return BFSurfaceType.Grass;
-
-        // Stone and volcanic rock, which take no prints - naming them still
-        // matters, because it is what stops a bolt on Mustafar throwing up
-        // the same debris as one in a snowdrift.
-        if (key.StartsWith("mus")) return BFSurfaceType.Rock;
-        if (key.StartsWith("uta")) return BFSurfaceType.Rock;
-        if (key.StartsWith("myg")) return BFSurfaceType.Rock;
-        if (key.StartsWith("rhn")) return BFSurfaceType.Rock;
-        if (key.StartsWith("pol")) return BFSurfaceType.Snow;
-
-        return BFSurfaceType.Unknown;
+        return BFSurfaceQuery.MapDefault;
     }
 
     /// <summary>Surface at a world position, or Unknown if unavailable.</summary>
