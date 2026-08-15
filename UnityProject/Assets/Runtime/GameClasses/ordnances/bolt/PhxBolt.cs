@@ -113,6 +113,22 @@ public class PhxBolt : PhxOrdnance
     {
         Coll = GetComponent<BoxCollider>();
         Body = GetComponent<Rigidbody>();
+
+        // Bolts are the fastest thing in the game and were the only projectile
+        // left on the Rigidbody default, Discrete. Missiles, debris chunks,
+        // hovers and soldiers all set ContinuousDynamic; nothing set it here.
+        //
+        // A soldier capsule is 0.4m radius - 0.8m of target. Physics runs at
+        // 120Hz, so a step is 8.3ms, and a stock blaster bolt covers 1.7m at
+        // 200 m/s and 2.5m at 300. Discrete detection only reports a contact
+        // when the collider overlaps AT a step, so the bolt jumps two to three
+        // times the width of its target each step and mostly steps straight
+        // over it. Terrain and buildings are metres thick and still get hit,
+        // which is why bolts visibly marked walls while passing through people.
+        //
+        // ContinuousDynamic rather than Continuous: soldiers carry Rigidbodies,
+        // and Continuous only sweeps against static geometry.
+        Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
         Light = GetComponent<Light>();
         HDLightData = GetComponent<HDAdditionalLightData>();
         Renderer = GetComponent<LineRenderer>();
