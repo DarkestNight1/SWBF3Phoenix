@@ -198,6 +198,39 @@ public sealed class BFEnvironmentLightingProfile
     /// <summary>Distance beyond which cascaded shadows stop, in metres.</summary>
     public float ShadowDistance = 500f;
 
+    /// <summary>
+    /// Where the shadow cascades divide, as fractions of
+    /// <see cref="ShadowDistance"/>.
+    /// </summary>
+    /// <remarks>
+    /// The most valuable per-map shadow knob, and until now the only one never
+    /// written: <see cref="BFLightingDirector"/> set the cascade *count* and
+    /// left the splits at HDRP's defaults on every map in the game.
+    ///
+    /// Count decides how many shadow maps are rendered; splits decide where the
+    /// resolution goes, and that is what should differ between maps. A forest
+    /// floor, a canopy walkway and an interior all want the first cascade tight
+    /// around the player because everything worth shadowing is within a few
+    /// metres. An open snowfield or a flat desert wants it pushed out, because
+    /// there is nothing close by to shadow and the detail that matters is at
+    /// range.
+    ///
+    /// Only the first three are used - a fourth cascade always ends at
+    /// ShadowDistance - and HDRP expects them ascending. Defaults here match
+    /// HDRP's own so an unauthored map behaves exactly as before.
+    /// </remarks>
+    public Vector3 CascadeSplits = new Vector3(0.05f, 0.15f, 0.3f);
+
+    /// <summary>
+    /// Width of the blend between cascades, as a fraction of each cascade.
+    /// </summary>
+    /// <remarks>
+    /// Wider hides the transition at the cost of rendering into two cascades
+    /// across the seam. Worth more on maps with large flat ground where a hard
+    /// cascade edge draws a visible line across the terrain.
+    /// </remarks>
+    public float CascadeBorder = 0.2f;
+
     public float ContactShadowLength = 0.6f;
     public float ContactShadowOpacity = 0.8f;
 
@@ -314,6 +347,8 @@ public sealed class BFEnvironmentLightingProfile
         { "hot", new BFEnvironmentLightingProfile
             {
                 Name = "Hoth",
+                CascadeSplits = new Vector3(0.10f, 0.28f, 0.55f),
+                CascadeBorder = 0.25f,
                 SunIntensityScale = 0.90f,
                 SunColor = new Color(0.86f, 0.92f, 1f),
                 SunAngle = new Vector2(22f, 200f),
@@ -342,6 +377,8 @@ public sealed class BFEnvironmentLightingProfile
         { "geo", new BFEnvironmentLightingProfile
             {
                 Name = "Geonosis",
+                CascadeSplits = new Vector3(0.06f, 0.18f, 0.40f),
+                CascadeBorder = 0.20f,
                 SunIntensityScale = 1.15f,
                 SunColor = new Color(1f, 0.88f, 0.72f),
                 SunAngle = new Vector2(62f, 140f),
@@ -365,6 +402,8 @@ public sealed class BFEnvironmentLightingProfile
         { "end", new BFEnvironmentLightingProfile
             {
                 Name = "Endor",
+                CascadeSplits = new Vector3(0.03f, 0.09f, 0.22f),
+                CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.70f,
                 SunColor = new Color(0.92f, 1f, 0.80f),
@@ -389,6 +428,8 @@ public sealed class BFEnvironmentLightingProfile
         { "tat", new BFEnvironmentLightingProfile
             {
                 Name = "Tatooine",
+                CascadeSplits = new Vector3(0.12f, 0.32f, 0.60f),
+                CascadeBorder = 0.30f,
                 SunIntensityScale = 1.25f,
                 SunColor = new Color(1f, 0.94f, 0.80f),
                 SunAngle = new Vector2(70f, 20f),
@@ -412,6 +453,8 @@ public sealed class BFEnvironmentLightingProfile
         { "mus", new BFEnvironmentLightingProfile
             {
                 Name = "Mustafar",
+                CascadeSplits = new Vector3(0.05f, 0.15f, 0.34f),
+                CascadeBorder = 0.20f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.50f,
                 SunColor = new Color(1f, 0.55f, 0.30f),
@@ -439,6 +482,8 @@ public sealed class BFEnvironmentLightingProfile
         { "kam", new BFEnvironmentLightingProfile
             {
                 Name = "Kamino",
+                CascadeSplits = new Vector3(0.06f, 0.16f, 0.36f),
+                CascadeBorder = 0.22f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.70f,
                 SunColor = new Color(0.88f, 0.93f, 1f),
@@ -477,6 +522,8 @@ public sealed class BFEnvironmentLightingProfile
                 // rather than lighting the scene, ambient and the map's own
                 // fixtures carry it, and the surfaces are stone.
                 Name = "Coruscant",
+                CascadeSplits = new Vector3(0.04f, 0.12f, 0.28f),
+                CascadeBorder = 0.15f,
                 Sky = BFSkyKind.Gradient,
                 SunIntensityScale = 0.45f,
                 SunColor = new Color(1f, 0.93f, 0.82f),
@@ -505,6 +552,8 @@ public sealed class BFEnvironmentLightingProfile
         { "nab", new BFEnvironmentLightingProfile
             {
                 Name = "Naboo",
+                CascadeSplits = new Vector3(0.10f, 0.26f, 0.52f),
+                CascadeBorder = 0.28f,
                 SunIntensityScale = 1.10f,
                 SunColor = new Color(1f, 0.97f, 0.92f),
                 SunAngle = new Vector2(55f, 75f),
@@ -521,6 +570,8 @@ public sealed class BFEnvironmentLightingProfile
         { "kas", new BFEnvironmentLightingProfile
             {
                 Name = "Kashyyyk",
+                CascadeSplits = new Vector3(0.04f, 0.11f, 0.26f),
+                CascadeBorder = 0.18f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.85f,
                 SunColor = new Color(1f, 0.97f, 0.85f),
@@ -541,6 +592,8 @@ public sealed class BFEnvironmentLightingProfile
         { "fel", new BFEnvironmentLightingProfile
             {
                 Name = "Felucia",
+                CascadeSplits = new Vector3(0.03f, 0.09f, 0.22f),
+                CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.75f,
                 SunColor = new Color(1f, 0.90f, 0.95f),
@@ -562,6 +615,8 @@ public sealed class BFEnvironmentLightingProfile
         { "myg", new BFEnvironmentLightingProfile
             {
                 Name = "Mygeeto",
+                CascadeSplits = new Vector3(0.05f, 0.15f, 0.34f),
+                CascadeBorder = 0.22f,
                 SunIntensityScale = 0.90f,
                 SunColor = new Color(0.90f, 0.94f, 1f),
                 SunAngle = new Vector2(30f, 210f),
@@ -582,6 +637,8 @@ public sealed class BFEnvironmentLightingProfile
         { "uta", new BFEnvironmentLightingProfile
             {
                 Name = "Utapau",
+                CascadeSplits = new Vector3(0.05f, 0.14f, 0.30f),
+                CascadeBorder = 0.20f,
                 SunIntensityScale = 1.00f,
                 SunColor = new Color(1f, 0.94f, 0.85f),
                 SunAngle = new Vector2(78f, 90f),
@@ -599,6 +656,8 @@ public sealed class BFEnvironmentLightingProfile
         { "yav", new BFEnvironmentLightingProfile
             {
                 Name = "Yavin 4",
+                CascadeSplits = new Vector3(0.04f, 0.12f, 0.28f),
+                CascadeBorder = 0.18f,
                 SunIntensityScale = 1.05f,
                 SunColor = new Color(1f, 0.95f, 0.82f),
                 SunAngle = new Vector2(50f, 45f),
@@ -615,6 +674,8 @@ public sealed class BFEnvironmentLightingProfile
         { "dag", new BFEnvironmentLightingProfile
             {
                 Name = "Dagobah",
+                CascadeSplits = new Vector3(0.05f, 0.14f, 0.32f),
+                CascadeBorder = 0.15f,
                 ForceAtmosphere = true,
                 SunIntensityScale = 0.55f,
                 SunColor = new Color(0.88f, 0.95f, 0.85f),
@@ -633,6 +694,36 @@ public sealed class BFEnvironmentLightingProfile
                 ShadowDistance = 200f,
                 BaseWetness = 0.9f,
                 DominantSurface = BFSurfaceType.Mud,
+            }
+        },
+
+        // Rhen Var. The one stock planet that had no profile at all and fell
+        // through to Default - a lighting-only omission, since the terrain
+        // classifier already knew it as rock.
+        //
+        // Measured: terrain runs -66.5 to 16.6 m, and the baked lighting has
+        // real contrast (mean luma 0.54, the second highest of any map). Stone
+        // ruins under a cold overcast sky, so the sun is weak and blue-shifted
+        // and the ambient carries more of the scene than usual. Snow-covered
+        // ground, but nothing like Hoth's whiteout - the interest here is the
+        // architecture, so the cascades sit between Hoth's far bias and a
+        // forest's near one.
+        { "rhn", new BFEnvironmentLightingProfile
+            {
+                Name = "Rhen Var",
+                CascadeSplits = new Vector3(0.07f, 0.20f, 0.42f),
+                CascadeBorder = 0.22f,
+                SunIntensityScale = 0.8f,
+                SunColor = new Color(0.88f, 0.92f, 1f),
+                SunAngularDiameter = 1.6f,
+                PlanetaryGroundTint = new Color(0.55f, 0.57f, 0.62f),
+                AtmosphereTint = new Color(0.5f, 0.62f, 0.95f),
+                AmbientIntensity = 1.35f,
+                FogMeanFreePath = 320f,
+                FogTint = new Color(0.82f, 0.87f, 0.95f),
+                ShadowDistance = 450f,
+                BaseSnowCoverage = 0.7f,
+                DominantSurface = BFSurfaceType.Snow,
             }
         },
 
@@ -662,6 +753,11 @@ public sealed class BFEnvironmentLightingProfile
         AmbientIntensity = 0.5f,
         ExposureCompensation = 0.2f,
         ShadowDistance = 120f,
+
+        // Interiors: everything worth shadowing is within a corridor's width,
+        // so the near cascade is tight and the far one barely matters.
+        CascadeSplits = new Vector3(0.06f, 0.18f, 0.42f),
+        CascadeBorder = 0.12f,
         ContactShadowLength = 0.8f,           // interiors live on contact detail
         ScreenSpaceGlobalIllumination = true,
         ReflectionMinSmoothness = 0.4f,
@@ -701,6 +797,11 @@ public sealed class BFEnvironmentLightingProfile
         ExposureCompensation = -0.20f,
         ExposureLimits = new Vector2(-4f, 16f),
         ShadowDistance = 900f,
+
+        // Space: a capital ship hull is enormous and entirely far-field, and
+        // there is no ground plane to catch a near shadow at all.
+        CascadeSplits = new Vector3(0.15f, 0.38f, 0.66f),
+        CascadeBorder = 0.30f,
         ContactShadowLength = 0.5f,
         AmbientOcclusionIntensity = 1.1f,
         DominantSurface = BFSurfaceType.Metal,

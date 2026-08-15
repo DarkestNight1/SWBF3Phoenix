@@ -179,7 +179,16 @@ public class BFLightingDirector : MonoBehaviour
                   $"exposure EV {Exposure.limitMin.value:F1}..{Exposure.limitMax.value:F1} " +
                   $"({Active.ExposureCompensation:+0.00;-0.00;0} bias), " +
                   $"fog {(Fog.enabled.value ? Fog.meanFreePath.value.ToString("F0") + "m" : "off")}, " +
-                  $"dominant surface {Active.DominantSurface}.");
+                  $"dominant surface {Active.DominantSurface}, " +
+                  // Shadow distance and cascade layout, so a per-map shadow
+                  // change is visible in the log rather than only on screen.
+                  // Two maps with different splits printing the same line is
+                  // the fastest way to catch a profile that did not resolve.
+                  $"shadows {ShadowSettings.maxShadowDistance.value:F0}m x" +
+                  $"{ShadowSettings.cascadeShadowSplitCount.value} " +
+                  $"[{ShadowSettings.cascadeShadowSplit0.value:F2}, " +
+                  $"{ShadowSettings.cascadeShadowSplit1.value:F2}, " +
+                  $"{ShadowSettings.cascadeShadowSplit2.value:F2}].");
     }
 
     void ApplySky(BFEnvironmentLightingProfile p)
@@ -471,6 +480,35 @@ public class BFLightingDirector : MonoBehaviour
         ShadowSettings.maxShadowDistance.Override(
             p.ShadowDistance * BFPresentationQuality.ShadowDistanceScale);
         ShadowSettings.cascadeShadowSplitCount.Override(BFPresentationQuality.ShadowCascades);
+
+        // Where the cascades divide, which decides where the shadow resolution
+        // goes. The count above only decides how many maps get rendered.
+        //
+        // These were never written, so every map in the game ran HDRP's default
+        // distribution regardless of what it looks like. A canopy walkway and
+        // an open snowfield want opposite answers: the first needs the near
+        // cascade tight because everything worth shadowing is a few metres
+        // away, the second needs it pushed out because there is nothing close
+        // and the detail that matters is at range.
+        //
+        // Sorted rather than trusted. These are hand-authored per map and HDRP
+        // requires them ascending; a transposed pair would otherwise produce a
+        // cascade of zero width and a band of missing shadows across the
+        // terrain, which is a miserable thing to track down from a screenshot.
+        Vector3 splits = p.CascadeSplits;
+        float s0 = Mathf.Clamp(Mathf.Min(splits.x, splits.y, splits.z), 0.001f, 1f);
+        float s2 = Mathf.Clamp(Mathf.Max(splits.x, splits.y, splits.z), 0.001f, 1f);
+        float s1 = Mathf.Clamp(splits.x + splits.y + splits.z - s0 - s2, s0, s2);
+
+        ShadowSettings.cascadeShadowSplit0.Override(s0);
+        ShadowSettings.cascadeShadowSplit1.Override(s1);
+        ShadowSettings.cascadeShadowSplit2.Override(s2);
+
+        float border = Mathf.Clamp01(p.CascadeBorder);
+        ShadowSettings.cascadeShadowBorder0.Override(border);
+        ShadowSettings.cascadeShadowBorder1.Override(border);
+        ShadowSettings.cascadeShadowBorder2.Override(border);
+        ShadowSettings.cascadeShadowBorder3.Override(border);
     }
 
     /// <summary>
