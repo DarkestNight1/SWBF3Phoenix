@@ -348,6 +348,78 @@ public class WorldLoader : Loader
     }
 
     /// <summary>
+    /// World-space edge length of the terrain, used both for the shader's
+    /// blend-map UV and for projecting baked vertex lighting onto it.
+    /// </summary>
+    /// <remarks>
+    /// This was <c>dim * dimScale</c> straight out of <c>GetHeightMap</c>. Both
+    /// come back as uint32_t, and dim is genuinely an integer - but the native
+    /// side fills dimScale with a C cast of tern INFO's GridUnitSize, which is
+    /// a float:
+    ///
+    ///     dimScale = (uint32_t) info -> m_GridUnitSize;
+    ///
+    /// So a map authored at 2.5 metres per grid unit arrives as 2, and a map
+    /// authored at anything under a metre arrives as ZERO. Neither case is
+    /// visible from the C# side - the number looks like a plausible grid size
+    /// either way.
+    ///
+    /// Truncation alone misregisters the blend map against the ground by the
+    /// ratio of the error. Zero is the "flat terrain" case, and it fails twice
+    /// over: <see cref="BuildBlendLightingScale"/> rejects a bound of zero and
+    /// returns null, so the map silently loses its baked terrain lighting, and
+    /// the shader's world UV - (worldPos.xz + bound/2) / bound in
+    /// BlendTerrainLayers.hlsl - divides by zero, so every layer samples a
+    /// single texel. Evenly lit and evenly textured, which is what flat looks
+    /// like.
+    ///
+    /// The mesh already knows the answer. <see cref="BuildTerrainMesh"/> places
+    /// every vertex in world space centred on the origin, so its bounds are the
+    /// terrain's true extent at full float precision, with no native rebuild
+    /// needed to get at it.
+    ///
+    /// The integer product is still preferred when the two agree, so maps with
+    /// a whole-number grid unit - which is most of them, and all the ones that
+    /// look right today - keep the exact value they already had. The mesh only
+    /// takes over when the two disagree by more than a couple of grid cells,
+    /// which is the signature of a truncation rather than of the half-cell
+    /// slack between "span of the vertices" and "span of the grid".
+    /// </remarks>
+    static float TerrainWorldBound(Mesh terrainMesh, uint dim, uint dimScale)
+    {
+        float stated = (float)(dim * dimScale);
+
+        if (terrainMesh == null || terrainMesh.vertexCount == 0)
+        {
+            return stated;
+        }
+
+        Vector3 size = terrainMesh.bounds.size;
+        float measured = Mathf.Max(size.x, size.z);
+        if (measured <= 0.0001f)
+        {
+            return stated;
+        }
+
+        // Slack of two grid cells. Sized off the measured extent rather than
+        // off dimScale, which is the quantity under suspicion - and which is
+        // zero in exactly the case this needs to catch.
+        float cell = dim > 0 ? measured / dim : measured;
+        if (Mathf.Abs(measured - stated) <= cell * 2f)
+        {
+            return stated;
+        }
+
+        Debug.LogWarning(
+            $"[Terrain] Grid unit size arrived truncated: dim={dim} dimScale={dimScale} " +
+            $"gives a {stated}m bound, but the built mesh spans {measured}m. Using the " +
+            "mesh. The native GetHeightMap casts a float GridUnitSize to an integer, so " +
+            "a fractional grid unit rounds down and a sub-metre one becomes zero.");
+
+        return measured;
+    }
+
+    /// <summary>
     /// Per-blend-map-texel darkening factor derived from the mesh's baked
     /// vertex colours, or null if the mesh has none (older native library,
     /// or a map with no colour block - the same guard BuildTerrainMesh uses).
@@ -562,7 +634,7 @@ public class WorldLoader : Loader
         }
 
         terrain.GetHeightMap(out uint dim, out uint dimScale, out float[] heightsRaw);
-        float bound = (float)(dim * dimScale);
+        float bound = TerrainWorldBound(terrainMesh, dim, dimScale);
         renderer.sharedMaterial.SetFloat("_XBound", bound);
         renderer.sharedMaterial.SetFloat("_ZBound", bound);
 
@@ -632,7 +704,7 @@ public class WorldLoader : Loader
         // own Bound uniform further down - computed once here instead of
         // twice.
         terrain.GetHeightMap(out uint dim, out uint dimScale, out float[] heightsRaw);
-        float bound = (float)(dim * dimScale);
+        float bound = TerrainWorldBound(terrainMesh, dim, dimScale);
 
         terrain.GetBlendMap(out uint blendDim, out uint numLayers, out byte[] blendMapRaw);
 
@@ -745,8 +817,27 @@ public class WorldLoader : Loader
             AssetDatabase.CreateAsset(terData, SaveDirectory + "/" + name + "_terrain_data.asset");
         }
 #endif
+        // dimScale is the native side's integer cast of a float grid unit size
+        // (see TerrainWorldBound), so a sub-metre grid unit arrives as zero,
+        // which makes a TerrainData with no horizontal extent at all - one that
+        // accepts SetHeights without complaint and renders nothing. There is no
+        // built mesh to measure against on this path, so fall back to a metre
+        // per grid unit rather than to nothing.
+        uint safeScale = dimScale > 0 ? dimScale : 1;
+        if (dimScale == 0)
+        {
+            Debug.LogWarning($"[Terrain] Grid unit size truncated to zero for '{name}'; " +
+                             "assuming 1m per grid unit. Import as mesh for the exact extent.");
+        }
+
+        // Equal height bounds leave no vertical range to normalise into, and
+        // every height then lands on a terrain of zero height - flat, and
+        // flat is indistinguishable from a map that genuinely is.
+        float heightRange = ceiling - floor;
+        if (heightRange <= 0f) heightRange = 1f;
+
         terData.heightmapResolution = (int)dim + 1;
-        terData.size = new Vector3(dim * dimScale, ceiling - floor, dim * dimScale);
+        terData.size = new Vector3(dim * safeScale, heightRange, dim * safeScale);
         terData.baseMapResolution = 512;
         terData.SetDetailResolution(512, 8);
 

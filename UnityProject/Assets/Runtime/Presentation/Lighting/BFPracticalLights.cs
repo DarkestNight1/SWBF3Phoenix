@@ -41,16 +41,22 @@ public static class BFPracticalLights
         public Color Color;
 
         /// <summary>
-        /// How far below the model's highest point the light hangs.
+        /// How far below the underside of the lid the light hangs.
         /// </summary>
         /// <remarks>
-        /// Measured from the top rather than the bottom because a roof model
-        /// may or may not include its support posts, and when it does its
-        /// lowest point is the ground rather than the underside of the lid.
-        /// Measuring down from the peak puts the light under the ridge either
-        /// way, which is also where a lantern would hang.
+        /// Measured from the underside of the topmost renderer, not from the
+        /// model's peak and not from its base, because neither of those is
+        /// reliably the ceiling of the space being lit. A roof model may or may
+        /// not include its support posts: when it does, the base is the ground;
+        /// when it does not, the base IS the underside and the space to light
+        /// is entirely below the model's bounds. Dropping from the lid's own
+        /// underside puts the light in open air under the canopy in both cases,
+        /// which is also where a lantern would hang.
+        ///
+        /// A light placed at or above the underside is inside the roof mesh and
+        /// lights nothing but the inside of the roof.
         /// </remarks>
-        public float DropFromTop;
+        public float DropBelowLid;
 
         /// <summary>
         /// Range as a multiple of the model's larger horizontal extent, so one
@@ -64,13 +70,6 @@ public static class BFPracticalLights
     const float MaxRange = 20f;
 
     /// <summary>
-    /// Lowest the light may sit above the model's base, so a model whose
-    /// bounds are shorter than <see cref="Spec.DropFromTop"/> does not end up
-    /// with its light buried in the floor.
-    /// </summary>
-    const float MinClearance = 0.5f;
-
-    /// <summary>
     /// Keyed by odf entity class name, lower case - the class, not the
     /// instance name, because a world file names most instances by number or
     /// not at all, and every placement of the same model wants the same light.
@@ -80,18 +79,25 @@ public static class BFPracticalLights
         // Kashyyyk village platforms. A solid wooden canopy over the walkable
         // deck, warm because the map's own light is warm and a neutral fill
         // under it reads as moonlight at midday.
+        //
+        // Verified against the shipped data rather than guessed: enumerating
+        // kas2.lvl gives this name WITH a ".msh" suffix, at 4 instances. The
+        // key here is the unsuffixed form and Lookup strips the extension
+        // before matching - an exact-match table keyed on the bare string
+        // against a suffixed name matches nothing at all, silently, which is
+        // how this entry did nothing the first time it was written.
         ["kas2_bldg_platform_roof"] = new Spec
         {
-            IntensityLumen = 2500f,
-            Color = new Color(1f, 0.86f, 0.7f),
-            DropFromTop = 1.2f,
+            IntensityLumen = 2600f,
+            Color = new Color(1f, 0.92f, 0.78f),
+            DropBelowLid = 0.5f,
             RangeFactor = 1.8f,
         },
 
         // The Kashyyyk main doorway. Dimmer and tighter than the platform: a
         // door is a threshold rather than a room, and the job is to stop the
         // opening reading as a black rectangle, not to light what is behind
-        // it. DropFromTop puts it just inside the head of the frame.
+        // it. DropBelowLid puts it just inside the head of the frame.
         //
         // NOTE: unverified class name - see the report below. If this key is
         // wrong the entry is a silent no-op, which is exactly what the load
@@ -100,7 +106,7 @@ public static class BFPracticalLights
         {
             IntensityLumen = 1800f,
             Color = new Color(1f, 0.89f, 0.76f),
-            DropFromTop = 0.8f,
+            DropBelowLid = 0.4f,
             RangeFactor = 2.2f,
         },
     };
@@ -117,6 +123,51 @@ public static class BFPracticalLights
     static readonly Dictionary<string, int> MatchCounts = new Dictionary<string, int>();
 
     /// <summary>
+    /// Find the entry for an imported name, tolerating the forms the same
+    /// asset arrives under.
+    /// </summary>
+    /// <remarks>
+    /// The name that reaches here is whatever the world file named the entity
+    /// class, and that is not one consistent spelling. The Kashyyyk roof
+    /// enumerates out of kas2.lvl as "kas2_bldg_platform_roof.msh"; other
+    /// placements of the same asset arrive unsuffixed, and geometry names
+    /// carry a segment suffix on top of that. So: lower-case, drop a trailing
+    /// .msh/.odf, then try an exact hit before falling back to a prefix match.
+    ///
+    /// The prefix fallback is last and not first. It is what makes a suffixed
+    /// or segmented name resolve, but it will also match a longer, unrelated
+    /// class that happens to begin with a key, so an exact hit must win when
+    /// there is one.
+    /// </remarks>
+    static bool Lookup(string entityClassName, out string key, out Spec spec)
+    {
+        string name = entityClassName.ToLowerInvariant();
+
+        if (name.EndsWith(".msh")) name = name.Substring(0, name.Length - 4);
+        else if (name.EndsWith(".odf")) name = name.Substring(0, name.Length - 4);
+
+        if (ByEntityClass.TryGetValue(name, out spec))
+        {
+            key = name;
+            return true;
+        }
+
+        foreach (KeyValuePair<string, Spec> entry in ByEntityClass)
+        {
+            if (name.StartsWith(entry.Key))
+            {
+                key = entry.Key;
+                spec = entry.Value;
+                return true;
+            }
+        }
+
+        key = null;
+        spec = default;
+        return false;
+    }
+
+    /// <summary>
     /// Add the practical for this entity class, if it has one. Safe to call
     /// for every imported instance; classes with no entry cost a dictionary
     /// miss.
@@ -125,8 +176,12 @@ public static class BFPracticalLights
     {
         if (instance == null || string.IsNullOrEmpty(entityClassName)) return;
 
-        string key = entityClassName.ToLowerInvariant();
-        if (!ByEntityClass.TryGetValue(key, out Spec spec))
+        // Fill light is a fidelity feature, not a correctness one. A machine on
+        // the bottom tier is already dropping local lights the map asked for by
+        // name, and should not then be handed lights the map never asked for.
+        if (!BFPresentationQuality.ImpactLights) return;
+
+        if (!Lookup(entityClassName, out string key, out Spec spec))
         {
             return;
         }
@@ -146,8 +201,16 @@ public static class BFPracticalLights
             bounds.Encapsulate(renderers[i].bounds);
         }
 
-        float y = Mathf.Max(bounds.max.y - spec.DropFromTop,
-                            bounds.min.y + MinClearance);
+        // The lid is the topmost renderer - the canopy itself. Anything below
+        // it is post, rail or deck, and its own underside is the ceiling of
+        // the space that needs the light.
+        Renderer lid = renderers[0];
+        for (int i = 1; i < renderers.Length; ++i)
+        {
+            if (renderers[i].bounds.max.y > lid.bounds.max.y) lid = renderers[i];
+        }
+
+        float y = lid.bounds.min.y - spec.DropBelowLid;
 
         float footprint = Mathf.Max(bounds.extents.x, bounds.extents.z);
         float range = Mathf.Clamp(footprint * spec.RangeFactor, MinRange, MaxRange);
