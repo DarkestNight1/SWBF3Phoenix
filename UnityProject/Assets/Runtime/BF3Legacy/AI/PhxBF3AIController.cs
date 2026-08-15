@@ -602,10 +602,16 @@ public class PhxBF3AIController : PhxAIController
         // A wall directly ahead means there is no ledge to walk off - let the
         // steering whiskers and stuck recovery deal with it. Without this the
         // drop probe starts inside the wall's mesh and reports a phantom pit.
+        //
+        // SoldierGround, not ~0. A mask of everything counts the ordnance-only
+        // and vehicle-only collision meshes the importer splits onto their own
+        // layers, which a soldier walks straight through - so a bolt-blocking
+        // pane in front of the AI read as a wall and suppressed the guard
+        // entirely. The soldier layer is already absent from this mask, which
+        // is what used to need the PhxSoldier exclusion below it.
         Vector3 chest = PawnPosition() + Vector3.up * 1.0f;
-        if (Physics.Raycast(chest, world, out RaycastHit wallHit, LedgeProbeAhead,
-                            ~0, QueryTriggerInteraction.Ignore) &&
-            wallHit.collider.GetComponentInParent<PhxSoldier>() == null)
+        if (Physics.Raycast(chest, world, LedgeProbeAhead,
+                            PhxLayers.SoldierGround, QueryTriggerInteraction.Ignore))
         {
             return;
         }
@@ -615,9 +621,18 @@ public class PhxBF3AIController : PhxAIController
         // where a downward ray exits through backfaces without a hit and the
         // guard froze the AI on every hill. A spherecast also tolerates thin
         // triangulation gaps a ray would slip through.
+        //
+        // SoldierGround here for the more serious version of the same reason.
+        // With a mask of everything, an ordnance-only or vehicle-only collision
+        // mesh under the drop answered "there is ground to land on" - and a
+        // soldier does not collide with either, so the guard cleared the AI to
+        // step off and it fell straight through the thing that had reassured
+        // it. That is the walking-off-the-map case: not a missing guard, a
+        // guard asking a question whose answer did not apply to soldiers.
         Vector3 probe = PawnPosition() + world * LedgeProbeAhead + Vector3.up * 1.8f;
         if (Physics.SphereCast(probe, 0.3f, Vector3.down, out _,
-                               1.8f + MaxSafeDrop, ~0, QueryTriggerInteraction.Ignore))
+                               1.8f + MaxSafeDrop, PhxLayers.SoldierGround,
+                               QueryTriggerInteraction.Ignore))
         {
             return;     // there is ground to land on
         }
