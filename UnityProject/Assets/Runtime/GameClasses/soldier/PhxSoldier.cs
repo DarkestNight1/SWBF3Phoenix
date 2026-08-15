@@ -763,29 +763,30 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     /// clips - see the note on the prone posture below.
     /// </remarks>
     /// <summary>
-    /// How far the camera should sit above the feet, in metres.
+    /// How much LOWER than standing the camera should sit, in metres.
     /// </summary>
     /// <remarks>
-    /// Follows the capsule, so going prone brings the view down with the body
-    /// instead of leaving it floating at standing height while the soldier
-    /// lies on the floor - which is what makes a lowered posture read as cover
-    /// rather than as a speed penalty.
+    /// A drop from the standing height rather than an absolute eye height.
+    /// The absolute version regressed the standing camera by 29 cm - capsule
+    /// 1.9 x 0.9 is 1.71 against the 2.0 the camera had always used - which is
+    /// a change to how the game looks on foot at all times, in service of a
+    /// posture most players are not in. Returning a delta means standing is
+    /// bit-for-bit what it was and only crouch and prone move.
     ///
-    /// Derived from the capsule rather than the odf's CAMERASECTION entries.
-    /// The stock classes do declare CROUCH, CROUCHZOOM, PRONE and PRONEZOOM
-    /// sections, but nothing in this runtime parses CAMERASECTION at all, and
-    /// adding that parser is a larger job than the posture it would serve.
+    /// Damped rather than tracking the capsule one for one: the capsule loses
+    /// 1.2 m going prone and a camera that fell the same distance would sit at
+    /// 0.8 m, close enough to the ground to clip through steps and door sills
+    /// on most maps. A head on the floor is still a head.
     /// </remarks>
-    public float GetEyeHeight()
+    public float GetPostureCameraDrop()
     {
         CapsuleCollider capsule = GetComponent<CapsuleCollider>();
         float height = capsule != null ? capsule.height : StandHeight;
 
-        // Prone sits proportionally higher in its own capsule than standing
-        // does: a head on the ground is still a head, and a camera at 0.63 m
-        // would be inside the floor geometry on most maps.
-        return Mathf.Max(height * 0.9f, 0.55f);
+        return Mathf.Max(StandHeight - height, 0f) * PostureCameraDropFactor;
     }
+
+    const float PostureCameraDropFactor = 0.55f;
 
     bool IsCrouched => State == PhxControlState.Crouch || State == PhxControlState.Prone;
 

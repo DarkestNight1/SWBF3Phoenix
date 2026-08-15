@@ -383,6 +383,31 @@ public class PhxBF3Config
     public float MinDynamicResolutionPercent = 65f;
 
     /// <summary>
+    /// Motion blur strength, 0 to 1. 0 disables it.
+    /// </summary>
+    /// <remarks>
+    /// Low on purpose. This is a third-person game, so the player character
+    /// animates in screen space every frame while the world behind it does
+    /// not - motion blur reads that as motion and softens the one thing the
+    /// player is always looking at. It was 0.35, which is a reasonable number
+    /// for a first-person camera and too much here.
+    /// </remarks>
+    public float MotionBlurIntensity = 0.12f;
+
+    /// <summary>
+    /// How aggressively TAA discards history where motion vectors disagree,
+    /// 0 to 1.
+    /// </summary>
+    /// <remarks>
+    /// HDRP defaults this to 0, meaning it never rejects. Static geometry
+    /// reprojects perfectly and stays crisp; a skinned character deforms every
+    /// frame so its history never quite matches, and the accumulated result
+    /// ghosts. Raising this trades a little temporal stability on characters
+    /// for them actually being sharp. Turn it down if edges start to shimmer.
+    /// </remarks>
+    public float TemporalMotionRejection = 0.55f;
+
+    /// <summary>
     /// Fraction of the frame budget held back as headroom, so the scaler aims
     /// under the refresh interval rather than exactly at it.
     /// </summary>

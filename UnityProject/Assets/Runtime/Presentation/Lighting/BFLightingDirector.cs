@@ -129,6 +129,10 @@ public class BFLightingDirector : MonoBehaviour
         string worldName = PhxGame.GetEnvironment()?.GetWorldName() ?? "";
         Active = BFEnvironmentLightingProfile.Resolve(worldName);
 
+        // The new map's importer has just written its own ambient; forget the
+        // previous map's baseline before anything scales it.
+        AmbientBaselineCaptured = false;
+
         // Before anything below reads a budget. The profile carries both what
         // the map should look like and what it is allowed to spend, and every
         // Apply* call past this point depends on the second half being in
@@ -140,14 +144,24 @@ public class BFLightingDirector : MonoBehaviour
         BFSurfaceQuery.MapDefault = Active.DominantSurface;
 
         ApplySky(Active);
-        ApplyExposure(Active);
         ApplyShadows(Active);
         ApplyIndirect(Active);
 
-        // Sun before fog: the log below reports what both settled at, and the
-        // fog pass reads nothing from the sun, so this ordering costs nothing
-        // and makes the diagnostic complete.
+        // Sun BEFORE exposure, not after. ApplyExposure reads SunData to pick
+        // the EV window, and SunData is assigned in ApplySun - so with the old
+        // ordering the first map of a session computed exposure from a null
+        // sun and every later map computed it from the PREVIOUS map's sun,
+        // before this map's scale had been applied to it.
+        //
+        // The null case is the damaging one: it falls through to the profile's
+        // raw ExposureLimits, which are deliberately wide (-2..14 EV) as a
+        // safety net. Auto-exposure given a fourteen-stop window normalises
+        // whatever it is pointed at to mid-grey, which is precisely the flat,
+        // washed-out look this was reported as.
+        //
+        // Fog still reads nothing from the sun, so it stays last.
         ApplySun(Active);
+        ApplyExposure(Active);
         ApplyFog(Active);
 
         // Logged with the resulting numbers, not the requested ones: "the map
@@ -505,21 +519,58 @@ public class BFLightingDirector : MonoBehaviour
     /// Safe to re-run: the importer rewrites these colours on every map load,
     /// so the scale applies to a fresh baseline rather than compounding.
     /// </remarks>
+    // The importer's ambient, captured before this pass ever scales it.
+    //
+    // ApplyAmbient multiplied RenderSettings in place, and Apply runs on EVERY
+    // OnMapLoaded. Those are global, engine-owned values that survive a map
+    // change, so the scale compounded: Coruscant's 1.35 became 1.82 on the
+    // second map load of a session, 2.46 on the third, 3.32 on the fourth. The
+    // symptom is a game that looks flatter and more washed out the longer it
+    // is played and fine again after a restart - which is exactly the kind of
+    // thing that reads as "the graphics are worse now" without pointing at any
+    // one change.
+    //
+    // ApplySun already guards against precisely this and says so in its own
+    // comment; the function immediately above it did not.
+    bool AmbientBaselineCaptured;
+    Color BaselineAmbientSky, BaselineAmbientEquator, BaselineAmbientGround, BaselineAmbientLight;
+    float BaselineAmbientIntensity;
+
+    /// <summary>
+    /// Re-read the ambient the importer left, so scaling is never cumulative.
+    /// </summary>
+    /// <remarks>
+    /// Captured per map rather than once: each .lgt carries its own ambient,
+    /// and a baseline taken on the first map would be applied to every map
+    /// after it.
+    /// </remarks>
+    void CaptureAmbientBaseline()
+    {
+        BaselineAmbientSky = RenderSettings.ambientSkyColor;
+        BaselineAmbientEquator = RenderSettings.ambientEquatorColor;
+        BaselineAmbientGround = RenderSettings.ambientGroundColor;
+        BaselineAmbientLight = RenderSettings.ambientLight;
+        BaselineAmbientIntensity = RenderSettings.ambientIntensity;
+        AmbientBaselineCaptured = true;
+    }
+
     void ApplyAmbient(BFEnvironmentLightingProfile p)
     {
+        if (!AmbientBaselineCaptured) CaptureAmbientBaseline();
+
         float scale = Mathf.Max(0f, p.AmbientIntensity);
-        if (Mathf.Approximately(scale, 1f)) return;
 
         if (RenderSettings.ambientMode == UnityEngine.Rendering.AmbientMode.Skybox)
         {
-            RenderSettings.ambientIntensity = scale;
+            RenderSettings.ambientIntensity = BaselineAmbientIntensity * scale;
             return;
         }
 
-        RenderSettings.ambientSkyColor *= scale;
-        RenderSettings.ambientEquatorColor *= scale;
-        RenderSettings.ambientGroundColor *= scale;
-        RenderSettings.ambientLight *= scale;
+        // From the baseline every time, never from the current value.
+        RenderSettings.ambientSkyColor = BaselineAmbientSky * scale;
+        RenderSettings.ambientEquatorColor = BaselineAmbientEquator * scale;
+        RenderSettings.ambientGroundColor = BaselineAmbientGround * scale;
+        RenderSettings.ambientLight = BaselineAmbientLight * scale;
     }
 
     /// <summary>

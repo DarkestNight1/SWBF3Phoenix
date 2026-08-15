@@ -75,8 +75,17 @@ public class PhxGraphicsEnhancer : MonoBehaviour
         TryAdd(() =>
         {
             MotionBlur mb = PostProfile.Add<MotionBlur>(true);
-            mb.intensity.Override(0.35f);          // present, not smeary
+            // 0.35 was smeary in practice, and specifically on the thing you
+            // look at constantly: this is a THIRD-PERSON game, so the player
+            // character is animating in screen space every single frame while
+            // the walls behind it are not. Motion blur reads that as motion and
+            // smears the character while leaving the scene crisp.
+            mb.intensity.Override(PhxBF3.Config.MotionBlurIntensity);
             mb.maximumVelocity.Override(200f);
+
+            // Ignore very small velocities, so an idle-breathing soldier is not
+            // continuously blurred by its own animation.
+            mb.minimumVelocity.Override(4f);
         }, "motion blur");
 
         // NOTE: no DepthOfField. It was configured with
@@ -159,6 +168,25 @@ public class PhxGraphicsEnhancer : MonoBehaviour
             // (fences, foliage, antennae) produces at high resolution
             data.antialiasing = HDAdditionalCameraData.AntialiasingMode.TemporalAntialiasing;
             data.taaSharpenStrength = 0.6f;
+
+            // TAA was left on its defaults past the sharpen strength, and the
+            // defaults are what made the CHARACTER blurry while the walls
+            // stayed sharp.
+            //
+            // taaMotionVectorRejection defaults to 0 - no history rejection at
+            // all. A static wall reprojects perfectly and looks crisp; a
+            // skinned soldier deforms every frame, so its history never quite
+            // matches and the accumulated result smears. Rejection is the knob
+            // that specifically discards history where motion vectors disagree,
+            // which is the animated-character case and nothing else.
+            //
+            // Quality is Medium by default; High widens the neighbourhood clamp
+            // TAA uses to decide what history to trust, and on the stated
+            // target (3060 at 1440p) it is not a meaningful cost.
+            data.TAAQuality = HDAdditionalCameraData.TAAQualityLevel.High;
+            data.taaMotionVectorRejection = PhxBF3.Config.TemporalMotionRejection;
+            data.taaHistorySharpening = 0.45f;
+            data.taaAntiFlicker = 0.6f;
             data.dithering = true;
             data.stopNaNs = true;
 
