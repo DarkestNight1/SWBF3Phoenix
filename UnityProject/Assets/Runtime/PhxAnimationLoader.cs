@@ -15,6 +15,9 @@ public static class PhxAnimationLoader
 
     static Dictionary<uint, CraClip> ClipDB = new Dictionary<uint, CraClip>();
 
+    /// <summary>Banks already reported missing, so a probe reports once.</summary>
+    static HashSet<string> ReportedMissingBanks = new HashSet<string>();
+
     // Bind poses keyed by skeleton name. A null value is a remembered miss, so
     // a skeleton the container doesn't have is looked up once rather than once
     // per clip.
@@ -67,6 +70,10 @@ public static class PhxAnimationLoader
     {
         ClipDB.Clear();
         SkeletonDB.Clear();
+
+        // A bank absent from one map's mounted data may be present in the
+        // next's, so the "already reported" set belongs to the map too.
+        ReportedMissingBanks.Clear();
 
         // Must happen together with the above or the two views of "which clips
         // exist" diverge, which is exactly how the pool leaked.
@@ -291,7 +298,22 @@ public static class PhxAnimationLoader
         AnimationBank bank = Con.Get<AnimationBank>(bankName);
         if (bank == null)
         {
-            Debug.LogError($"Cannot find AnimationBank '{bankName}'!");
+            // Once, and not as an error.
+            //
+            // Callers routinely PROBE a list of candidate banks - a non-human
+            // species is looked up as "<species>", "<species>_0", "<species>_1"
+            // and "<species>fp", and at most one of those exists. Reporting
+            // each miss as an error meant a working clone commander produced a
+            // stream of red every time one spawned, while a genuine failure
+            // looked identical.
+            //
+            // The aggregate case still reports: the multi-bank CreatePlayer
+            // warns when a clip is found in NONE of the banks it was given,
+            // which is the condition that actually matters.
+            if (ReportedMissingBanks.Add(bankName))
+            {
+                Debug.Log($"No AnimationBank '{bankName}' in the mounted data.");
+            }
             return null;
         }
 

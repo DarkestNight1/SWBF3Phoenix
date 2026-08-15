@@ -108,8 +108,6 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
         Body.interpolation = RigidbodyInterpolation.Interpolate;
         Body.collisionDetectionMode = CollisionDetectionMode.ContinuousDynamic;
 
-        ApplyInertia();
-
         SWBFModel Mapping = ModelLoader.Instance.GetModelMapping(gameObject, MissileClass.GeometryName.Get());
         if (Mapping != null)
         {
@@ -124,6 +122,17 @@ public class PhxMissile : PhxOrdnance, IPhxTickablePhysics
             Colliders = new List<Collider>();
             Colliders.Add(GetComponent<SphereCollider>());
         }
+
+        // After the colliders, not before.
+        //
+        // Assigning inertiaTensor tells PhysX to stop deriving it, but adding
+        // or enabling a collider makes it derive the body's mass properties
+        // again and throw the explicit value away. This ran before the model's
+        // colliders were built, so whatever the convexified ordnance mesh
+        // happened to produce won - and for a missile that is a long thin
+        // sliver, which degenerates. Applying last makes the explicit tensor
+        // the final word, which is what OnEnable then restores on every reuse.
+        ApplyInertia();
 
         TrailEffect = SCENE.EffectsManager.LendEffect(MissileClass.TrailEffect.Get());
         if (TrailEffect != null)
