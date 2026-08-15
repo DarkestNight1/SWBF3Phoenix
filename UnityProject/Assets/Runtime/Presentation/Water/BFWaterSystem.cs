@@ -84,7 +84,17 @@ public sealed class BFWaterSurface : MonoBehaviour, BFInteractionReceiver
         // look like that planet's water.
         if (material.HasProperty("_BaseColor"))
         {
-            material.SetColor("_BaseColor", ShallowColor);
+            // Alpha carried over from whatever the material already had, not
+            // taken from ShallowColor. A body built by BFMapWater has been put
+            // into HDRP's transparent pass with an alpha chosen to let the bed
+            // show through, and writing an opaque colour straight over it turns
+            // the surface back into a sheet of wet concrete.
+            Color shallow = ShallowColor;
+            if (material.HasProperty("_BaseColor"))
+            {
+                shallow.a = material.GetColor("_BaseColor").a;
+            }
+            material.SetColor("_BaseColor", shallow);
         }
         if (material.HasProperty("_Smoothness"))
         {

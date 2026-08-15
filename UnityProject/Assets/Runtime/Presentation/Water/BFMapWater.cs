@@ -61,13 +61,16 @@ public sealed class BFMapWater : MonoBehaviour
         {
             ScriptPrefix = "kas",
 
-            // Just above the bed, not level with it. The seabed is authored at
-            // exactly 0.00 and the terrain's own minimum is -0.36, so a surface
-            // at zero would z-fight the ground it is supposed to cover. This is
-            // also honest to the original: Kashyyyk's sea is ankle-deep at the
-            // shore and a boundary further out, not something to swim in, so a
-            // shallow surface is the right shape as well as the safe one.
-            SurfaceHeight = 0.15f,
+            // Above the bed, and with enough depth to read as water rather than
+            // as a wet floor. The seabed is authored at exactly 0.00 and the
+            // terrain's own minimum is -0.36, so anything at or near zero
+            // z-fights the ground it is supposed to cover.
+            //
+            // The ceiling on this is the shoreline, not taste: the bank starts
+            // climbing at the 55th percentile of terrain height, which measures
+            // 0.72m. A surface above that stops being a sea and starts being a
+            // flood, so this sits below it with room to spare.
+            SurfaceHeight = 0.45f,
 
             // The bed is flat to within a few centimetres over half the map, so
             // the footprint only needs to admit ground at about water level;
@@ -203,6 +206,54 @@ public sealed class BFMapWater : MonoBehaviour
         return true;
     }
 
+    /// <summary>
+    /// Switch the built surface to transparent so the bed shows through it.
+    /// </summary>
+    /// <remarks>
+    /// GameObject.CreatePrimitive hands back HDRP's default Lit material, which
+    /// is opaque - so the surface read as a sheet of wet concrete laid over the
+    /// bay rather than as water, and none of BFWaterSurface's depth colouring
+    /// could show because there was nothing to see through.
+    ///
+    /// HDRP does not switch surface type from a property alone: _SurfaceType
+    /// drives the inspector, but what actually moves the material into the
+    /// transparent pass is the render queue and the blend state, and the
+    /// _SURFACE_TYPE_TRANSPARENT keyword is what compiles the blending in. All
+    /// four have to be set together, which is the part that makes this look
+    /// like more work than "set alpha".
+    /// </remarks>
+    static void MakeTransparent(GameObject surface)
+    {
+        Renderer renderer = surface.GetComponent<Renderer>();
+        if (renderer == null) return;
+
+        Material mat = renderer.material;
+        if (mat == null) return;
+
+        mat.SetFloat("_SurfaceType", 1f);                 // 0 opaque, 1 transparent
+        mat.SetFloat("_BlendMode", 0f);                   // alpha
+        mat.SetFloat("_DstBlend", (float)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha);
+        mat.SetFloat("_SrcBlend", (float)UnityEngine.Rendering.BlendMode.SrcAlpha);
+        mat.SetFloat("_ZWrite", 0f);
+        mat.SetFloat("_AlphaCutoffEnable", 0f);
+
+        mat.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
+        mat.EnableKeyword("_BLENDMODE_ALPHA");
+        mat.DisableKeyword("_ALPHATEST_ON");
+
+        mat.renderQueue = (int)UnityEngine.Rendering.RenderQueue.Transparent;
+
+        // Alpha low enough to read as water. BFWaterSurface owns the colour
+        // itself and overwrites _BaseColor on Start - this only has to make
+        // sure the material it writes into is one that can show through.
+        Color c = mat.HasProperty("_BaseColor") ? mat.GetColor("_BaseColor") : Color.white;
+        c.a = 0.55f;
+        mat.SetColor("_BaseColor", c);
+
+        // Smooth, because a rough transparent surface reads as frosted glass.
+        if (mat.HasProperty("_Smoothness")) mat.SetFloat("_Smoothness", 0.95f);
+    }
+
     /// <summary>Bounds of the imported terrain, or false if there is none.</summary>
     static bool TerrainFootprint(out Bounds bounds)
     {
@@ -249,6 +300,8 @@ public sealed class BFMapWater : MonoBehaviour
         // would have soldiers walking on it instead.
         Collider collider = surface.GetComponent<Collider>();
         if (collider != null) Destroy(collider);
+
+        MakeTransparent(surface);
 
         Debug.Log($"[BFPresentation] Water built on '{world}' at y={surfaceHeight:0.00}, " +
                   $"{footprint.size.x:0}x{footprint.size.z:0}m - {why}.");

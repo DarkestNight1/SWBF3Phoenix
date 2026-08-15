@@ -159,7 +159,7 @@ Material:
     - _AlphaSrcBlend: 1
     - _AlphaToMask: 0
     - _AlphaToMaskInspectorValue: 0
-    - _Ammo: 49
+    - _Ammo: 48
     - _Anisotropy: 0
     - _BlendMode: 0
     - _CoatMask: 0

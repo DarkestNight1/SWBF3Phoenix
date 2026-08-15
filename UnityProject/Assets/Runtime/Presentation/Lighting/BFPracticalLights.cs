@@ -67,7 +67,7 @@ public static class BFPracticalLights
     }
 
     const float MinRange = 6f;
-    const float MaxRange = 20f;
+    const float MaxRange = 28f;
 
     /// <summary>
     /// Keyed by odf entity class name, lower case - the class, not the
@@ -80,6 +80,20 @@ public static class BFPracticalLights
         // deck, warm because the map's own light is warm and a neutral fill
         // under it reads as moonlight at midday.
         //
+        // Sized against the sun it is competing with, not picked by feel. The
+        // load log for kas2c_con reports the Kashyyyk profile driving the sun
+        // at 45000 lux with auto-exposure running EV 10.1 to 15.6. A 2600
+        // lumen point light is a domestic bulb: against an exposure metered
+        // for a lit clearing it lands under the noise floor, which is why the
+        // decking under these roofs still read as black with the fill present
+        // and working. The light budget log confirms all four exist - "4
+        // punctual light(s)", one per roof - so this was never a placement
+        // failure, only a brightness one.
+        //
+        // Range widened with it. A brighter point at the old 20m ceiling puts
+        // a hot spot under the ridge and leaves the platform edges dark, which
+        // trades one unreadable area for another.
+        //
         // Verified against the shipped data rather than guessed: enumerating
         // kas2.lvl gives this name WITH a ".msh" suffix, at 4 instances. The
         // key here is the unsuffixed form and Lookup strips the extension
@@ -88,10 +102,10 @@ public static class BFPracticalLights
         // how this entry did nothing the first time it was written.
         ["kas2_bldg_platform_roof"] = new Spec
         {
-            IntensityLumen = 2600f,
+            IntensityLumen = 14000f,
             Color = new Color(1f, 0.92f, 0.78f),
             DropBelowLid = 0.5f,
-            RangeFactor = 1.8f,
+            RangeFactor = 2.4f,
         },
 
         // The Kashyyyk main doorway. Dimmer and tighter than the platform: a
