@@ -93,6 +93,15 @@ public class PhxProjectiles : IPhxTickable, IPhxTickablePhysics
                     PhxMissile Missile = MissileObj.AddComponent<PhxMissile>();
                     Pool = new PhxOrdnancePool(Missile, MissileClass, 25);                     
                 }
+                else if (OClassType == typeof(PhxStickyClass))
+                {
+                    // Ahead of the PhxShellClass arm on purpose: PhxStickyClass
+                    // derives from it, and if the order were reversed a grenade
+                    // would be built as a shell and keep the shell's
+                    // explode-on-first-contact.
+                    PhxSticky Sticky = MissileObj.AddComponent<PhxSticky>();
+                    Pool = new PhxOrdnancePool(Sticky, MissileClass, 25);
+                }
                 else if (OClassType == typeof(PhxShellClass))
                 {
                     PhxShell Shell = MissileObj.AddComponent<PhxShell>();
