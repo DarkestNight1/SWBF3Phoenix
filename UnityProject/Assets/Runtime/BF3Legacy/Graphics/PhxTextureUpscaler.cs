@@ -87,8 +87,24 @@ public class PhxTextureUpscaler : MonoBehaviour
         // always a guess. Subscribed once here rather than per map.
         if (PhxGame.Instance != null)
         {
-            PhxGame.Instance.OnMapLoaded += () => MapLoaded = true;
+            PhxGame.Instance.OnMapLoaded += OnMapLoadedHandler;
         }
+    }
+
+    /// <summary>
+    /// A named handler, because a lambda cannot be detached.
+    /// </summary>
+    /// <remarks>
+    /// This was subscribed as <c>() =&gt; MapLoaded = true</c>. Nothing holds a
+    /// reference to that delegate, so there is no way to remove it - the
+    /// subscription outlives the component unconditionally, and every later map
+    /// load calls into a destroyed MonoBehaviour. Of the seven systems here
+    /// that were missing an unsubscribe, this was the only one that could not
+    /// simply have one added.
+    /// </remarks>
+    void OnMapLoadedHandler()
+    {
+        MapLoaded = true;
     }
 
     void Update()
@@ -409,6 +425,7 @@ public class PhxTextureUpscaler : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= OnMapLoadedHandler;
         foreach (RenderTexture rt in Cache.Values)
         {
             if (rt != null) rt.Release();

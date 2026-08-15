@@ -91,6 +91,7 @@ public sealed class BFTerrainInteractionSystem : MonoBehaviour, BFInteractionRec
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= Rebuild;
         if (Instance == this) Instance = null;
         BFSurfaceInteractionSystem.Unregister(this);
         Shader.SetGlobalFloat(MaskEnabledId, 0f);

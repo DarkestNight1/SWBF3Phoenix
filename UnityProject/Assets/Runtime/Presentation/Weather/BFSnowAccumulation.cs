@@ -50,6 +50,7 @@ public sealed class BFSnowAccumulation : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= ApplyMapBaseline;
         if (Instance == this) Instance = null;
         Shader.SetGlobalFloat(CoverageId, 0f);
     }

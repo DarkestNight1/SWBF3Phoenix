@@ -53,6 +53,7 @@ public sealed class BFReflectionProbeManager : MonoBehaviour
     void OnDestroy()
     {
         if (Instance == this) Instance = null;
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= Rebuild;
         Clear();
     }
 
@@ -189,6 +190,7 @@ public sealed class BFLightProbeManager : MonoBehaviour
     void OnDestroy()
     {
         if (Instance == this) Instance = null;
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= ConfigureScene;
     }
 
     void Start()

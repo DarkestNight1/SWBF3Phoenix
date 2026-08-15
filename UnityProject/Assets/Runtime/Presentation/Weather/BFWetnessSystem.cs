@@ -43,6 +43,7 @@ public sealed class BFWetnessSystem : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= ApplyMapBaseline;
         if (Instance == this) Instance = null;
         Shader.SetGlobalFloat(WetnessId, 0f);
         Shader.SetGlobalFloat(PuddleId, 0f);

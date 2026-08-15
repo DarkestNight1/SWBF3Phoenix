@@ -348,6 +348,7 @@ public sealed class BFWaterSystem : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= Discover;
         if (Instance == this) Instance = null;
         Bodies.Clear();
     }

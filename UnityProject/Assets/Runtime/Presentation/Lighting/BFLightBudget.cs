@@ -59,6 +59,7 @@ public sealed class BFLightBudget : MonoBehaviour
 
     void OnDestroy()
     {
+        if (PhxGame.Instance != null) PhxGame.Instance.OnMapLoaded -= Rescan;
         if (Instance == this) Instance = null;
     }
 
