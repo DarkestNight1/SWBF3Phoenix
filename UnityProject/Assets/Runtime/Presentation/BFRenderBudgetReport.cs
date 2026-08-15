@@ -103,7 +103,13 @@ public class BFRenderFeatureStats
     public float ssrMinSmoothness;
     public bool ssgi;
     public bool derivedMaterialMaps;
-    public int shadowFilteringQuality;
+    // HDRP 17 split the single shadowFilteringQuality into three - punctual,
+    // directional and area. Both of the ones this game actually pays for are
+    // reported rather than collapsing them back into one number: PCSS is
+    // enabled per category now, so "shadow filtering 2" was ambiguous the
+    // moment the field was split.
+    public int shadowFilteringQualityDirectional;
+    public int shadowFilteringQualityPunctual;
     public bool ssgiSupportedByAsset;
 
     /// <summary>
@@ -366,8 +372,18 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
         HDRenderPipelineAsset hdrp = GraphicsSettings.currentRenderPipeline as HDRenderPipelineAsset;
         if (hdrp != null)
         {
+            // HDRP 17 replaced reflectionProbeCacheSize - a count of probes the
+            // cache held - with a texture ATLAS (reflectionProbeTexCacheSize,
+            // a resolution) plus a separate cap on how many cube reflections
+            // may be live at once. The old field still exists but is internal
+            // and only read by the asset migration.
+            //
+            // maxCubeReflectionOnScreen is the one that still answers the
+            // question this warning asks, because it is still a count of
+            // probes. Comparing a probe budget against an atlas resolution
+            // would be comparing two different units.
             data.probes.reflectionCacheSize =
-                hdrp.currentPlatformRenderPipelineSettings.lightLoopSettings.reflectionProbeCacheSize;
+                hdrp.currentPlatformRenderPipelineSettings.lightLoopSettings.maxCubeReflectionOnScreen;
         }
 
         // A budget larger than the cache guarantees the cache thrashes every
@@ -376,8 +392,8 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             data.probes.reflectionBudget > data.probes.reflectionCacheSize)
         {
             data.warnings.Add($"reflection probe budget {data.probes.reflectionBudget} exceeds the " +
-                              $"pipeline's cache of {data.probes.reflectionCacheSize} - the cache " +
-                              "will evict and re-render probes every frame.");
+                              $"pipeline's limit of {data.probes.reflectionCacheSize} cube " +
+                              "reflections on screen - probes past that are dropped, not blended.");
         }
     }
 
@@ -399,7 +415,10 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
             r.dynamicResMinPercent = s.dynamicResolutionSettings.minPercentage;
             r.dynamicResMapFloorPercent = BFDynamicResolution.MapFloorPercent;
 
-            data.features.shadowFilteringQuality = (int)s.hdShadowInitParams.shadowFilteringQuality;
+            data.features.shadowFilteringQualityDirectional =
+                (int)s.hdShadowInitParams.directionalShadowFilteringQuality;
+            data.features.shadowFilteringQualityPunctual =
+                (int)s.hdShadowInitParams.punctualShadowFilteringQuality;
             data.features.ssgiSupportedByAsset = s.supportSSGI;
             data.features.decalDrawDistance = s.decalSettings.drawDistance;
         }
@@ -620,7 +639,8 @@ public sealed class BFRenderBudgetReport : MonoBehaviour
           .Append(", SSR ").Append(d.features.ssr)
           .Append(", SSGI ").Append(d.features.ssgi)
           .Append(d.features.ssgiSupportedByAsset ? "" : " (unsupported by asset)")
-          .Append(", shadow filtering ").Append(d.features.shadowFilteringQuality)
+          .Append(", shadow filtering dir ").Append(d.features.shadowFilteringQualityDirectional)
+          .Append("/punct ").Append(d.features.shadowFilteringQualityPunctual)
           .Append(", derived maps ").Append(d.features.derivedMaterialMaps)
           .AppendLine();
 

@@ -42,7 +42,10 @@ public class BFLightingDirector : MonoBehaviour
 
     Fog Fog;
     Exposure Exposure;
-    AmbientOcclusion AmbientOcclusion;
+    // Renamed from AmbientOcclusion in HDRP 17. The old name still exists but
+    // is an empty deprecated stub that is no longer a VolumeComponent at all,
+    // so this is a hard break rather than a soft one.
+    ScreenSpaceAmbientOcclusion AmbientOcclusion;
     ScreenSpaceReflection Reflections;
     ContactShadows ContactShadows;
     MicroShadowing MicroShadows;
@@ -97,7 +100,7 @@ public class BFLightingDirector : MonoBehaviour
         GradientSky = Profile.Add<GradientSky>(true);
         Fog = Profile.Add<Fog>(true);
         Exposure = Profile.Add<Exposure>(true);
-        AmbientOcclusion = Profile.Add<AmbientOcclusion>(true);
+        AmbientOcclusion = Profile.Add<ScreenSpaceAmbientOcclusion>(true);
         Reflections = Profile.Add<ScreenSpaceReflection>(true);
         ContactShadows = Profile.Add<ContactShadows>(true);
         MicroShadows = Profile.Add<MicroShadowing>(true);

@@ -39,7 +39,7 @@ public class PhxGame : MonoBehaviour
     public Volume             CharSelectPPVolume;
     public AudioMixerGroup    UIAudioMixer;
     public PhxCamera          Camera;
-    public PhysicMaterial     GroundPhyMat;
+    public PhysicsMaterial    GroundPhyMat;
     public PhxHUD             HUDPrefab;
     public PhxBolt            BoltPrefab;
     public PhxBeam            BeamPrefab;

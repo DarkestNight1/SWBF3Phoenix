@@ -58,9 +58,71 @@ namespace TypeCheck
             }
 
             int failed = 0;
-            if (config == "editor" || config == "both") failed += Run(repo, data, true, max);
-            if (config == "player" || config == "both") failed += Run(repo, data, false, max);
+            if (config == "editor" || config == "both") failed += Run(repo, data, unityRoot, true, max);
+            if (config == "player" || config == "both") failed += Run(repo, data, unityRoot, false, max);
             return failed == 0 ? 0 : 1;
+        }
+
+        /// <summary>The editor's version, parsed out of its install directory name.</summary>
+        /// <remarks>
+        /// The directory is what the Hub names after the version, and it is the
+        /// only version marker that is present before the editor has ever run -
+        /// which is the case this has to work in, since the whole point is to
+        /// check code against an engine the project has not been opened with
+        /// yet.
+        /// </remarks>
+        static (int Major, int Minor) EditorVersion(string unityRoot)
+        {
+            string name = new DirectoryInfo(unityRoot.TrimEnd('\\', '/')).Name;
+
+            var m = System.Text.RegularExpressions.Regex.Match(name, @"^(\d+)\.(\d+)");
+            if (!m.Success) return (0, 0);
+
+            return (int.Parse(m.Groups[1].Value), int.Parse(m.Groups[2].Value));
+        }
+
+        static bool IsUnity6(string unityRoot) => EditorVersion(unityRoot).Major >= 6000;
+
+        /// <summary>
+        /// The UNITY_* version defines the editor would set.
+        /// </summary>
+        /// <remarks>
+        /// Unity defines the exact version, the major, and an _OR_NEWER symbol
+        /// for every release up to the running one. Reproducing the whole
+        /// ladder is not worth it - what matters is that code guarded on
+        /// "6000 or newer" and code guarded on "2020_3 or newer" both resolve
+        /// the way the real compiler resolves them.
+        /// </remarks>
+        static IEnumerable<string> VersionDefines(string unityRoot)
+        {
+            (int major, int minor) = EditorVersion(unityRoot);
+
+            // Everything from 2017 onward keeps these true.
+            yield return "UNITY_2017_1_OR_NEWER";
+            yield return "UNITY_2018_1_OR_NEWER";
+            yield return "UNITY_2019_1_OR_NEWER";
+            yield return "UNITY_2020_1_OR_NEWER";
+            yield return "UNITY_2020_3_OR_NEWER";
+
+            if (major >= 6000)
+            {
+                yield return "UNITY_2021_1_OR_NEWER";
+                yield return "UNITY_2022_1_OR_NEWER";
+                yield return "UNITY_2023_1_OR_NEWER";
+                yield return "UNITY_6000_0_OR_NEWER";
+                yield return "UNITY_6000";
+                yield return $"UNITY_6000_{minor}_OR_NEWER";
+                yield return $"UNITY_6000_{minor}";
+            }
+            else
+            {
+                yield return "UNITY_2020_3";
+                yield return "UNITY_2020";
+
+                // Only the old stack ships the post-processing package; under
+                // Unity 6 this project's effects are all HDRP volume overrides.
+                yield return "UNITY_POST_PROCESSING_STACK_V2";
+            }
         }
 
         static string FindRepoRoot()
@@ -77,7 +139,7 @@ namespace TypeCheck
             return null;
         }
 
-        static int Run(string repo, string data, bool editorConfig, int max)
+        static int Run(string repo, string data, string unityRoot, bool editorConfig, int max)
         {
             string assets = Path.Combine(repo, "UnityProject", "Assets");
             string label = editorConfig ? "EDITOR" : "PLAYER";
@@ -90,18 +152,26 @@ namespace TypeCheck
             // Unity's own defines, plus the project's. LVLIMPORT_NO_EDITOR is
             // set for the Standalone group only (ProjectSettings.asset), which
             // is what makes the player compile a genuinely different one.
+            // Derived from whichever editor this was pointed at rather than
+            // hardcoded. The version defines decide which branch of a
+            // #if UNITY_6000_0_OR_NEWER the compiler sees, so a checker that
+            // always claimed 2020.3 would verify the wrong half of every
+            // compatibility shim - the exact thing it exists to catch during
+            // an engine upgrade.
             var defines = new List<string>
             {
-                "UNITY_2020_3_OR_NEWER", "UNITY_2020_3", "UNITY_2020", "UNITY_5_3_OR_NEWER",
+                "UNITY_5_3_OR_NEWER",
                 "UNITY_STANDALONE", "UNITY_STANDALONE_WIN", "UNITY_64",
-                "UNITY_POST_PROCESSING_STACK_V2",
                 "ENABLE_INPUT_SYSTEM", "CSHARP_7_3_OR_NEWER",
             };
+            defines.AddRange(VersionDefines(unityRoot));
+
             if (editorConfig) defines.Add("UNITY_EDITOR");
             else defines.Add("LVLIMPORT_NO_EDITOR");
 
             var parseOptions = new CSharpParseOptions(
-                LanguageVersion.CSharp8,
+                // Unity 6 compiles as C# 9; 2020.3 as C# 8.
+                IsUnity6(unityRoot) ? LanguageVersion.CSharp9 : LanguageVersion.CSharp8,
                 preprocessorSymbols: defines);
 
             var trees = new List<SyntaxTree>(sources.Count);
@@ -232,7 +302,16 @@ namespace TypeCheck
             // type-forwards the same primitives, so referencing both makes
             // every System.Int32 ambiguous (CS0433) while leaving the real
             // definitions unreachable (CS0518). One core only.
-            string mscorlib = Path.Combine(data, "MonoBleedingEdge", "lib", "mono", "unityjit");
+            // Unity 6 moved the reference BCL. 2020.3 ships the JIT profile
+            // under MonoBleedingEdge; Unity 6 ships proper reference
+            // assemblies under UnityReferenceAssemblies/unity-4.8-api and no
+            // longer has the old path at all. Probed rather than branched on
+            // the version, so an editor that ships both keeps working.
+            string mscorlib = Path.Combine(data, "UnityReferenceAssemblies", "unity-4.8-api");
+            if (!Directory.Exists(mscorlib))
+            {
+                mscorlib = Path.Combine(data, "MonoBleedingEdge", "lib", "mono", "unityjit");
+            }
             AddDir(mscorlib);
 
             // LibSWBF2.NET targets netstandard 2.0, so consuming its types

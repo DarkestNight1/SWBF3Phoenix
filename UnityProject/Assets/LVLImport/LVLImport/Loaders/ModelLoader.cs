@@ -36,7 +36,8 @@ public class ModelLoader : Loader {
     GameObject ModelDBRoot = new GameObject("ModelDBRoot");
 
 
-    public PhysicMaterial PhyMat;
+    // Renamed from PhysicMaterial in Unity 6; the old spelling is obsolete-as-error.
+    public PhysicsMaterial PhyMat;
 
 
 

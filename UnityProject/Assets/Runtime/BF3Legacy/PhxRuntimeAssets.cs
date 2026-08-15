@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.Rendering;                 // LightUnit: promoted from HDRP into core SRP in Unity 6
 using UnityEngine.Rendering.HighDefinition;
 
 /// <summary>
