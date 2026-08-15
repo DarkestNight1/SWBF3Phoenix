@@ -788,6 +788,115 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     const float PostureCameraDropFactor = 0.55f;
 
+    /// <summary>Steepest ground a soldier walks up instead of being stopped by.</summary>
+    const float SlopeLimit = 50f;
+
+    /// <summary>Tallest lip a soldier steps over instead of being stopped by.</summary>
+    /// <remarks>
+    /// Sized above a stock stair riser and above the door sills that separate
+    /// most interiors from the ground outside them, and below the crates and
+    /// low walls that are meant to be cover rather than a floor.
+    /// </remarks>
+    const float StepOffset = 0.45f;
+
+    /// <summary>
+    /// The distance a grounded soldier actually travels this tick, given what
+    /// is in front of them.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="CurrSpeed"/> is horizontal: <c>moveDirLocal</c> is built with
+    /// a zero Y and rotated by a yaw-only <c>LookRot</c>. Sweeping that
+    /// horizontal delta and clamping to the first hit - which is all this used
+    /// to do - is right for a wall and wrong for everything a soldier is
+    /// supposed to walk up. A ramp face is a hit a few centimetres ahead of the
+    /// capsule's lower hemisphere, so the clamp cut the tick's movement to
+    /// nearly nothing and the only thing that still carried the soldier upward
+    /// was PhysX depenetrating the capsule out along the ramp normal, one
+    /// overlap at a time. That is the "slow up ramps and stairs" bug: not a
+    /// speed that was set too low, but a movement that was being cancelled and
+    /// then partially undone by the solver.
+    ///
+    /// So the hit is classified rather than just obeyed. Walkable ground
+    /// redirects the movement along itself at full speed; a low obstruction is
+    /// stepped onto; anything else is still a wall and still clamps.
+    ///
+    /// Nothing here applies gravity or pulls a descending soldier back down -
+    /// the grounded model pins position per tick and that is unchanged.
+    /// </remarks>
+    Vector3 ResolveGroundedMove(Vector3 delta)
+    {
+        float distance = delta.magnitude;
+        if (distance <= 1e-4f) return delta;
+
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+        if (capsule == null || !capsule.enabled) return delta;
+
+        Vector3 direction = delta / distance;
+
+        if (!SweepCapsule(capsule, Vector3.zero, direction, distance, out RaycastHit hit))
+        {
+            return delta;
+        }
+
+        // Walkable ground in the way is not an obstruction, it is the floor
+        // continuing upward. Keep the speed and turn it along the surface,
+        // which is what walking up a slope is.
+        if (Vector3.Angle(hit.normal, Vector3.up) <= SlopeLimit)
+        {
+            Vector3 along = Vector3.ProjectOnPlane(direction, hit.normal);
+            if (along.sqrMagnitude > 1e-6f)
+            {
+                along.Normalize();
+                if (!SweepCapsule(capsule, Vector3.zero, along, distance, out _))
+                {
+                    return along * distance;
+                }
+            }
+        }
+
+        // Not walkable head-on, but possibly a step. Lift the sweep by the step
+        // height and see whether the way is clear from up there; a stair riser
+        // is vertical, so it never passes the slope test above and would
+        // otherwise read as a wall.
+        Vector3 lift = Vector3.up * StepOffset;
+        if (!SweepCapsule(capsule, lift, direction, distance, out _))
+        {
+            // Then come back down onto whatever is up there, rather than
+            // staying at the lifted height - landing on the measured surface is
+            // what stops a soldier floating a step's worth above a low kerb.
+            Vector3 lifted = delta + lift;
+            if (SweepCapsule(capsule, lifted, Vector3.down, StepOffset * 1.5f,
+                             out RaycastHit stepHit)
+                && Vector3.Angle(stepHit.normal, Vector3.up) <= SlopeLimit)
+            {
+                return lifted + Vector3.down * Mathf.Max(0f, stepHit.distance - 0.01f);
+            }
+        }
+
+        // A wall. Stop just short of the surface rather than exactly on it, so
+        // the next tick does not start embedded.
+        return direction * Mathf.Max(0f, hit.distance - 0.01f);
+    }
+
+    /// <summary>
+    /// Cast the soldier's own capsule, optionally from an offset origin.
+    /// </summary>
+    /// <remarks>
+    /// The radius is pulled in slightly so a body already touching a wall is
+    /// not reported as starting inside it.
+    /// </remarks>
+    bool SweepCapsule(CapsuleCollider capsule, Vector3 originOffset, Vector3 direction,
+                      float distance, out RaycastHit hit)
+    {
+        float half = Mathf.Max(0f, capsule.height * 0.5f - capsule.radius);
+        Vector3 centre = transform.TransformPoint(capsule.center) + originOffset;
+        Vector3 up = transform.up * half;
+
+        return Physics.CapsuleCast(centre - up, centre + up, capsule.radius * 0.95f,
+                                   direction, out hit, distance, PhxLayers.SoldierGround,
+                                   QueryTriggerInteraction.Ignore);
+    }
+
     bool IsCrouched => State == PhxControlState.Crouch || State == PhxControlState.Prone;
 
     // Posture-aware clip selection. Crouch has no alert variants and no
@@ -2029,35 +2138,10 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             // Casting the soldier's own capsule along the intended delta and
             // clamping to the first hit keeps the existing movement model
             // (position is pinned per tick, gravity does not apply while
-            // grounded) while making it collide.
-            Vector3 delta = CurrSpeed * deltaTime;
-            float distance = delta.magnitude;
-
-            if (distance > 1e-4f)
-            {
-                CapsuleCollider capsule = GetComponent<CapsuleCollider>();
-                if (capsule != null && capsule.enabled)
-                {
-                    // Capsule end points in world space, pulled in by the skin
-                    // width so a body already touching a wall is not reported
-                    // as starting inside it.
-                    float half = Mathf.Max(0f, capsule.height * 0.5f - capsule.radius);
-                    Vector3 centre = transform.TransformPoint(capsule.center);
-                    Vector3 up = transform.up * half;
-                    float radius = capsule.radius * 0.95f;
-
-                    if (Physics.CapsuleCast(centre - up, centre + up, radius,
-                                            delta / distance, out RaycastHit sweepHit,
-                                            distance, PhxLayers.SoldierGround,
-                                            QueryTriggerInteraction.Ignore))
-                    {
-                        // Stop just short of the surface rather than exactly on
-                        // it, so the next tick does not start embedded.
-                        distance = Mathf.Max(0f, sweepHit.distance - 0.01f);
-                        delta = delta.normalized * distance;
-                    }
-                }
-            }
+            // grounded) while making it collide. ResolveGroundedMove owns
+            // that sweep, and the ramp and step cases that clamping alone
+            // gets wrong.
+            Vector3 delta = ResolveGroundedMove(CurrSpeed * deltaTime);
 
             Body.MovePosition(Body.position + delta);
 
