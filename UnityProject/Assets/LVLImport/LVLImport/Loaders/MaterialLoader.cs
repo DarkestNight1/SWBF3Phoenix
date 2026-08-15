@@ -720,7 +720,17 @@ public class MaterialLoader : Loader
             dst[(i * 3) + 1] = alpha;
             dst[(i * 3) + 2] = alpha;
         }
-        grayscale.LoadRawTextureData(dst);
+        // SetPixelData, not LoadRawTextureData.
+        //
+        // LoadRawTextureData wants the bytes for the WHOLE mip chain, so the
+        // moment this texture gained mips it began rejecting a mip-0-sized
+        // buffer with "not enough data provided" - taking the entire material,
+        // and with it every model using it, down the exception path. On
+        // Coruscant that was most of the building set, the health droids and
+        // several unit classes.
+        //
+        // SetPixelData uploads one level; Apply(true) generates the rest.
+        grayscale.SetPixelData(dst, 0);
         grayscale.Apply(true);
         return grayscale;
     }

@@ -393,9 +393,21 @@ public sealed class BFWaterSystem : MonoBehaviour
         if (material == null) return false;
         if (BFSurfaceQuery.FromKeyword(material.name) == BFSurfaceType.Water) return true;
 
-        Texture texture = material.HasProperty("_BaseColorMap")
-            ? material.GetTexture("_BaseColorMap")
-            : material.mainTexture;
+        // Ask before reading either one. `mainTexture` is a property lookup for
+        // "_MainTex" under the hood and Unity logs an error per call when the
+        // shader has no such property - which the hologram shader does not, so
+        // scanning a map with holograms in it filled the console with errors
+        // from a function that was only ever asking a question.
+        Texture texture = null;
+        if (material.HasProperty("_BaseColorMap"))
+        {
+            texture = material.GetTexture("_BaseColorMap");
+        }
+        else if (material.HasProperty("_MainTex"))
+        {
+            texture = material.mainTexture;
+        }
+
         return texture != null && BFSurfaceQuery.FromKeyword(texture.name) == BFSurfaceType.Water;
     }
 

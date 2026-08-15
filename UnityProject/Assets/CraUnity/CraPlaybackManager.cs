@@ -519,7 +519,22 @@ public class CraPlaybackManager
                 Debug.Assert(Bones.length == BoneData.GetNumAllocated());
             }
 
-            BonePlayerClipIndices[allocIdx].Add(clipIdx, clipBoneIdx);
+            // Assign, do not Add.
+            //
+            // This maps clip -> that clip's index for this bone, and for a
+            // given bone and clip the answer is fixed: it is looked up from the
+            // clip's own bone-hash table. So a repeat is always writing the
+            // value that is already there.
+            //
+            // It happens because a second player can be created for a clip that
+            // some bone is already registered against - PhxHumanAnimator builds
+            // a fresh CraPlayer every time the AI asks for an action animation,
+            // while this table is manager-wide and keyed by bone. Add() threw on
+            // the collision, and the throw unwound all the way out of the AI
+            // controller's Tick, so every AI stopped being processed for that
+            // frame. Rebuilding a player per request is still wasteful and
+            // worth fixing at the caller; it is no longer fatal.
+            BonePlayerClipIndices[allocIdx][clipIdx] = clipBoneIdx;
             assignedBones.Add(allocIdx);
         }
 
