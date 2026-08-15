@@ -55,6 +55,12 @@ public static class PhxClassRegister
         // (measured), which is why PhxMine needed no new type to carry it.
         { "detonator",      new GameBaseClass(typeof(PhxGenericWeapon.ClassProperties), typeof(PhxDetonator))  },
 
+        // The engineer's fusioncutter. Also unregistered, so the WEAPONSECTION
+        // entry naming it was skipped and an engineer carried nothing in that
+        // slot. NOT the dispensers - `dispenser` is a separate base class with
+        // more than twice as many leaves, and is a separate job.
+        { "repair",         new GameBaseClass(typeof(PhxRepairWeapon.ClassProperties), typeof(PhxRepairWeapon)) },
+
 
         // This probably doesn't need to be an instance, but skin changer mods might modify leafpatch classes
         // e.g. season changer on Marth's Pioneer Trails...

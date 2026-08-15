@@ -594,5 +594,19 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
     public override void PlayIntroAnim(){}
     public PhxInstance GetAim(){ return Aim; }
     void StateFinished(int layer){}
-    public void AddHealth(float amount){}
+    /// <summary>Repair. See <see cref="IPhxDestructible.AddHealth"/>.</summary>
+    /// <remarks>
+    /// Was an empty stub, so a fusioncutter held against a tank did nothing.
+    /// A destroyed vehicle is not repairable - the wreck is removed and the
+    /// crew are already dead, so there is nothing left to bring back.
+    /// </remarks>
+    public float AddHealth(float amount)
+    {
+        if (IsDestroyed || amount <= 0f) return 0f;
+
+        float before = CurHealth.Get();
+        float max = C != null ? C.MaxHealth.Get() : before;
+        CurHealth.Set(Mathf.Min(before + amount, max));
+        return CurHealth.Get() - before;
+    }
 }

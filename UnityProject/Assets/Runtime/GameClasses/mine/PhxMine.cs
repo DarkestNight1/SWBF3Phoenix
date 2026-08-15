@@ -238,6 +238,25 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
                          "when it detonated. Spawn a new mine instead.");
     }
 
+    /// <summary>
+    /// A mine cannot be repaired, and the repair tool is how one is cleared.
+    /// </summary>
+    /// <remarks>
+    /// The fusioncutter declares MineHealth = -1000: pointing it at a mine
+    /// destroys it rather than healing it, which is the engineer's counter to
+    /// a minefield. Negative repair is routed to damage so that clearing one
+    /// still sets it off where it lies - clearing a mine from close range is
+    /// supposed to be a bad idea.
+    /// </remarks>
+    public float AddHealth(float amount)
+    {
+        if (amount >= 0f) return 0f;
+
+        float before = CurHealth.Get();
+        AddDamage(-amount);
+        return CurHealth.Get() - before;
+    }
+
     public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (Detonated) return;

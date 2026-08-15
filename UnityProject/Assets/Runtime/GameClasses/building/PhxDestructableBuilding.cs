@@ -281,6 +281,26 @@ public class PhxDestructableBuilding : PhxInstance<PhxDestructableBuilding.Class
         CurHealth.Set(Mathf.Max(CurHealth.Get() - damage, 0f));
     }
 
+    /// <summary>Repair. See <see cref="IPhxDestructible.AddHealth"/>.</summary>
+    /// <remarks>
+    /// Deliberately does NOT flip IsBuilt here. Tick already watches for health
+    /// crossing back above the rebuild threshold and swaps the model, collision
+    /// and effects there; doing it here as well would run the rebuild twice in
+    /// one frame. Same reasoning Restore gives below.
+    ///
+    /// A levelled structure can be repaired back up, which is what the
+    /// fusioncutter's BuildingRebuild amount is for.
+    /// </remarks>
+    public float AddHealth(float amount)
+    {
+        if (amount <= 0f) return 0f;
+
+        float before = CurHealth.Get();
+        float max = C != null ? C.MaxHealth.Get() : before;
+        CurHealth.Set(Mathf.Min(before + amount, max));
+        return CurHealth.Get() - before;
+    }
+
     /// <summary>Rebuild the structure. See <see cref="IPhxDestructible.Restore"/>.</summary>
     /// <remarks>
     /// Only health is set: Tick already watches for health crossing back above

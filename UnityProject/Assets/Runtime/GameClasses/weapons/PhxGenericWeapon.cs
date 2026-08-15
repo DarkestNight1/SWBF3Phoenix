@@ -611,7 +611,7 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
         return 1f - ReloadDelay / C.ReloadTime;
     }
 
-    public void Tick(float deltaTime)
+    public virtual void Tick(float deltaTime)
     {
         CurrSpread = Mathf.Max(CurrSpread - deltaTime * C.SpreadRecoverRate, 0f);
 

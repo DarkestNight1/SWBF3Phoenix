@@ -181,6 +181,18 @@ public class PhxRemoteTerminal : PhxInstance<PhxRemoteTerminal.ClassProperties>,
         PhxDestructionRegistry.Register(this);
     }
 
+    /// <summary>Repair. See <see cref="IPhxDestructible.AddHealth"/>.</summary>
+    /// <remarks>Nothing to repair once it is gone; the instance is destroyed with it.</remarks>
+    public float AddHealth(float amount)
+    {
+        if (amount <= 0f || Destroyed) return 0f;
+
+        float before = CurHealth.Get();
+        float max = C != null ? C.MaxHealth.Get() : before;
+        CurHealth.Set(Mathf.Min(before + amount, max));
+        return CurHealth.Get() - before;
+    }
+
     public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (Destroyed) return;

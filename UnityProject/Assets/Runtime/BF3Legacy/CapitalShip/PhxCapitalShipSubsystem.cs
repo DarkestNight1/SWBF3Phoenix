@@ -74,6 +74,23 @@ public class PhxCapitalShipSubsystem : MonoBehaviour, IPhxDamageableInstance, IP
         Invulnerable = value;
     }
 
+    /// <summary>Repair. See <see cref="IPhxDestructible.AddHealth"/>.</summary>
+    /// <remarks>
+    /// Health only, and never a resurrection: a knocked-out subsystem stays
+    /// out. Restore below explains why the kill side effects are one-way -
+    /// a shield generator's death drops the ship's shields for good, and
+    /// patching the generator does not close the hull breach the boarding
+    /// party came through.
+    /// </remarks>
+    public float AddHealth(float amount)
+    {
+        if (amount <= 0f || !IsAlive) return 0f;
+
+        float before = CurHealth;
+        CurHealth = Mathf.Min(before + amount, MaxHealth);
+        return CurHealth - before;
+    }
+
     public void AddDamage(float damage, PhxPawnController instigator = null)
     {
         if (!IsAlive || Invulnerable || Ship == null) return;

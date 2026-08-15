@@ -49,6 +49,17 @@ public interface IPhxDestructible
     void AddDamage(float damage, PhxPawnController instigator = null);
 
     /// <summary>
+    /// Repair. Returns how much health was actually restored, so a repair tool
+    /// can tell "healed it" from "it was already full" without asking twice.
+    /// </summary>
+    /// <remarks>
+    /// Clamped to MaxHealth by the implementation, not the caller: only the
+    /// object knows whether being repaired past a threshold also means
+    /// rebuilding itself.
+    /// </remarks>
+    float AddHealth(float amount);
+
+    /// <summary>
     /// Return to full health, undoing a destruction.
     /// </summary>
     /// <remarks>
