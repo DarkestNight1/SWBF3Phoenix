@@ -147,7 +147,7 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
             if (!(inst is IPhxControlableInstance)) continue;
 
             if (inst is PhxSoldier soldier && soldier.IsDead) continue;
-            if (myTeam > 0 && inst.Team.Get() == myTeam) continue;
+            if (PhxDamage.IsFriendly(myTeam, inst)) continue;
 
             return inst;
         }

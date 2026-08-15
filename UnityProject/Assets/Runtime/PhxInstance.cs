@@ -223,6 +223,18 @@ public interface IPhxWeapon
     public int GetTotalAmmo();
     public int GetMagazineAmmo();
     public int GetAvailableAmmo();
+
+    /// <summary>
+    /// Resupply the reserve, in magazines.
+    /// </summary>
+    /// <remarks>
+    /// Magazines rather than rounds because that is the unit the data uses:
+    /// a weapon recharge station declares soldierammo = 1.0 against
+    /// soldierhealth = 25.0, so one is a fraction of a clip and the other is
+    /// absolute HP. Letting each weapon convert also keeps a rifle's clip and
+    /// a rocket launcher's from having to mean the same number of rounds.
+    /// </remarks>
+    public void AddAmmo(float magazines);
     public float GetReloadTime();
     public float GetReloadProgress();
 }

@@ -192,4 +192,57 @@ public static class PhxDamage
         if (span <= 0.0001f) return 1f;
         return 1f - (distance - innerRadius) / span;
     }
+
+    /// <summary>
+    /// Whether <paramref name="target"/> is on the attacker's own side.
+    /// </summary>
+    /// <remarks>
+    /// One rule in one place. Melee, force powers and mines each carried their
+    /// own copy of it and they had already drifted apart - melee tested
+    /// `team != 0` where the other two tested `team > 0`, which disagree for a
+    /// negative team id. Team 0 is the unaffiliated/neutral team, and nothing
+    /// is friendly to it: a neutral turret shoots everyone.
+    ///
+    /// Deliberately NOT called from ApplyToCollider. Putting an unconditional
+    /// team check there would silently disable self-damage, and a grenade
+    /// landing at your own feet killing you is correct BF2 behaviour, not a
+    /// bug. Direct-fire callers gate on this; area effects do not.
+    /// </remarks>
+    public static bool IsFriendly(int attackerTeam, PhxInstance target)
+    {
+        if (target == null) return false;
+        if (attackerTeam <= 0) return false;
+
+        return target.Team.Get() == attackerTeam;
+    }
+
+    /// <summary>Same rule, starting from the controller that did the damage.</summary>
+    public static bool IsFriendly(PhxPawnController attacker, PhxInstance target)
+    {
+        // An unattributed hit - a map turret, a script, a scenery explosion -
+        // has no side and so is friendly to nobody.
+        if (attacker == null) return false;
+
+        return IsFriendly(attacker.Team, target);
+    }
+
+    /// <summary>
+    /// Whether direct fire from <paramref name="attacker"/> should be allowed
+    /// to damage whatever is on this collider.
+    /// </summary>
+    /// <remarks>
+    /// Gunfire only. Off by default and behind a config flag because team-kill
+    /// penalties become reachable the moment shots are attributed at all: with
+    /// 32v32 and AI that have no line-of-fire check and will happily fire
+    /// through a squadmate, leaving this on would punish the player for the
+    /// bots' behaviour.
+    /// </remarks>
+    public static bool BlocksDirectFire(PhxPawnController attacker, Collider target)
+    {
+        if (PhxBF3.Config.FriendlyFire) return false;
+        if (attacker == null || target == null) return false;
+
+        PhxInstance inst = target.GetComponentInParent<PhxInstance>();
+        return inst != null && IsFriendly(attacker, inst);
+    }
 }

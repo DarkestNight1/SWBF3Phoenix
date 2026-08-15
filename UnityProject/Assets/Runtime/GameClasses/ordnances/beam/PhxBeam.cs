@@ -17,6 +17,8 @@ public class PhxBeamClass : PhxOrdnanceClass
     public PhxProp<float> Rebound = new PhxProp<float>(0f);
 
     public PhxProp<bool> PassThrough = new PhxProp<bool>(false);
+
+    public PhxProp<string> ImpactEffect = new PhxProp<string>(null);
 }
 
 
@@ -35,10 +37,14 @@ public class PhxBeam : PhxOrdnance, IPhxTickable
     Light Light;
     HDAdditionalLightData HDLightData;
 
+
     List<Collider> IgnoredColliders;
-    List<int> IgnoredColliderLayers;
 
+    /// <summary>Damage is dealt once per shot, not once per frame. See Tick.</summary>
+    bool DamageApplied;
 
+    // Reused so the per-frame raycast does not allocate.
+    static readonly RaycastHit[] HitCache = new RaycastHit[16];
     public override void Init()
     {
         Light = GetComponent<Light>();
@@ -77,13 +83,9 @@ public class PhxBeam : PhxOrdnance, IPhxTickable
         transform.localPosition = Vector3.zero;
         transform.localRotation = Quaternion.identity;
 
-        IgnoredColliders = Originator.GetIgnoredColliders();
-        IgnoredColliderLayers = new List<int>();
+        DamageApplied = false;
 
-        foreach (Collider Coll in IgnoredColliders)
-        {
-            IgnoredColliderLayers.Add(Coll.gameObject.layer);
-        }
+        IgnoredColliders = Originator.GetIgnoredColliders();
     }
 
 
@@ -95,40 +97,75 @@ public class PhxBeam : PhxOrdnance, IPhxTickable
         gameObject.SetActive(false);
 
         IgnoredColliders = null;
-        IgnoredColliderLayers = null;
     }
 
+    bool IsIgnored(Collider c)
+    {
+        if (c == null) return true;
+        if (IgnoredColliders == null) return false;
+
+        for (int i = 0; i < IgnoredColliders.Count; ++i)
+        {
+            if (IgnoredColliders[i] == c) return true;
+        }
+        return false;
+    }
+
+    /// <remarks>
+    /// A beam did no damage at all - it positioned a LineRenderer and nothing
+    /// else - so every beam weapon in the game was cosmetic. It is a hitscan
+    /// shot with a trail that lingers, so the damage lands ONCE, on the first
+    /// tick, and the visual persists for the ordnance's lifespan. Applying it
+    /// per frame would be roughly twenty-four times the authored amount for a
+    /// 0.4 s beam.
+    ///
+    /// The shooter used to be excluded by rewriting its colliders to layer 2
+    /// for the duration of the raycast and putting them back afterwards. That
+    /// is not safe against anything else reading layers in the same frame, and
+    /// it mutates objects this ordnance does not own. RaycastAll and a skip
+    /// test does the same job without touching the scene.
+    /// </remarks>
     public void Tick(float deltaTime)
     {
-        // Probably need something more efficient
-        if (IgnoredColliders != null)
+        int count = Physics.RaycastNonAlloc(transform.position, transform.forward,
+                                            HitCache, BeamClass.Range, BeamMask,
+                                            QueryTriggerInteraction.Ignore);
+
+        // Nearest first: RaycastNonAlloc makes no ordering promise, and both
+        // "where does the beam stop" and "what does a non-penetrating beam
+        // hit" depend on the order.
+        System.Array.Sort(HitCache, 0, count,
+                          Comparer<RaycastHit>.Create((a, b) => a.distance.CompareTo(b.distance)));
+
+        bool passThrough = BeamClass.PassThrough;
+        float endDistance = BeamClass.Range;
+        bool applyDamage = !DamageApplied && BeamClass.MaxDamage > 0f;
+
+        for (int i = 0; i < count; ++i)
         {
-            foreach (Collider Coll in IgnoredColliders)
+            RaycastHit hit = HitCache[i];
+            if (IsIgnored(hit.collider)) continue;
+
+            if (applyDamage && !PhxDamage.BlocksDirectFire(Owner, hit.collider))
             {
-                Coll.gameObject.layer = 2;
+                PhxDamage.ApplyToCollider(hit.collider, BeamClass.MaxDamage,
+                                          BeamClass.GetDamageScales(), hit.point,
+                                          isSaber: false, instigator: Owner);
+
+                SCENE.EffectsManager.PlayEffectOnce(BeamClass.ImpactEffect.Get(), hit.point,
+                                                    Quaternion.LookRotation(hit.normal, Vector3.up));
+            }
+
+            if (!passThrough)
+            {
+                // Stops here, so this is the end of the drawn beam.
+                endDistance = hit.distance;
+                break;
             }
         }
 
-        // Do raycast (how to ignore Originator's colliders??)
-        // Todo: Stop only if not PassThrough, generalize layers
-        if (Physics.Raycast(transform.position, transform.forward, out RaycastHit hit, BeamClass.Range, BeamMask, QueryTriggerInteraction.Ignore))
-        {
-            // Extend linerender to hit
-            Renderer.SetPosition(1, new Vector3(0f, 0f, hit.distance));
-        }
-        else
-        {
-            // Extend linerender to full range
-            Renderer.SetPosition(1, new Vector3(0f, 0f, BeamClass.Range));
-        }
+        DamageApplied |= applyDamage;
 
-        // ''
-        if (IgnoredColliders != null && IgnoredColliderLayers != null)
-        {
-            for (int i = 0; i < IgnoredColliders.Count; i++)
-            {
-                IgnoredColliders[i].gameObject.layer = IgnoredColliderLayers[i];
-            }
-        }
+        Renderer.SetPosition(1, new Vector3(0f, 0f, endDistance));
     }
 }

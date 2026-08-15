@@ -197,6 +197,15 @@ public class PhxBolt : PhxOrdnance
             return;
         }
 
+        // Own team, and friendly fire off: the bolt still stops here and still
+        // marks the wall, it just does no damage. Passing through would be
+        // worse - you would shoot your squadmates' cover away from behind them.
+        if (PhxDamage.BlocksDirectFire(instigator, coll.collider))
+        {
+            ParentPool.Free(this);
+            return;
+        }
+
         PhxDamage.ApplyToCollider(coll.collider, BoltClass.MaxDamage,
                                   BoltClass.GetDamageScales(), contact.point,
                                   isSaber: false, instigator: instigator);

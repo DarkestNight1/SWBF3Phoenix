@@ -142,7 +142,7 @@ public sealed class PhxForcePowers : MonoBehaviour
             PhxInstance instance = coll.GetComponentInParent<PhxInstance>();
             if (instance == null || ReferenceEquals(instance, Owner)) continue;
             if (!alreadyHit.Add(instance)) continue;
-            if (team > 0 && instance.Team.Get() == team) continue;
+            if (PhxDamage.IsFriendly(team, instance)) continue;
 
             Vector3 to = instance.transform.position - origin;
             to.y = 0f;

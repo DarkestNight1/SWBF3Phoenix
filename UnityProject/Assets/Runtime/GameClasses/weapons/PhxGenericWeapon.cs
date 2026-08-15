@@ -469,6 +469,50 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
         return Ammunition;
     }
 
+    // Left over from a resupply too small to be a whole round. Without this an
+    // ammo droid ticking a quarter of a clip at a time would floor to zero
+    // every tick and hand out nothing at all, forever.
+    float AmmoCredit;
+
+    /// <summary>
+    /// Top up the reserve. See <see cref="IPhxWeapon.AddAmmo"/>.
+    /// </summary>
+    /// <remarks>
+    /// PhxSoldier.AddAmmo was an empty TODO while PhxPowerupstation and
+    /// PhxDroidStation both called it every tick, so health droids healed and
+    /// ammo droids were furniture.
+    ///
+    /// The ceiling is the same reserve Init hands out (RoundsPerClip * 3), so
+    /// standing on a station returns you to what you spawned with and no more.
+    /// The magazine itself is deliberately not filled - that is what reloading
+    /// is for, and topping it up here would let a player skip the reload by
+    /// standing on the pad.
+    /// </remarks>
+    public void AddAmmo(float magazines)
+    {
+        if (magazines <= 0f) return;
+
+        // A clip size of -1 means "never runs out" in the odfs (the
+        // fusioncutter, which uses heat instead). Nothing to resupply.
+        int clipSize = C.RoundsPerClip;
+        if (clipSize <= 0) return;
+
+        int maxReserve = clipSize * 3;
+        if (Ammunition >= maxReserve)
+        {
+            AmmoCredit = 0f;
+            return;
+        }
+
+        AmmoCredit += magazines * clipSize;
+
+        int rounds = Mathf.FloorToInt(AmmoCredit);
+        if (rounds <= 0) return;
+
+        AmmoCredit -= rounds;
+        Ammunition = Mathf.Min(Ammunition + rounds, maxReserve);
+    }
+
     public float GetReloadTime()
     {
         return C.ReloadTime;

@@ -13,7 +13,20 @@ public class PhxDroidStation : MonoBehaviour
 {
     public bool IsHealthDroid = true;   // false = ammo droid
     public float Radius = 2.5f;
+
+    /// <summary>Health per tick, for a health droid.</summary>
     public float AmountPerTick = 10f;
+
+    /// <summary>
+    /// Magazines per tick, for an ammo droid.
+    /// </summary>
+    /// <remarks>
+    /// Separate from AmountPerTick because the two are not in the same unit -
+    /// health is absolute HP and ammo is clips, the same split the stock
+    /// powerupstation odfs use (soldierhealth 25.0 against soldierammo 1.0).
+    /// Feeding the health figure to AddAmmo asked for ten magazines a second.
+    /// </remarks>
+    public float MagazinesPerTick = 0.5f;
     public float TickInterval = 1f;
 
     static readonly Collider[] OverlapCache = new Collider[16];
@@ -38,7 +51,7 @@ public class PhxDroidStation : MonoBehaviour
             }
             else
             {
-                soldier.AddAmmo(AmountPerTick);
+                soldier.AddAmmo(MagazinesPerTick);
             }
         }
     }

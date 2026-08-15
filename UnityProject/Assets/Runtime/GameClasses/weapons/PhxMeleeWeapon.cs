@@ -212,7 +212,7 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
 
             PhxInstance instance = coll.GetComponentInParent<PhxInstance>();
             if (instance == null || instance == this || alreadyHit.Contains(instance)) continue;
-            if (ownerTeam != 0 && instance.Team == ownerTeam) continue;
+            if (PhxDamage.IsFriendly(ownerTeam, instance)) continue;
 
             Vector3 to = instance.transform.position - origin;
             to.y = 0f;
@@ -282,4 +282,5 @@ public class PhxMeleeWeapon : PhxInstance<PhxMeleeWeapon.ClassProperties>, IPhxW
     public int GetAvailableAmmo() => 1;
     public float GetReloadTime() => 0f;
     public float GetReloadProgress() => 1f;
+    public void AddAmmo(float magazines) { }
 }

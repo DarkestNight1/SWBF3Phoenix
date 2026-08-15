@@ -477,6 +477,19 @@ public class PhxBF3Config
     public float ExplosionHearingRange = 120f;
 
     /// <summary>
+    /// Allow direct fire to damage your own team.
+    /// </summary>
+    /// <remarks>
+    /// Off by default. Gunfire was unattributed until kills started being
+    /// credited, so friendly fire has never actually been reachable in this
+    /// project - turning it on with 32v32 and AI that have no line-of-fire
+    /// check means being shot in the back by your own side constantly.
+    /// Explosions and mines ignore this: a grenade at your feet killing you is
+    /// correct, and always was.
+    /// </remarks>
+    public bool FriendlyFire = false;
+
+    /// <summary>
     /// Re-compress imported world textures to DXT on upload.
     /// </summary>
     /// <remarks>

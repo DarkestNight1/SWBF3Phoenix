@@ -691,9 +691,32 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     const float DeathCamSeconds = 2.5f;
 
-    public void AddAmmo(float amount)
+    /// <summary>
+    /// Resupply every weapon carried, in magazines.
+    /// </summary>
+    /// <remarks>
+    /// Was an empty TODO, which is why a health droid healed and an ammo droid
+    /// did nothing at all - PhxPowerupstation and PhxDroidStation have both
+    /// been calling this every tick the whole time.
+    ///
+    /// Every weapon rather than the one in hand: BF2's recharge pad refills
+    /// your kit, and having to cycle weapons while standing on it would be
+    /// worse for no gain.
+    /// </remarks>
+    public void AddAmmo(float magazines)
     {
-        // TODO
+        if (magazines <= 0f || Weapons == null) return;
+
+        for (int channel = 0; channel < Weapons.Length; ++channel)
+        {
+            IPhxWeapon[] slots = Weapons[channel];
+            if (slots == null) continue;
+
+            for (int i = 0; i < slots.Length; ++i)
+            {
+                slots[i]?.AddAmmo(magazines);
+            }
+        }
     }
 
     public void NextWeapon(int channel)
