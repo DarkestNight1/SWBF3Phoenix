@@ -26,6 +26,8 @@ public static class BFTerrainSurfaceMap
     public static void Reset()
     {
         Types = null;
+        CachedWorld = null;
+        CachedGround = BFSurfaceType.Unknown;
         Dimension = 0;
         WorldExtent = 0f;
     }
@@ -53,6 +55,24 @@ public static class BFTerrainSurfaceMap
 
         // Classify each layer once - the expensive part is the string matching,
         // and there are at most sixteen layers against a quarter-million texels.
+        //
+        // The keyword match alone classifies nothing on any stock map. Probing
+        // all twelve shipped terrains, every layer texture is named
+        // <map>_main_<n> - hoth_main_1, tat2_main_2, end_main_1, kas2_main_1 -
+        // and not one of them contains "snow", "sand", "rock", "grass" or any
+        // other word BFSurfaceQuery looks for. So every texel on every map
+        // resolved to Unknown, and everything keyed on the result quietly did
+        // nothing: no footprints in Hoth's snow or Tatooine's sand, because
+        // Unknown is not Deformable, and no surface-correct impact debris,
+        // wetness or snow accumulation either.
+        //
+        // The planet fallback is NOT applied here. Build runs during import,
+        // and the world name it keys on is not reliably set that early - baking
+        // it into the table would mean the fallback silently doing nothing
+        // depending on load order. Sample applies it instead, by which point
+        // the environment certainly exists. A name that does say something is
+        // still resolved here and wins later, so mod terrain that names its
+        // layers usefully keeps that answer.
         var layerTypes = new BFSurfaceType[layerCount];
         for (int i = 0; i < layerCount; ++i)
         {
@@ -100,6 +120,73 @@ public static class BFTerrainSurfaceMap
                   $"layers [{string.Join(", ", layerTypes)}]");
     }
 
+    static string CachedWorld;
+    static BFSurfaceType CachedGround = BFSurfaceType.Unknown;
+
+    /// <summary>
+    /// What a map's ground is made of, when its layer names will not say.
+    /// </summary>
+    /// <remarks>
+    /// Keyed by mission-script prefix, which is the same key
+    /// <see cref="BFMapCollisionOverrides"/> and <see cref="BFMapWater"/> use.
+    /// Each entry is the material a soldier is standing on for most of that
+    /// map - not every texel of it, which no single answer could be, but the
+    /// one that decides whether boots leave prints and what a blaster bolt
+    /// throws up.
+    ///
+    /// A map not listed keeps Unknown, which is the honest answer for one
+    /// nobody has looked at, and leaves it behaving exactly as it does now.
+    /// </remarks>
+    static BFSurfaceType PlanetGround()
+    {
+        string world = PhxGame.GetEnvironment()?.GetWorldName();
+        if (string.IsNullOrEmpty(world)) return BFSurfaceType.Unknown;
+
+        // Sample is on the path of every footstep, impact and query, so the
+        // string work happens once per map rather than once per call.
+        if (world == CachedWorld) return CachedGround;
+
+        CachedWorld = world;
+        CachedGround = Classify(world);
+        return CachedGround;
+    }
+
+    static BFSurfaceType Classify(string world)
+    {
+        string key = world.ToLowerInvariant();
+
+        // Snow, and the reason the user can name Hoth without being told.
+        if (key.StartsWith("hot")) return BFSurfaceType.Snow;
+
+        // Desert.
+        if (key.StartsWith("tat")) return BFSurfaceType.Sand;
+        if (key.StartsWith("geo")) return BFSurfaceType.Sand;
+
+        // Forest floor and jungle. Mud is this codebase's word for loose dark
+        // ground - BFSurfaceQuery already maps the keyword "dirt" onto it - and
+        // it is the deepest print any surface takes, which is right for a
+        // forest floor and wrong for nothing here.
+        if (key.StartsWith("end")) return BFSurfaceType.Mud;
+        if (key.StartsWith("yav")) return BFSurfaceType.Mud;
+        if (key.StartsWith("kas")) return BFSurfaceType.Mud;
+        if (key.StartsWith("dag")) return BFSurfaceType.Mud;
+        if (key.StartsWith("fel")) return BFSurfaceType.Mud;
+
+        // Meadow.
+        if (key.StartsWith("nab")) return BFSurfaceType.Grass;
+
+        // Stone and volcanic rock, which take no prints - naming them still
+        // matters, because it is what stops a bolt on Mustafar throwing up
+        // the same debris as one in a snowdrift.
+        if (key.StartsWith("mus")) return BFSurfaceType.Rock;
+        if (key.StartsWith("uta")) return BFSurfaceType.Rock;
+        if (key.StartsWith("myg")) return BFSurfaceType.Rock;
+        if (key.StartsWith("rhn")) return BFSurfaceType.Rock;
+        if (key.StartsWith("pol")) return BFSurfaceType.Snow;
+
+        return BFSurfaceType.Unknown;
+    }
+
     /// <summary>Surface at a world position, or Unknown if unavailable.</summary>
     public static BFSurfaceType Sample(Vector3 worldPosition)
     {
@@ -119,6 +206,11 @@ public static class BFTerrainSurfaceMap
         // index this map is built over. Getting this backwards is invisible on
         // a symmetric map and puts snow on the ridges everywhere else.
         int raw = (Dimension - 1 - v) * Dimension + u;
-        return Types[raw];
+        BFSurfaceType type = Types[raw];
+
+        // Unknown here means the layer name said nothing, which on stock data
+        // is every texel of every map - so this is the branch that actually
+        // decides what Hoth and Tatooine are made of.
+        return type != BFSurfaceType.Unknown ? type : PlanetGround();
     }
 }
