@@ -45,6 +45,7 @@ namespace SkelProbe
         static bool CensusMode;
         static bool MissingMode;
         static bool HashMode;
+        static bool PoseMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -68,11 +69,13 @@ namespace SkelProbe
             CensusMode = false;
             MissingMode = false;
             HashMode = false;
+            PoseMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--hash") { HashMode = true; }
+                if (args[i] == "--poses") { PoseMode = true; }
+                else if (args[i] == "--hash") { HashMode = true; }
                 else if (args[i] == "--missing") { MissingMode = true; }
                 else if (args[i] == "--census") { CensusMode = true; }
                 else if (args[i] == "--water") { WaterMode = true; }
@@ -127,6 +130,7 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (PoseMode) { PoseProbe.Run(path); continue; }
                 if (MissingMode) { MissingProbe.Run(path); continue; }
                 if (CensusMode) { CensusProbe.Run(path); continue; }
                 if (WaterMode) { WaterProbe.Run(path); continue; }
