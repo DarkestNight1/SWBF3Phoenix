@@ -926,7 +926,32 @@ public class PhxMatch
                 if (team.ReinforcementCount == 0) break;
 
                 PhxCommandpost cp = PickSpawnPost(posts, teamNum);
-                PhxClass unit = cp != null ? PickUnitClass(team, teamNum) : null;
+
+                // A hero the team has earned and nobody has taken.
+                //
+                // GetAvailableHeroClass and TryClaimHero existed but were
+                // reachable only from the character select screen, so an AI
+                // team could unlock its hero and then never field one - on a
+                // map where the player is on the other side, the hero simply
+                // never appeared. The claim has to happen here, before the
+                // ordinary unit pick, because the slot is what makes it
+                // exclusive.
+                bool claimedHero = false;
+                PhxClass unit = null;
+
+                if (cp != null)
+                {
+                    PhxClass hero = GetAvailableHeroClass(teamNum);
+                    if (hero != null && PhxHeroRules.TryClaimHero(teamNum))
+                    {
+                        unit = hero;
+                        claimedHero = true;
+                    }
+                    else
+                    {
+                        unit = PickUnitClass(team, teamNum);
+                    }
+                }
                 if (unit == null)
                 {
                     // No held post or no usable class: back off rather than
@@ -942,7 +967,21 @@ public class PhxMatch
                 IPhxControlableInstance ai = idle != null
                     ? RespawnAI(idle, unit, cp)
                     : SpawnAI<PhxBF3AIController>(unit, cp, teamNum);
-                if (ai == null) break;
+                if (ai == null)
+                {
+                    // Give the slot back. A hero claimed for a spawn that then
+                    // failed would otherwise be locked for the rest of the
+                    // round with nobody playing it - the same rollback the
+                    // player path already does.
+                    if (claimedHero) PhxHeroRules.NotifyHeroLost(teamNum);
+                    break;
+                }
+
+                if (claimedHero)
+                {
+                    Debug.Log($"[BF3Legacy] Team {teamNum} fielded its hero " +
+                              $"'{unit.Name}' under AI control.");
+                }
 
                 if (team.ReinforcementCount > 0) team.ReinforcementCount--;
                 spawned++;
@@ -1104,19 +1143,115 @@ public class PhxMatch
     /// Next unit class to field. Classes below their CountMin come first so the
     /// mission's required mix fills out before extras; CountMax is a hard cap.
     /// </summary>
+    /// <summary>Share of a team that should be carrying a scoped weapon.</summary>
+    /// <remarks>
+    /// A squad is not a sniper platoon. One in eight is roughly what the stock
+    /// maps field when their scripts bother to state CountMin at all, and it is
+    /// few enough that the snipe hint nodes - Kashyyyk authors ten against 168
+    /// cover nodes - are not oversubscribed.
+    /// </remarks>
+    const float SniperShare = 0.125f;
+
+    /// <summary>
+    /// Whether a unit class carries a scoped weapon.
+    /// </summary>
+    /// <remarks>
+    /// There is no role or class-label property anywhere in the data, so the
+    /// weapon is the only honest signal. SniperScope is the marker: its own
+    /// documentation records that it is set on the sniper rifle, the bowcaster,
+    /// the award pistol and sniper, and the hero target pistol - and on nothing
+    /// else.
+    ///
+    /// Read off the class rather than an instance. PhxClass.InitClass has
+    /// already populated the Weapons sections by the time a class is in a
+    /// team's list, so this costs no spawning.
+    /// </remarks>
+    static bool IsSniperClass(PhxClass unit)
+    {
+        if (!(unit is PhxSoldier.ClassProperties soldier)) return false;
+        if (soldier.Weapons == null) return false;
+
+        PhxScene scene = PhxGame.GetScene();
+        if (scene == null) return false;
+
+        // Section iteration exactly as PhxSoldier does it when building a
+        // loadout - the sections are only populated once InitClass has run, and
+        // a class in a team's list has been through that.
+        foreach (Dictionary<string, IPhxPropRef> section in soldier.Weapons)
+        {
+            if (section == null) continue;
+            if (!section.TryGetValue("WeaponName", out IPhxPropRef nameVal)) continue;
+            if (!(nameVal is PhxProp<string> weaponName)) continue;
+
+            PhxClass weapon = scene.GetClass(weaponName.Get());
+            PhxProp<bool> scope = weapon?.P?.Get<PhxProp<bool>>("SniperScope");
+            if (scope != null && scope.Get()) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Live AI on this team carrying a scoped weapon.</summary>
+    int CountLiveSnipers(int teamIdx)
+    {
+        int count = 0;
+        for (int i = 0; i < AIControllers.Count; ++i)
+        {
+            PhxPawnController c = AIControllers[i];
+            if (c == null || c.Pawn == null || c.Team != teamIdx) continue;
+
+            PhxInstance inst = c.Pawn.GetInstance();
+            if (inst != null && IsSniperClass(inst.GetClassRef())) count++;
+        }
+        return count;
+    }
+
     PhxClass PickUnitClass(PhxTeam team, int teamIdx)
     {
+        // Whether this spawn should be a sniper, decided before the walk below
+        // rather than left to chance.
+        //
+        // The walk returns the first eligible class out of an unordered
+        // HashSet, so once every class sits at its CountMin every subsequent
+        // spawn got the same one - snipers appeared only where a mission script
+        // happened to state a CountMin for them, which most do not. A team could
+        // field thirty-two identical troopers all match.
+        int alive = CountLiveAIOnTeam(teamIdx);
+        bool wantSniper = alive > 0 &&
+                          CountLiveSnipers(teamIdx) < Mathf.CeilToInt(alive * SniperShare);
+
         PhxClass fallback = null;
+        PhxClass sniper = null;
+
         foreach (PhxUnitClass uc in team.UnitClasses)
         {
             if (uc.Unit == null) continue;
 
             int inUse = CountLiveAIOfClass(teamIdx, uc.Unit);
             if (inUse >= uc.CountMax) continue;
+
+            // CountMin still wins outright - a script that asked for a minimum
+            // of something is stating a requirement, not a preference.
             if (inUse < uc.CountMin) return uc.Unit;
+
+            if (sniper == null && IsSniperClass(uc.Unit)) sniper = uc.Unit;
             if (fallback == null) fallback = uc.Unit;
         }
+
+        if (wantSniper && sniper != null) return sniper;
         return fallback;
+    }
+
+    /// <summary>Live AI on a team, for proportion decisions.</summary>
+    int CountLiveAIOnTeam(int teamIdx)
+    {
+        int count = 0;
+        for (int i = 0; i < AIControllers.Count; ++i)
+        {
+            PhxPawnController c = AIControllers[i];
+            if (c == null || c.Pawn == null || c.Team != teamIdx) continue;
+            if (c.Pawn.GetInstance() != null) count++;
+        }
+        return count;
     }
 
     int CountLiveAIOfClass(int teamIdx, PhxClass cl)
