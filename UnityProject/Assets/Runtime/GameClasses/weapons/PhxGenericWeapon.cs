@@ -563,6 +563,19 @@ public class PhxGenericWeapon : PhxInstance<PhxGenericWeapon.ClassProperties>, I
 
     public bool HasSniperScope() => C.SniperScope;
 
+    /// <summary>
+    /// Spend one round from the magazine.
+    /// </summary>
+    /// <remarks>
+    /// For subclasses whose "shot" is not a projectile - a detonator places a
+    /// charge - so they can consume ammo without going through the salvo
+    /// state machine, which is built around firing into a pool.
+    /// </remarks>
+    protected void ConsumeRound()
+    {
+        MagazineAmmo = Mathf.Max(MagazineAmmo - 1, 0);
+    }
+
     public void AddAmmo(float magazines)
     {
         if (magazines <= 0f) return;

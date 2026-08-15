@@ -48,6 +48,13 @@ public static class PhxClassRegister
         { "beacon",         new GameBaseClass(typeof(PhxBeacon.ClassProperties),         typeof(PhxBeacon))         },
         { "remoteterminal", new GameBaseClass(typeof(PhxRemoteTerminal.ClassProperties), typeof(PhxRemoteTerminal)) },
 
+        // Remote charges. The importer enumerated `detonator` as a real base
+        // class and nothing was registered for it, so PhxSoldier.Init got a
+        // null back and skipped the WEAPONSECTION entry naming it - the
+        // engineer's detpack did not exist at all. Its ordnance is base 'mine'
+        // (measured), which is why PhxMine needed no new type to carry it.
+        { "detonator",      new GameBaseClass(typeof(PhxGenericWeapon.ClassProperties), typeof(PhxDetonator))  },
+
 
         // This probably doesn't need to be an instance, but skin changer mods might modify leafpatch classes
         // e.g. season changer on Marth's Pioneer Trails...
