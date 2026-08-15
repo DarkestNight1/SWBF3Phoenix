@@ -83,9 +83,23 @@ public class PhxPlayerController : PhxPawnController
 
         Debug.DrawRay(Camera.transform.position, ViewDirection * 1000f, Color.blue);
 
-        // ignore vehicle colliders
-        int layerMask = 7;
-        if (Physics.Raycast(Camera.transform.position, ViewDirection, out RaycastHit hit, 1000f, layerMask))
+        // What the aim ray may hit is what a SHOT may hit - see
+        // PhxLayers.OrdnanceHits, which derives it from the collision matrix.
+        //
+        // This was `int layerMask = 7;` commented "ignore vehicle colliders".
+        // 7 is not a layer index, it is a bitmask: bits 0, 1 and 2, or Default,
+        // TransparentFX and Ignore Raycast. Soldiers are layer 10, terrain 11,
+        // buildings 12 - so the ray could hit essentially nothing in the game
+        // and TargetPos fell through to null on virtually every frame, sending
+        // GetAimPosition to its "1000 metres along the camera ray" fallback.
+        //
+        // Shots converge from the barrel onto that point, so a target a
+        // thousand metres away means the barrel-to-camera offset has barely
+        // begun to close at the range people actually fight at. That is why
+        // nothing could be killed, and why the damage trace showed every bolt
+        // landing in terrain with enemies alive seven metres away.
+        if (Physics.Raycast(Camera.transform.position, ViewDirection, out RaycastHit hit,
+                            1000f, PhxLayers.OrdnanceHits, QueryTriggerInteraction.Ignore))
         {
             PhxInstance GetInstance(Transform t)
             {

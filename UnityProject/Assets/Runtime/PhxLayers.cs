@@ -111,6 +111,70 @@ public static class PhxLayers
         }
     }
 
+    static int OrdnanceHitsMask;
+    static bool OrdnanceHitsResolved;
+
+    /// <summary>
+    /// Everything a projectile can actually hit.
+    /// </summary>
+    /// <remarks>
+    /// This is the mask an aim ray must use, because the only useful answer to
+    /// "what am I pointing at" is "where would my shot stop".
+    ///
+    /// Derived from the collision matrix rather than hand-listed, for the same
+    /// reason <see cref="SoldierGround"/> is: hand-listing got it catastrophically
+    /// wrong. PhxPlayerController's aim ray used a literal
+    ///
+    ///     int layerMask = 7;   // "ignore vehicle colliders"
+    ///
+    /// which is not a layer index but a BITMASK - bits 0, 1 and 2, meaning
+    /// Default, TransparentFX and Ignore Raycast. Soldiers are on layer 10,
+    /// terrain 11, buildings 12, so the ray could hit essentially nothing in
+    /// the game and the aim point fell through to its "1000 metres along the
+    /// camera ray" fallback on virtually every shot.
+    ///
+    /// That is what made the player unable to kill anything. Shots are fired
+    /// from the barrel toward the aim point, so with the aim point a thousand
+    /// metres away the barrel-to-camera offset closes by well under a percent
+    /// over the first few metres - a target seven metres away is missed by
+    /// most of the third-person camera's offset, and the bolt lands in the
+    /// terrain. The damage trace showed exactly that: every single bolt
+    /// hitting Terrain with enemies alive seven metres away.
+    ///
+    /// The convergence itself was always right; it was being handed a target
+    /// that did not exist. Diagnosed with the help of the barrel-fire-origin
+    /// research in BF2GameExt by S1thK3nny (MIT) - see the credits in
+    /// docs/BF2Compatibility.md - which documents the same class of parallax
+    /// fault in the original engine.
+    /// </remarks>
+    public static int OrdnanceHits
+    {
+        get
+        {
+            if (!OrdnanceHitsResolved)
+            {
+                int ordnance = LayerMask.NameToLayer("OrdnanceAll");
+
+                int mask = 0;
+                for (int layer = 0; layer < 32; ++layer)
+                {
+                    if (!Physics.GetIgnoreLayerCollision(ordnance, layer))
+                    {
+                        mask |= 1 << layer;
+                    }
+                }
+
+                // The ordnance layer itself is in the matrix for bolt-vs-bolt
+                // cases and is not something to aim at.
+                mask &= ~(1 << ordnance);
+
+                OrdnanceHitsMask = mask;
+                OrdnanceHitsResolved = true;
+            }
+            return OrdnanceHitsMask;
+        }
+    }
+
     static int TerrainLayerIndex = -1;
 
     /// <summary>

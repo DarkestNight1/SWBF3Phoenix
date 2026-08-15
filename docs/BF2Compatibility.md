@@ -157,3 +157,45 @@ Phoenix.exe -map kas2c_con
 ```
 
 `+map` is accepted too, since that is the form the stock game's launchers use.
+
+## Credits: BF2GameExt (S1thK3nny fork, MIT)
+
+<https://github.com/S1thK3nny/BF2GameExt>
+
+A much larger fork of PrismaticFlower's patcher, and a far richer source for
+Phoenix. Where the upstream is mostly limit-lifting, this one adds gameplay and
+fixes real engine faults, several of which Phoenix has independently - because
+Phoenix reimplements the same behaviours and can reproduce the same mistakes.
+
+Its `docs/RE/` directory is reverse-engineering research rather than code, which
+makes it usable regardless of implementation: it describes what the original
+engine does and where it goes wrong.
+
+**Already paid off.** `docs/RE/barrel-fire-origin.md` documents a parallax fault:
+projectiles leaving from one point while the aim direction is computed from
+another, so shots land away from the crosshair. Phoenix's convergence was
+already correct - it fires from the barrel toward the aim point - but its aim
+point was wrong, because `PhxPlayerController` raycast with a literal
+`layerMask = 7`. That is a bitmask of layers 0-2 (Default, TransparentFX,
+Ignore Raycast), not the "ignore vehicle colliders" its comment claimed, and it
+excluded soldiers, terrain and buildings. The ray hit nothing, the aim point
+fell back to a thousand metres down the camera ray, and shots missed by most of
+the third-person camera offset at combat range. Fixed by `PhxLayers.OrdnanceHits`.
+
+Worth reviewing next, mapped to Phoenix's open problems:
+
+| BF2GameExt source | Phoenix relevance |
+| --- | --- |
+| `src/entity/soldier_prone.cpp`, `prone_lvl_load.cpp`, `docs/images/Prone.webp` | Prone stance. The `prone_lvl_load` name suggests the animations ship as an extra LVL rather than existing in stock data - which matches the probe result that no prone locomotion clips exist in any shipped bank. |
+| `src/entity/droideka_ball_mode.cpp`, `droideka_death_anim_fix.cpp` | Droideka roll/deploy and death animation. |
+| `src/entity/hover_pilot_null_fix.cpp`, `vehicle_view_toggle.cpp`, `flyer_carrier_fixes.cpp` | Vehicle mount, camera and view-toggle faults - the area of the seat/camera bug fixed this session. |
+| `src/ai/ai_fairness.cpp`, `src/entity/ai_squad_order_null_fix.cpp` | AI behaviour and a squad-order null fault. |
+| `src/entity/hero_team_switch_fix.cpp` | Hero classes. |
+| `src/entity/soldier_fp_animation_override.cpp`, `anim_bank_append.cpp` | First-person animation banks; `anim_bank_append` is how extra banks get mounted. |
+| `src/render/red_light_stale_node_fix.cpp` | Stale light nodes - adjacent to the lighting work here. |
+| `src/entity/terrain_texture_fix.cpp` | Terrain texturing. |
+| `docs/RE/AISystem.md`, `AIComparison_BF1_vs_BF2.md` | How the original AI actually decides, against which Phoenix's scorer can be checked. |
+
+Licensed MIT, so both the research and the implementation may be referenced with
+attribution. Nothing has been copied; the barrel-fire-origin fix above was
+diagnosed from the research and written against Phoenix's own architecture.
