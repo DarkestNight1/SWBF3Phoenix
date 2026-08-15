@@ -66,6 +66,13 @@ public static class PhxClassRegister
         // e.g. season changer on Marth's Pioneer Trails...
         { "leafpatch",      new GameBaseClass(typeof(PhxLeafPatchClass),                 typeof(PhxLeafPatch))      },
 
+        // Ground cover, and unregistered until now - so it was skipped at
+        // import with no error, an unregistered base class being something the
+        // importer declines to build rather than something it fails at.
+        // Probing the shipped maps puts that at 66 instances: nab_prop_flowers
+        // x52 on Naboo, yav_prop_grass_tall x10 and yav_prop_grass x4 on Yavin.
+        { "grasspatch",     new GameBaseClass(typeof(PhxGrassPatchClass),                typeof(PhxGrassPatch))     },
+
         // Positional ambience: machinery, shield hums, water, tractor beams.
         // Unregistered until now, so every map imported its soundemitters
         // world as a few hundred silent empties.

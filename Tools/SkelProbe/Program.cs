@@ -42,6 +42,9 @@ namespace SkelProbe
         static bool PostureMode;
         static bool TerrainMode;
         static bool WaterMode;
+        static bool CensusMode;
+        static bool MissingMode;
+        static bool HashMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -62,11 +65,17 @@ namespace SkelProbe
             PostureMode = false;
             TerrainMode = false;
             WaterMode = false;
+            CensusMode = false;
+            MissingMode = false;
+            HashMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--water") { WaterMode = true; }
+                if (args[i] == "--hash") { HashMode = true; }
+                else if (args[i] == "--missing") { MissingMode = true; }
+                else if (args[i] == "--census") { CensusMode = true; }
+                else if (args[i] == "--water") { WaterMode = true; }
                 else if (args[i] == "--terrain") { TerrainMode = true; }
                 else if (args[i] == "--posture") { PostureMode = true; }
                 else                 if (args[i] == "--collision") { CollisionMode = true; }
@@ -100,6 +109,14 @@ namespace SkelProbe
                 }
             }
 
+            if (HashMode)
+            {
+                var names = new List<string>();
+                for (int i = 0; i < args.Length; ++i) if (args[i] != "--hash") names.Add(args[i]);
+                HashProbe.Run(names.ToArray());
+                return 0;
+            }
+
             if (files.Count == 0)
             {
                 Console.Error.WriteLine("usage: SkelProbe <lvl file or directory> [...] [--limit N]");
@@ -110,6 +127,8 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (MissingMode) { MissingProbe.Run(path); continue; }
+                if (CensusMode) { CensusProbe.Run(path); continue; }
                 if (WaterMode) { WaterProbe.Run(path); continue; }
                 if (TerrainMode) { TerrainProbe.Run(path); continue; }
                 if (PostureMode) { PostureProbe.Run(path); continue; }
@@ -169,6 +188,7 @@ namespace SkelProbe
                 Console.WriteLine();
             }
 
+            if (MissingMode) MissingProbe.Summary();
             return 0;
         }
 
