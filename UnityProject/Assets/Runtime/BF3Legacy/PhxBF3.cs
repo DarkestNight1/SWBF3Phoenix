@@ -276,6 +276,26 @@ public class PhxBF3Config
     /// higher, not a quarter faster. 1.0 is stock BF2.
     /// </summary>
     public float JumpHeightScale = 1.25f;
+
+    /// <summary>
+    /// Multiplies every soldier's ODF MaxHealth. 1.0 is stock BF2.
+    /// </summary>
+    /// <remarks>
+    /// Stock troopers have 100 health against weapons that were tuned for the
+    /// original game's much lower accuracy - hitscan-feeling bolts, modern aim
+    /// assistance and AI that now actually take cover and shoot from it add up
+    /// to fights that end before they start. Scaling health rather than
+    /// retuning every weapon's damage keeps the relative weight of the arsenal
+    /// intact: a sniper rifle still kills a trooper in one, a blaster pistol
+    /// still takes a while, and the hero classes stay proportionally as tough
+    /// as their odfs say they are.
+    ///
+    /// Applied to MaxHealth at class load, so everything downstream - the
+    /// health fraction the HUD reads, the AI's own read on whether it is
+    /// hurt, the medic droid's top-up - all follow from it with no further
+    /// changes.
+    /// </remarks>
+    public float HealthScale = 1.75f;
     public bool HighResolutionMode = true;
     public bool VerticalBattlefront = true;   // seamless ground <-> space transitions
     public bool DynamicWeather = true;        // per-map precipitation, storms, day/night

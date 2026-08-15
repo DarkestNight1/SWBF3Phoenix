@@ -79,6 +79,11 @@ public class PhxScene
         // calls SpaceAssaultEnable/AddCriticalSystem/AddAIGoal. Resetting in
         // Import would wipe the configuration the script just supplied.
         PhxSpaceAssault.Reset();
+
+        // Class objects do not survive a map load, so the "already scaled" set
+        // must not either - a stale entry would leave the next map's identically
+        // shaped class unscaled.
+        PhxSoldier.ResetHealthScaling();
         PhxAIGoals.Reset();
 
         // Same reasoning as the two above: EnableSPHeroRules and

@@ -206,9 +206,42 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
     int[] WeaponIdx = new int[2] { -1, -1 };
 
 
+    /// <summary>
+    /// Classes whose MaxHealth has already been scaled by
+    /// <see cref="PhxBF3.PhxConfig.HealthScale"/>.
+    /// </summary>
+    /// <remarks>
+    /// Identity comparison, not value: two soldier classes can legitimately
+    /// share a MaxHealth, and the question here is "has this object been
+    /// touched", not "does this number look scaled".
+    /// </remarks>
+    static readonly HashSet<ClassProperties> HealthScaled =
+        new HashSet<ClassProperties>();
+
+    /// <summary>Reset between maps, since classes do not survive a load.</summary>
+    public static void ResetHealthScaling() => HealthScaled.Clear();
+
+    static void ApplyHealthScale(ClassProperties cl)
+    {
+        if (cl == null || !HealthScaled.Add(cl)) return;
+
+        float scale = PhxBF3.Config.HealthScale;
+        if (scale <= 0f || Mathf.Approximately(scale, 1f)) return;
+
+        cl.MaxHealth.Set(cl.MaxHealth.Get() * scale);
+    }
+
     public override void Init()
     {
         gameObject.layer = LayerMask.NameToLayer("SoldierAll");
+
+        // Scaled once, here, and never again. MaxHealth lives on the class,
+        // which is shared by every soldier of that type, so applying the scale
+        // in place would compound it on the second spawn and every spawn after
+        // - the fifth trooper off the line would be indestructible. Guarded on
+        // the class instead, so the multiply happens the first time the class
+        // is used and the value is simply read from then on.
+        ApplyHealthScale(C);
 
         // Start at full health and stamina. CurHealth is an instance property
         // that stock odfs never set, so it kept its 100 default while MaxHealth
