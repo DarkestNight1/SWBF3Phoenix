@@ -355,6 +355,24 @@ public class PhxBF3AIController : PhxAIController
             }
         }
 
+        // Resupply pre-empts every state, not just combat.
+        //
+        // TickSelfPreservation was called from TickEngage alone, so a soldier
+        // only ever looked for a droid while it had a target. One that took
+        // fire crossing open ground, broke line of sight and then marched on to
+        // its objective at a tenth health never sought help at all - and since
+        // dropping below the retreat threshold usually means the fight went
+        // badly, that is exactly the soldier most likely to be out of contact.
+        //
+        // Sited here rather than inside each Tick so it cannot be forgotten by
+        // a state added later, and after the state selection above so the state
+        // it returns to is already correct when it finishes.
+        if (State != PhxAIState.Board && State != PhxAIState.ManTurret &&
+            TickSelfPreservation())
+        {
+            return;
+        }
+
         switch (State)
         {
             case PhxAIState.SeekObjective: TickSeekObjective(deltaTime); break;
@@ -965,22 +983,39 @@ public class PhxBF3AIController : PhxAIController
         if (soldier == null || !soldier.IsInit) return false;
 
         float health = soldier.HealthFraction;
+        float ammo = AmmoFraction(soldier);
+
+        bool hurt = health <= RetreatHealthFraction;
+        bool dry = ammo <= ResupplyAmmoFraction;
 
         if (Retreating)
         {
-            // Patched up (or picked up by a droid): back to the fight.
-            if (health >= RecoveredHealthFraction)
+            // Patched up, or restocked: back to the fight. Both conditions have
+            // to clear, or a soldier who went for ammo walks away the instant
+            // its health ticks up from a passing medic droid.
+            bool recovered = health >= RecoveredHealthFraction || !NeededHealth;
+            bool restocked = ammo >= RecoveredAmmoFraction || !NeededAmmo;
+
+            if (recovered && restocked)
             {
                 Retreating = false;
+                NeededHealth = false;
+                NeededAmmo = false;
                 return false;
             }
         }
         else
         {
-            if (health > RetreatHealthFraction) return false;
+            // Ammo counts as much as health here. A soldier with a full bar and
+            // an empty magazine contributes nothing to a firefight, and until
+            // now nothing sent it to a droid - AmmoFraction was computed for
+            // the decision scorer and then never acted on.
+            if (!hurt && !dry) return false;
 
             Retreating = true;
-            RetreatGoal = FindRecoveryPoint();
+            NeededHealth = hurt;
+            NeededAmmo = dry;
+            RetreatGoal = FindRecoveryPoint(wantHealth: hurt, wantAmmo: dry);
         }
 
         // Nowhere to go - better to keep fighting than stand still.
@@ -1035,17 +1070,52 @@ public class PhxBF3AIController : PhxAIController
     /// <summary>
     /// Nearest resupply droid, or failing that a friendly command post.
     /// </summary>
-    Vector3 FindRecoveryPoint()
+    /// <summary>Rounds below which a soldier goes looking for a droid.</summary>
+    const float ResupplyAmmoFraction = 0.2f;
+
+    /// <summary>Rounds at which it is worth going back to the fight.</summary>
+    const float RecoveredAmmoFraction = 0.7f;
+
+    /// <summary>What sent this soldier away, so arrival can be judged.</summary>
+    bool NeededHealth;
+    bool NeededAmmo;
+
+    /// <summary>Magazine fill of the primary weapon, 1 when it has no magazine.</summary>
+    static float AmmoFraction(PhxSoldier soldier)
+    {
+        IPhxWeapon weapon = soldier.GetPrimaryWeapon();
+        if (weapon == null) return 1f;
+
+        int mag = weapon.GetMagazineSize();
+        if (mag <= 0) return 1f;
+
+        // Total ammo, not the loaded magazine - a soldier mid-reload is not
+        // out of ammunition, and sending it across the map would be absurd.
+        return Mathf.Clamp01(weapon.GetTotalAmmo() / (float)mag);
+    }
+
+    Vector3 FindRecoveryPoint(bool wantHealth, bool wantAmmo)
     {
         Vector3 self = PawnPosition();
         Vector3 best = Vector3.positiveInfinity;
         float bestDist = float.MaxValue;
         PhxScene scene = PhxGame.GetScene();
 
-        // Resupply droids first: they actually restore health.
+        // Droids first, but only ones that supply what is actually missing.
+        //
+        // This used to take the nearest station of any kind. A station's odf
+        // states SoldierHealth and SoldierAmmo independently and either may be
+        // zero, so a bleeding soldier could walk to the closest droid, stand in
+        // an ammo-only resupply field, and be repaired by nothing.
         foreach (PhxPowerupstation station in GetResupplyStations(scene))
         {
-            if (station == null) continue;
+            if (station == null || !station.IsInit) continue;
+
+            bool heals = station.C.SoldierHealth.Get() > 0f;
+            bool restocks = station.C.SoldierAmmo.Get() > 0f;
+
+            if (wantHealth && !heals) continue;
+            if (wantAmmo && !restocks && !wantHealth) continue;
 
             float d = Vector3.SqrMagnitude(station.transform.position - self);
             if (d < bestDist)
@@ -1078,8 +1148,9 @@ public class PhxBF3AIController : PhxAIController
 
     void TickEngage(float deltaTime)
     {
-        // Badly hurt soldiers disengage before anything else in this state.
-        if (TickSelfPreservation()) return;
+        // Self-preservation pre-empts every state from Tick now, so the
+        // combat-only call that used to sit here is gone - keeping it would run
+        // the check twice per frame for a soldier already in a firefight.
 
         if (TargetPawn == null || TargetPawn.GetInstance() == null ||
             (TargetPawn is PhxSoldier deadCheck && deadCheck.IsDead))
