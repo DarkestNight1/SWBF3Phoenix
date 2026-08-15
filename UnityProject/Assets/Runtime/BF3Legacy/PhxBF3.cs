@@ -376,6 +376,43 @@ public class PhxBF3Config
     public bool UseDynamicResolution = false;
 
     /// <summary>
+    /// Physics steps per second. 0 leaves Unity's default alone.
+    /// </summary>
+    /// <remarks>
+    /// Unity defaults to 50 Hz, a number from an era of 30 fps games. A
+    /// soldier's position is advanced in FixedUpdate, so at 50 Hz the world
+    /// moves fifty times a second while the display presents ninety or a
+    /// hundred and forty - and the camera, which is pinned to that position,
+    /// judders even though the character animation on top of it is smooth.
+    /// That is the exact shape of the report this fixes: "the camera stutters
+    /// while I walk and the animation is smooth".
+    ///
+    /// 120 Hz rather than 60: the movement velocity is accumulated in Update
+    /// at render rate and integrated in FixedUpdate at this rate, so the two
+    /// clocks disagree by construction and the residual jitter scales with the
+    /// gap between them. Closing the gap is what makes it invisible. The
+    /// physics load here is 2005 geometry and a few dozen capsules, so the
+    /// extra steps are affordable in a way they would not be in a modern
+    /// project.
+    ///
+    /// Lower it if CPU time becomes the limit; 60 is still a large improvement
+    /// over the default.
+    /// </remarks>
+    public int PhysicsRateHz = 120;
+
+    /// <summary>
+    /// How tightly the third-person camera follows. 0 pins it exactly.
+    /// </summary>
+    /// <remarks>
+    /// High by default - at 30 the camera is within a pixel of its target in
+    /// about two frames - so this filters single-frame jitter without the
+    /// floaty trailing a lower value would give. Raise it toward 0 for a
+    /// perfectly rigid camera, which is sharper but shows every bit of noise
+    /// the followed body has.
+    /// </remarks>
+    public float CameraFollowSharpness = 30f;
+
+    /// <summary>
     /// Sync presentation to the display. On by default.
     /// </summary>
     /// <remarks>

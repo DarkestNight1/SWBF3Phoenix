@@ -327,8 +327,33 @@ public class PhxCamera : MonoBehaviour
             Quaternion camTargetRot = Quaternion.LookRotation(viewDir);
             camTargetPos += camTargetRot * new Vector3(PositionOffset.x, 0f, 0f);
 
-            transform.position = camTargetPos;// Vector3.Lerp(transform.position, camTargetPos, deltaTime * FollowSpeed);
-            transform.rotation = camTargetRot;// Quaternion.Slerp(transform.rotation, camTargetRot, deltaTime * FollowSpeed);
+            // Position is smoothed, rotation is not.
+            //
+            // The old line assigned position directly, with a frame-rate
+            // dependent Vector3.Lerp commented out beside it - and a lerp
+            // whose factor is `deltaTime * speed` really is wrong, so removing
+            // it was right. But hard-pinning the camera means every bit of
+            // positional noise in the followed body reaches the screen
+            // unfiltered, and the body advances on the physics clock while
+            // this runs on the render clock.
+            //
+            // The exponential form is frame-rate correct: the same time
+            // constant regardless of frame rate, which is what the naive lerp
+            // got wrong. Sharpness is deliberately high - at 30 the camera is
+            // within a pixel of the target in about two frames - so this
+            // removes single-frame jitter without the floaty trailing feel
+            // that camera smoothing usually brings. 0 restores the direct
+            // assignment exactly.
+            //
+            // Rotation stays direct because it comes from the mouse, on the
+            // render clock, and smoothing aim is not something a shooter can
+            // afford.
+            float sharpness = PhxBF3.Config.CameraFollowSharpness;
+            transform.position = sharpness > 0f
+                ? Vector3.Lerp(transform.position, camTargetPos,
+                               1f - Mathf.Exp(-sharpness * deltaTime))
+                : camTargetPos;
+            transform.rotation = camTargetRot;
         }
         else if (Mode == CamMode.Track)
         {
