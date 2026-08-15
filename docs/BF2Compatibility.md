@@ -122,3 +122,38 @@ attack/defend ratio whenever a map declares goals.
   toggle off, the runtime behaves like upstream SWBF2 Phoenix.
 - The 1.3 community patch's HUD fixes target the original executable and are
   not applicable; Phoenix renders its own UI.
+
+## Credits: BF2GameExt (PrismaticFlower, MIT)
+
+<https://github.com/PrismaticFlower/BF2GameExt>
+
+BF2GameExt is a Win32 patcher for the retail 2005 `BattlefrontII.exe`, covering
+the GoG, Steam and mod-tools builds. It was reviewed for anything Phoenix should
+adopt. Almost none of it ports, and the reason is structural rather than a
+judgement on the work: Phoenix replaces that executable instead of hooking it,
+so patches that lift hard limits or stop crashes inside it have nothing to apply
+to here.
+
+Recorded per feature, so this does not have to be re-derived:
+
+| BF2GameExt patch | Phoenix |
+| --- | --- |
+| DLC mission limit 500 -> 4096 | No cap exists. Addon missions are a `List`, and the 7-component BF3 Legacy pack with MoreMaps registers 89 scripts without one. |
+| Runtime heap extension | N/A - the CLR and Unity own allocation. |
+| SoundParameterized layer limit | N/A - Phoenix has its own sound system with no fixed layer array. |
+| SkyObjectClass limit | N/A - skydomes are imported as ordinary renderers. |
+| Terrain detail map cleanup (map-switch crash) | N/A as a crash, but the underlying hazard is real and shared: per-map state that outlives a map change. Phoenix answers it explicitly - `BFTerrainSurfaceMap.Reset`, `PhxSpaceAssault.Reset`, `PhxSoldier.ResetHealthScaling` and friends all run on load. |
+| PropGenerator loop exit (foliage crash at high FOV) | N/A - foliage is a particle system with no view-dependent update loop. |
+| BlurEffect downsize clamp (water normal overlay) | N/A - water is shaded by HDRP. Useful as evidence that stock water is a scrolling normal-map overlay, which is the look `BFWaterSurface` is aiming at. |
+| Screenshot redirect, `/log` enablement, RedWarning dialog fix | N/A - all three are retail-executable plumbing Unity already provides. |
+| **DLC mission list init - command-line mod map launch** | **Adopted.** See `PhxGame.ApplyCommandLineBoot`. |
+
+The last row is the one real feature. Phoenix already had the destination
+(`PhxBootMode.SWBF2Map`) and no way to reach it but by editing the settings
+asset, so the command line now supplies it:
+
+```
+Phoenix.exe -map kas2c_con
+```
+
+`+map` is accepted too, since that is the form the stock game's launchers use.

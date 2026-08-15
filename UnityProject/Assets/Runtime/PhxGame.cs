@@ -202,6 +202,59 @@ public class PhxGame : MonoBehaviour
         }
     }
 
+    /// <summary>
+    /// Let the command line pick the boot map, overriding the settings asset.
+    /// </summary>
+    /// <remarks>
+    /// Adapted from BF2GameExt by PrismaticFlower (MIT), which patches the
+    /// retail 2005 executable - see https://github.com/PrismaticFlower/BF2GameExt
+    /// and the credits in docs/BF2Compatibility.md.
+    ///
+    /// Almost nothing in that project ports to Phoenix, because almost all of
+    /// it lifts hard limits and fixes crashes inside an engine Phoenix
+    /// replaces rather than hooks: a 500-mission cap, heap exhaustion, sky
+    /// object and sound layer overflows, a screenshot key. None of those exist
+    /// here to fix.
+    ///
+    /// Its last patch is the exception, and it is a real feature rather than a
+    /// workaround: repairing DLC mission list initialisation so the game can be
+    /// launched straight into a mod map from the command line. Phoenix already
+    /// had the destination - PhxBootMode.SWBF2Map with BootSWBF2Map - and no
+    /// way to reach it except by editing the settings asset and re-entering
+    /// play mode. This is that missing half.
+    ///
+    ///     Phoenix.exe -map kas2c_con
+    ///
+    /// Worth having beyond parity: every diagnostic pass on this project so far
+    /// has meant loading one specific map repeatedly through two menus.
+    /// </remarks>
+    void ApplyCommandLineBoot()
+    {
+        string[] args = System.Environment.GetCommandLineArgs();
+        if (args == null) return;
+
+        for (int i = 0; i < args.Length - 1; ++i)
+        {
+            // "+map" as well as "-map": the stock game and its launchers use
+            // the plus form, and someone coming from those will reach for it.
+            if (!string.Equals(args[i], "-map", System.StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(args[i], "+map", System.StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            string script = args[i + 1];
+            if (string.IsNullOrWhiteSpace(script)) continue;
+
+            Settings.BootMode = PhxBootMode.SWBF2Map;
+            Settings.BootSWBF2Map = script;
+
+            Debug.Log($"[Phx] Command line requested boot map '{script}' - " +
+                      "skipping the main menu.");
+            return;
+        }
+    }
+
     public void EnterMainMenu(bool bInit = false)
     {
         Debug.Assert(Env == null || Env.IsLoaded);
@@ -455,6 +508,8 @@ public class PhxGame : MonoBehaviour
             Debug.LogErrorFormat("Invalid game path '{0}!'", GamePath);
             return;
         }
+
+        ApplyCommandLineBoot();
 
         if (Settings.BootMode == PhxBootMode.MainMenu)
         {
