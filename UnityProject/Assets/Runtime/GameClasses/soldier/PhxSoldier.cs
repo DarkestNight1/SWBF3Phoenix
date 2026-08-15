@@ -725,6 +725,140 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         return weapon != null && weapon.HasSniperScope();
     }
 
+    // ---------------------------------------------------------------------
+    // Posture
+    // ---------------------------------------------------------------------
+    // The capsule is created at 1.9 m in Init and was never resized, so crouch
+    // had no posture change at all: the state flipped, the speed factors
+    // changed, and the soldier stood up straight playing the standing idle.
+    // Crouching behind a crate did not put you behind it.
+
+    const float StandHeight = 1.9f;
+    const float CrouchHeight = 1.25f;
+    const float ProneHeight = 0.7f;
+
+    /// <summary>Metres per second the capsule resizes; an instant resize pops.</summary>
+    const float PostureChangeSpeed = 5f;
+
+    static float HeightForState(PhxControlState state)
+    {
+        switch (state)
+        {
+            case PhxControlState.Crouch: return CrouchHeight;
+            case PhxControlState.Prone:  return ProneHeight;
+            default:                     return StandHeight;
+        }
+    }
+
+    /// <summary>Drive the capsule toward the current posture's height.</summary>
+    /// <remarks>
+    /// The centre tracks half the height so the FEET stay at the transform
+    /// origin. Growing about a fixed centre would drive the capsule down
+    /// through the floor on every stand-up, which is the failure the plan for
+    /// this warned about.
+    /// </remarks>
+    /// <summary>Whether the soldier is in a lowered posture.</summary>
+    /// <remarks>
+    /// Prone counts as crouched for animation because there are no prone
+    /// clips - see the note on the prone posture below.
+    /// </remarks>
+    /// <summary>
+    /// How far the camera should sit above the feet, in metres.
+    /// </summary>
+    /// <remarks>
+    /// Follows the capsule, so going prone brings the view down with the body
+    /// instead of leaving it floating at standing height while the soldier
+    /// lies on the floor - which is what makes a lowered posture read as cover
+    /// rather than as a speed penalty.
+    ///
+    /// Derived from the capsule rather than the odf's CAMERASECTION entries.
+    /// The stock classes do declare CROUCH, CROUCHZOOM, PRONE and PRONEZOOM
+    /// sections, but nothing in this runtime parses CAMERASECTION at all, and
+    /// adding that parser is a larger job than the posture it would serve.
+    /// </remarks>
+    public float GetEyeHeight()
+    {
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+        float height = capsule != null ? capsule.height : StandHeight;
+
+        // Prone sits proportionally higher in its own capsule than standing
+        // does: a head on the ground is still a head, and a camera at 0.63 m
+        // would be inside the floor geometry on most maps.
+        return Mathf.Max(height * 0.9f, 0.55f);
+    }
+
+    bool IsCrouched => State == PhxControlState.Crouch || State == PhxControlState.Prone;
+
+    // Posture-aware clip selection. Crouch has no alert variants and no
+    // separate run - a crouched soldier moving forward plays the one crouch
+    // walk regardless - which is why these collapse rather than mirroring the
+    // standing set one for one.
+    int AnimIdle(bool alert) => IsCrouched ? Animator.CrouchIdle
+                                           : (alert ? Animator.StandAlertIdle : Animator.StandIdle);
+    int AnimWalk(bool alert) => IsCrouched ? Animator.CrouchWalk
+                                           : (alert ? Animator.StandAlertWalk : Animator.StandWalk);
+    int AnimRun(bool alert) => IsCrouched ? Animator.CrouchWalk
+                                          : (alert ? Animator.StandAlertRun : Animator.StandRun);
+    int AnimBackward(bool alert) => IsCrouched ? Animator.CrouchBackward
+                                              : (alert ? Animator.StandAlertBackward : Animator.StandBackward);
+    int AnimReload => IsCrouched ? Animator.CrouchReload : Animator.StandReload;
+    int AnimShoot => IsCrouched ? Animator.CrouchShoot : Animator.StandShootPrimary;
+    int AnimTurnLeft => IsCrouched ? Animator.CrouchTurnLeft : Animator.TurnLeft;
+    int AnimTurnRight => IsCrouched ? Animator.CrouchTurnRight : Animator.TurnRight;
+
+    void TickPosture(float deltaTime)
+    {
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+        if (capsule == null) return;
+
+        float target = HeightForState(State);
+        if (Mathf.Approximately(capsule.height, target)) return;
+
+        float height = Mathf.MoveTowards(capsule.height, target,
+                                         PostureChangeSpeed * deltaTime);
+        capsule.height = height;
+        capsule.center = new Vector3(0f, height * 0.5f, 0f);
+    }
+
+    /// <summary>Whether there is room overhead to rise to this height.</summary>
+    /// <remarks>
+    /// Without it a soldier who crawls under a pipe and presses space stands
+    /// straight into it, and the capsule resolves that overlap by launching
+    /// them sideways. Tested against the ground mask, which is what the rest
+    /// of this file already treats as world geometry rather than other
+    /// soldiers.
+    /// </remarks>
+    bool HasHeadroom(float height)
+    {
+        CapsuleCollider capsule = GetComponent<CapsuleCollider>();
+        if (capsule == null) return true;
+
+        if (height <= capsule.height + 0.01f) return true;
+
+        float radius = capsule.radius;
+        Vector3 top = transform.position + Vector3.up * (height - radius);
+        return !Physics.CheckSphere(top, radius * 0.95f, PhxLayers.SoldierGround,
+                                    QueryTriggerInteraction.Ignore);
+    }
+
+    /// <summary>
+    /// The posture the controller is asking for, refused where it does not fit.
+    /// </summary>
+    /// <remarks>
+    /// Crouch is tried before Stand on the way up, so a soldier under a low
+    /// ceiling rises as far as it allows instead of staying flat because the
+    /// full height was blocked.
+    /// </remarks>
+    PhxControlState ResolvePostureRequest()
+    {
+        if (Controller.Prone) return PhxControlState.Prone;
+        if (Controller.Crouch) return PhxControlState.Crouch;
+
+        if (HasHeadroom(StandHeight)) return PhxControlState.Stand;
+        if (HasHeadroom(CrouchHeight)) return PhxControlState.Crouch;
+        return PhxControlState.Prone;
+    }
+
     void TickZoom(float deltaTime)
     {
         // Scoping is a standing act. Sprinting, jumping, dying or riding
@@ -733,7 +867,8 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         bool canZoom = !IsDead
                        && Controller != null
                        && Context != PhxSoldierContext.Pilot
-                       && (State == PhxControlState.Stand || State == PhxControlState.Crouch);
+                       && (State == PhxControlState.Stand || State == PhxControlState.Crouch
+                           || State == PhxControlState.Prone);
 
         if (!canZoom)
         {
@@ -1020,7 +1155,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
 
     void FireAnimation(bool primary)
     {
-        Animator.Anim.SetState(1, Animator.StandShootPrimary);
+        Animator.Anim.SetState(1, AnimShoot);
         Animator.Anim.RestartState(1);
     }
 
@@ -1029,7 +1164,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         IPhxWeapon weap = GetEquippedWeapon(0);
         if (weap != null)
         {
-            Animator.Anim.SetState(1, Animator.StandReload);
+            Animator.Anim.SetState(1, AnimReload);
             Animator.Anim.RestartState(1);
             float animTime = Animator.Anim.GetCurrentState(1).GetDuration();
             float reloadTime = weap.GetReloadTime();
@@ -1044,7 +1179,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             // reports them by name.
             if (animTime > 0.001f && reloadTime > 0.001f)
             {
-                Animator.Anim.SetPlaybackSpeed(1, Animator.StandReload, animTime / reloadTime);
+                Animator.Anim.SetPlaybackSpeed(1, AnimReload, animTime / reloadTime);
             }
         }
     }
@@ -1454,6 +1589,11 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         // running and leave the camera scoped.
         TickZoom(deltaTime);
 
+        // Capsule follows the posture. Outside the grounded block for the same
+        // reason zoom is: a soldier who jumps or dies must not keep a crouched
+        // capsule, and a call sited inside would simply stop running.
+        TickPosture(deltaTime);
+
         if (Controller == null)
         {
             return;
@@ -1518,7 +1658,8 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
         if (LandTimer == 0f)
         {
             // Stand - Crouch - Sprint
-            if (State == PhxControlState.Stand || State == PhxControlState.Crouch || State == PhxControlState.Sprint)
+            if (State == PhxControlState.Stand || State == PhxControlState.Crouch
+                || State == PhxControlState.Prone || State == PhxControlState.Sprint)
             {
                 float accStep = C.Acceleration * deltaTime;
                 float thrustFactor = ControlValues[(int)State][0];
@@ -1547,7 +1688,7 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                         {
                             TurnTimer = TurnTime;
                             TurnStart = transform.rotation;
-                            Animator.Anim.SetState(0, rotDiff < 0f ? Animator.TurnLeft : Animator.TurnRight);
+                            Animator.Anim.SetState(0, rotDiff < 0f ? AnimTurnLeft : AnimTurnRight);
                             Animator.Anim.SetState(1, CraSettings.STATE_NONE);
                             Animator.Anim.RestartState(0);
                         }
@@ -1603,31 +1744,32 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                     }
                     else if (walk > 0.2f && walk <= 0.75f)
                     {
-                        Animator.Anim.SetState(0, AlertTimer > 0f ? Animator.StandAlertWalk : Animator.StandWalk);
-                        Animator.Anim.SetPlaybackSpeed(0, Animator.StandWalk, walk / 0.75f);
+                        Animator.Anim.SetState(0, AnimWalk(AlertTimer > 0f));
+                        Animator.Anim.SetPlaybackSpeed(0, AnimWalk(AlertTimer > 0f), walk / 0.75f);
                     }
                     else if (walk > 0.75f)
                     {
-                        Animator.Anim.SetState(0, AlertTimer > 0f ? Animator.StandAlertRun : Animator.StandRun);
-                        Animator.Anim.SetPlaybackSpeed(0, Animator.StandRun, walk);
+                        Animator.Anim.SetState(0, AnimRun(AlertTimer > 0f));
+                        Animator.Anim.SetPlaybackSpeed(0, AnimRun(AlertTimer > 0f), walk);
                     }
                     else if (walk < -0.2f)
                     {
-                        Animator.Anim.SetState(0, AlertTimer > 0f ? Animator.StandAlertBackward : Animator.StandBackward);
-                        Animator.Anim.SetPlaybackSpeed(0, Animator.StandBackward, -walk);
+                        Animator.Anim.SetState(0, AnimBackward(AlertTimer > 0f));
+                        Animator.Anim.SetPlaybackSpeed(0, AnimBackward(AlertTimer > 0f), -walk);
                     }
                     else
                     {
-                        Animator.Anim.SetState(0, AlertTimer > 0f ? Animator.StandAlertIdle : Animator.StandIdle);
+                        Animator.Anim.SetState(0, AnimIdle(AlertTimer > 0f));
                     }
                     // ---------------------------------------------------------------------------------------------
                 }
             }
 
-            // Stand - Crouch
-            if (State == PhxControlState.Stand || State == PhxControlState.Crouch)
+            // Stand - Crouch - Prone
+            if (State == PhxControlState.Stand || State == PhxControlState.Crouch
+                || State == PhxControlState.Prone)
             {
-                State = Controller.Crouch ? PhxControlState.Crouch : PhxControlState.Stand;
+                State = ResolvePostureRequest();
 
                 // ---------------------------------------------------------------------------------------------
                 // Idle
@@ -1741,17 +1883,22 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 }
             }
 
-            // Crouch
-            if (State == PhxControlState.Crouch)
+            // Crouch - Prone
+            if (State == PhxControlState.Crouch || State == PhxControlState.Prone)
             {
-                if (Controller.Jump)
+                // Sprinting out of a lowered posture stands you up, which is
+                // the one path that does not go through the posture keys. The
+                // controller flags have to be cleared too or ResolvePostureRequest
+                // puts the soldier straight back down on the next tick.
+                //
+                // Prone cannot sprint directly: the odf's prone thrust factor
+                // is 0.30 against sprint's 2.50, and letting one become the
+                // other in a single frame reads as a teleport.
+                if (State == PhxControlState.Crouch
+                    && Controller.MoveDirection.y > 0.8f && Controller.Sprint && CanStartSprint)
                 {
-                    State = PhxControlState.Stand;
-                }
-
-                // TODO: verify
-                else if (Controller.MoveDirection.y > 0.8f && Controller.Sprint && CanStartSprint)
-                {
+                    Controller.Crouch = false;
+                    Controller.Prone = false;
                     State = PhxControlState.Sprint;
                 }
             }
@@ -1865,7 +2012,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 Body.AddForce(CurrSpeed, ForceMode.VelocityChange);
             }
         }
-        else if ((State == PhxControlState.Stand || State == PhxControlState.Crouch || State == PhxControlState.Sprint) && LandTimer == 0f)
+        else if ((State == PhxControlState.Stand || State == PhxControlState.Crouch
+                  || State == PhxControlState.Prone || State == PhxControlState.Sprint)
+                 && LandTimer == 0f)
         {
             // Sweep before moving, or the move is a teleport.
             //
@@ -1973,7 +2122,8 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
             return;
         }
 
-        if (State == PhxControlState.Stand || State == PhxControlState.Crouch)
+        if (State == PhxControlState.Stand || State == PhxControlState.Crouch
+            || State == PhxControlState.Prone)
         {
             if (Animator.Anim.GetCurrentStateIdx(1) == Animator.StandShootPrimary)
             {

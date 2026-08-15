@@ -71,7 +71,8 @@ public class PhxPlayerController : PhxPawnController
         rot = Quaternion.Euler(euler);
         ViewDirection = rot * Vector3.forward;
 
-        Jump = Input.GetButtonDown("Jump");
+        UpdatePosture();
+
         Sprint = Input.GetButton("Sprint");
         Reload = Input.GetButtonDown("Reload");
         NextPrimaryWeapon = Input.GetAxis("WeaponChange") < 0;
@@ -79,10 +80,6 @@ public class PhxPlayerController : PhxPawnController
         ShootPrimary = Input.GetButton("Fire1");
         ShootSecondary = Input.GetButton("Fire2");
 
-        if (Input.GetButtonDown("Crouch"))
-        {
-            Crouch = !Crouch;
-        }
 
         Debug.DrawRay(Camera.transform.position, ViewDirection * 1000f, Color.blue);
 
@@ -145,6 +142,76 @@ public class PhxPlayerController : PhxPawnController
         {
             Enter = true;
             VehicleEnterTimer = VehicleEnterCooldown;
+        }
+    }
+
+    // --- Posture -----------------------------------------------------------
+
+    /// <summary>When the last C press was, for detecting the double tap.</summary>
+    float LastCrouchTapTime = float.NegativeInfinity;
+
+    /// <summary>
+    /// How long after a C press a second one still counts as a double tap.
+    /// </summary>
+    /// <remarks>
+    /// 0.3 s is the usual double-click window. Much shorter and going prone
+    /// takes a deliberately fast tap; much longer and toggling crouch off
+    /// immediately after turning it on drops you flat instead.
+    /// </remarks>
+    const float DoubleTapWindow = 0.3f;
+
+    /// <summary>
+    /// C to crouch, C twice to go prone, space to get back up.
+    /// </summary>
+    /// <remarks>
+    /// Space is shared with jumping and takes priority when a posture is held:
+    /// standing up IS the action there, and the alternative - leaping out of
+    /// prone - is not something anyone means by pressing it. From a standing
+    /// start it jumps exactly as before.
+    ///
+    /// Direct key reads, following the G / E / F / Q precedent in this file
+    /// rather than hand-editing InputManager.asset, which cannot be validated
+    /// without opening the editor.
+    /// </remarks>
+    void UpdatePosture()
+    {
+        bool jumpPressed = Input.GetButtonDown("Jump");
+
+        // Space gets you up first, and does not also jump on that press.
+        if (jumpPressed && (Crouch || Prone))
+        {
+            Crouch = false;
+            Prone = false;
+            Jump = false;
+            return;
+        }
+
+        Jump = jumpPressed;
+
+        if (!Input.GetKeyDown(KeyCode.C)) return;
+
+        bool doubleTap = Time.time - LastCrouchTapTime <= DoubleTapWindow;
+        LastCrouchTapTime = Time.time;
+
+        if (doubleTap)
+        {
+            // Second tap: all the way down. Crouch stays set because Prone
+            // means "crouched and then some" to everything downstream.
+            Crouch = true;
+            Prone = true;
+        }
+        else if (Prone)
+        {
+            // A single tap from prone comes up one step rather than all the
+            // way, which is what makes C a posture ladder rather than a
+            // three-state cycle you have to think about.
+            Prone = false;
+            Crouch = true;
+        }
+        else
+        {
+            Crouch = !Crouch;
+            Prone = false;
         }
     }
 }

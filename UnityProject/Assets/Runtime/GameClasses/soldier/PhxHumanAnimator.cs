@@ -25,6 +25,17 @@ public static class PhxAnimationBanks
         public string LandHard;
         public string TurnLeft;
         public string TurnRight;
+
+        // Crouch. Every one of these is authored in the stock banks and was
+        // being thrown away: the state flipped, the speed factors changed, and
+        // the soldier stood up straight playing the standing idle.
+        public string CrouchIdle;
+        public string CrouchWalk;
+        public string CrouchBackward;
+        public string CrouchReload;
+        public string CrouchShoot;
+        public string CrouchTurnLeft;
+        public string CrouchTurnRight;
     }
 
     public static readonly Dictionary<string, Dictionary<string, PhxAnimBank>> Banks = new Dictionary<string, Dictionary<string, PhxAnimBank>>()
@@ -53,7 +64,14 @@ public static class PhxAnimationBanks
                         LandSoft = "human_rifle_landsoft",
                         LandHard = "human_rifle_landhard",
                         TurnLeft = "human_rifle_stand_turnleft",
-                        TurnRight = "human_rifle_stand_turnright"
+                        TurnRight = "human_rifle_stand_turnright",
+                        CrouchIdle = "human_rifle_crouch_idle_emote_full",
+                        CrouchWalk = "human_rifle_crouch_walkforward",
+                        CrouchBackward = "human_rifle_crouch_walkbackward",
+                        CrouchReload = "human_rifle_crouch_reload_full",
+                        CrouchShoot = "human_rifle_crouch_shoot_full",
+                        CrouchTurnLeft = "human_rifle_crouch_turnleft",
+                        CrouchTurnRight = "human_rifle_crouch_turnright"
                     }
                 },
                 {
@@ -77,7 +95,14 @@ public static class PhxAnimationBanks
                         LandSoft = "human_tool_landsoft",                                   // tool
                         LandHard = "human_tool_landhard",                                   // tool
                         TurnLeft = "human_rifle_stand_turnleft",                            // rifle
-                        TurnRight = "human_rifle_stand_turnright"                           // rifle
+                        TurnRight = "human_rifle_stand_turnright",                          // rifle
+                        CrouchIdle = "human_tool_crouch_idle_emote",                        // tool
+                        CrouchWalk = "human_pistol_crouch_walkforward",
+                        CrouchBackward = "human_tool_crouch_walkbackward",                  // tool
+                        CrouchReload = "human_pistol_crouch_reload",
+                        CrouchShoot = "human_pistol_crouch_shoot",
+                        CrouchTurnLeft = "human_rifle_crouch_turnleft",                     // rifle
+                        CrouchTurnRight = "human_rifle_crouch_turnright"                    // rifle
                     }
                 },
                 { 
@@ -101,7 +126,14 @@ public static class PhxAnimationBanks
                         LandSoft = "human_bazooka_landsoft",
                         LandHard = "human_bazooka_landhard",
                         TurnLeft = "human_rifle_stand_turnleft",
-                        TurnRight = "human_rifle_stand_turnright"
+                        TurnRight = "human_rifle_stand_turnright",
+                        CrouchIdle = "human_bazooka_crouch_idle_emote",
+                        CrouchWalk = "human_bazooka_crouch_walkforward",
+                        CrouchBackward = "human_bazooka_crouch_walkbackward",
+                        CrouchReload = "human_bazooka_crouch_reload",
+                        CrouchShoot = "human_bazooka_crouch_shoot",
+                        CrouchTurnLeft = "human_rifle_crouch_turnleft",
+                        CrouchTurnRight = "human_rifle_crouch_turnright"
                     }
                 },
             } 
@@ -145,6 +177,14 @@ public struct PhxHumanAnimator
     public int TurnLeft => Banks[CurrentBankIdx].TurnLeft;
     public int TurnRight => Banks[CurrentBankIdx].TurnRight;
 
+    public int CrouchIdle => Banks[CurrentBankIdx].CrouchIdle;
+    public int CrouchWalk => Banks[CurrentBankIdx].CrouchWalk;
+    public int CrouchBackward => Banks[CurrentBankIdx].CrouchBackward;
+    public int CrouchReload => Banks[CurrentBankIdx].CrouchReload;
+    public int CrouchShoot => Banks[CurrentBankIdx].CrouchShoot;
+    public int CrouchTurnLeft => Banks[CurrentBankIdx].CrouchTurnLeft;
+    public int CrouchTurnRight => Banks[CurrentBankIdx].CrouchTurnRight;
+
     struct PhxAnimBank
     {
         public int StandSprint;
@@ -165,6 +205,13 @@ public struct PhxHumanAnimator
         public int LandHard;
         public int TurnLeft;
         public int TurnRight;
+        public int CrouchIdle;
+        public int CrouchWalk;
+        public int CrouchBackward;
+        public int CrouchReload;
+        public int CrouchShoot;
+        public int CrouchTurnLeft;
+        public int CrouchTurnRight;
     }
 
     static readonly string[] HUMANM_BANKS = 
@@ -284,6 +331,14 @@ public struct PhxHumanAnimator
                 Banks[i].LandHard = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.LandHard, false));
                 Banks[i].TurnLeft = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.TurnLeft, false));
                 Banks[i].TurnRight = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.TurnRight, false));
+
+                Banks[i].CrouchIdle = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "crouch_idle_emote", bank.CrouchIdle, true);
+                Banks[i].CrouchWalk = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "crouch_walkforward", bank.CrouchWalk, true);
+                Banks[i].CrouchBackward = AddSpeciesState(root, 0, Species, weaponAnimBanks[i], "crouch_walkbackward", bank.CrouchBackward, true);
+                Banks[i].CrouchReload = AddSpeciesState(root, 1, Species, weaponAnimBanks[i], "crouch_reload", bank.CrouchReload, false, "bone_a_spine");
+                Banks[i].CrouchShoot = AddSpeciesState(root, 1, Species, weaponAnimBanks[i], "crouch_shoot", bank.CrouchShoot, false, "bone_a_spine");
+                Banks[i].CrouchTurnLeft = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.CrouchTurnLeft, false));
+                Banks[i].CrouchTurnRight = Anim.AddState(0, GetPlayer(root, HUMANM_BANKS, bank.CrouchTurnRight, false));
 
                 NameToBankIdx.Add(weaponAnimBanks[i], i);
             }

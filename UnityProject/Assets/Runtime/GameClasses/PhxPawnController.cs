@@ -14,6 +14,18 @@ public abstract class PhxPawnController
     public bool ShootPrimary;
     public bool ShootSecondary;
     public bool Crouch;
+
+    /// <summary>
+    /// Requested prone. Implies Crouch is also set, so anything that only
+    /// knows about crouching still reads a lowered posture rather than a
+    /// standing one.
+    /// </summary>
+    /// <remarks>
+    /// A separate flag rather than replacing Crouch with an enum, because the
+    /// AI writes Crouch directly in several places (laying mines, taking
+    /// cover) and none of it wants to know about prone.
+    /// </remarks>
+    public bool Prone;
     public bool Jump;
     public bool Sprint;
     public bool Reload;

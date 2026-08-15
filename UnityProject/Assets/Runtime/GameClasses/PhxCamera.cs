@@ -312,7 +312,13 @@ public class PhxCamera : MonoBehaviour
             }
 
             Vector3 rotPoint = followed.transform.position;
-            rotPoint.y += PositionOffset.y;
+
+            // Height tracks the pawn's posture where it has one, so crouching
+            // and going prone bring the view down with the body. PositionOffset
+            // stays the fallback for anything that is not a soldier.
+            rotPoint.y += followed is PhxSoldier soldier
+                ? soldier.GetEyeHeight()
+                : PositionOffset.y;
 
             //Vector3 viewDir = (FollowInstance.GetTargetPosition() - rotPoint).normalized;
             Vector3 viewDir = match.Player.ViewDirection;
