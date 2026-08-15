@@ -410,6 +410,14 @@ public class PhxBF3AIController : PhxAIController
     bool EngageHoldGround;
     bool WantsCover;
 
+    // Geometric cover, for where the map authored no hint nodes. Cached rather
+    // than searched per decision: the search is about seventy line tests and
+    // the decision runs several times a second.
+    Vector3 CoverSpot;
+    bool CoverSpotValid;
+    bool HoldingCoverSpot;
+    float CoverRecheckTimer;
+
     float DecisionTimer;
     BFAIAction Decision = BFAIAction.Attack;
 
@@ -474,8 +482,18 @@ public class PhxBF3AIController : PhxAIController
         // working on it, whoever that is.
         s.ObjectiveThreatened = objective != null && objective.GetCaptureProgress() > 0.01f;
 
-        s.InCover = ClaimedHint != null;
-        s.CoverAvailable = ClaimedHint == null && Skill.CoverUsage > 0f;
+        s.InCover = ClaimedHint != null || HoldingCoverSpot;
+
+        // "Is there cover" and not "am I currently standing at a hint node".
+        //
+        // This used to be the latter, which meant the scorer was told cover was
+        // reachable wherever a soldier happened to be - so SeekCover would win
+        // on the strength of a promise nothing could keep, the hint scan would
+        // find no node, and the soldier would stand still having just decided
+        // to take cover. CoverSpotValid is a position that was actually found,
+        // by the authored nodes or by BFAICover, so the answer is now true only
+        // when there is somewhere to go.
+        s.CoverAvailable = !s.InCover && Skill.CoverUsage > 0f && CoverSpotValid;
 
         Decision = BFAIDecision.Choose(s, (int)PhxBF3.Config.AIDifficulty,
                                        PhxAIDirectives.GetAggressiveness(Team));
@@ -1246,7 +1264,12 @@ public class PhxBF3AIController : PhxAIController
         HintScanTimer -= deltaTime;
         if (HintScanTimer <= 0f)
         {
-            HintScanTimer = 3f;
+            // Scanned faster when the chooser has actually asked for cover.
+            // Three seconds is fine as an idle habit and far too slow as a
+            // response to being shot at - it is most of the time a soldier
+            // spends deciding to move and then not having moved.
+            HintScanTimer = WantsCover ? 1.2f : 3f;
+
             // WantsCover is the scored chooser asking for cover; without it this
             // was a pure skill roll that ignored how the fight was actually going.
             if (ClaimedHint == null && (WantsCover || Random.value < Skill.CoverUsage))
@@ -1259,6 +1282,18 @@ public class PhxBF3AIController : PhxAIController
                 if (candidate != null && PhxHintNodes.TryOccupy(candidate, this, 20f))
                 {
                     ClaimedHint = candidate;
+                    CoverSpotValid = false;
+                }
+                else
+                {
+                    // Nothing authored within reach. Away from a designer's
+                    // nodes the map is not empty of cover, only of labels for
+                    // it, so look at the geometry instead. Authored first
+                    // always: a node knows which side of the wall the fight is
+                    // expected to come from, and the search below only knows
+                    // where the shooting is coming from right now.
+                    CoverSpotValid = BFAICover.TryFind(PawnPosition(), targetPos,
+                                                       maxRange: 12f, out CoverSpot);
                 }
             }
         }
@@ -1285,6 +1320,54 @@ public class PhxBF3AIController : PhxAIController
                      ClaimedHint.Type == PhxHintType.Cover;
             return;
         }
+
+        // Unauthored cover, found from the geometry. Same shape as the hint
+        // node above - move in, then hold and stay low - but the position came
+        // from a search rather than from a designer, so it is re-checked as the
+        // fight moves instead of being held until released.
+        if (CoverSpotValid)
+        {
+            float toSpot = Vector3.Distance(PawnPosition(), CoverSpot);
+            if (toSpot > 1.5f)
+            {
+                MoveTowards(CoverSpot, sprint: toSpot > 10f);
+                Crouch = false;
+                HoldingCoverSpot = false;
+                return;
+            }
+
+            // Arrived. Crouched is the posture the spot was tested for - it was
+            // chosen because a crouched chest is protected there, and standing
+            // up in it protects nothing.
+            MoveDirection = Vector2.zero;
+            Crouch = true;
+            HoldingCoverSpot = true;
+
+            // Stop holding it once it stops being cover. The search ran against
+            // where the threat was then; a target that has moved around the
+            // side turns the spot back into open ground, and a soldier crouched
+            // in the open behind nothing is the exact behaviour this set out to
+            // remove.
+            CoverRecheckTimer -= deltaTime;
+            if (CoverRecheckTimer <= 0f)
+            {
+                CoverRecheckTimer = 1.5f;
+
+                Vector3 chest = PawnPosition() + Vector3.up * 0.85f;
+                Vector3 threatEye = targetPos + Vector3.up * 1.5f;
+                bool stillProtected = Physics.Linecast(chest, threatEye,
+                                                       PhxLayers.SoldierGround,
+                                                       QueryTriggerInteraction.Ignore);
+                if (!stillProtected)
+                {
+                    CoverSpotValid = false;
+                    HoldingCoverSpot = false;
+                }
+            }
+            return;
+        }
+
+        HoldingCoverSpot = false;
 
         // combat movement: strafe and use cover based on skill. All decisions
         // roll on the strafe timer, never per frame - a per-frame roll made
