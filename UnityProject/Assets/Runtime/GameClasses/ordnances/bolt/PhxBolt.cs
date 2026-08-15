@@ -88,6 +88,38 @@ public class PhxBolt : PhxOrdnance
             Physics.IgnoreCollision(c, Coll, true);
             IgnoredColliders.Add(c);
         }
+
+        // TEMPORARY DIAGNOSTIC, with the rest of the PhxDamage.Trace work.
+        //
+        // The damage trace proved bolts never contact a soldier at all: every
+        // OnCollisionEnter in a full firefight was Terrain, BuildingAll or
+        // OrdnanceAll, with 31 enemies alive seven metres away. Reading has
+        // since ruled out the collision matrix (SoldierAll and OrdnanceAll
+        // collide in both directions), the damage routing, the per-health-type
+        // scales, and the pooled-bolt IgnoreCollision leak this method already
+        // guards against.
+        //
+        // What is left is either this ignore set being wrong - one entry is
+        // expected, the shooter's own capsule - or the target's capsule not
+        // being there to hit. Both are one line to see and neither can be read
+        // off the source, so print them at the moment of firing.
+        if (PhxDamage.Trace)
+        {
+            var names = new System.Text.StringBuilder();
+            for (int i = 0; i < IgnoredColliders.Count; ++i)
+            {
+                if (i > 0) names.Append(", ");
+                names.Append(IgnoredColliders[i] == null
+                    ? "<destroyed>"
+                    : $"{IgnoredColliders[i].name}/{IgnoredColliders[i].transform.root.name}");
+            }
+
+            Debug.Log($"[PhxBolt] fired; ignoring {IgnoredColliders.Count} collider(s): "
+                      + $"[{names}]. Expect exactly one - the shooter's own capsule. "
+                      + $"More means the pooled ignore pairs are leaking again.");
+
+            PhxDamage.ReportSoldierColliders();
+        }
     }
 
     // Colliders this bolt is currently ignoring, so the pairs can be undone

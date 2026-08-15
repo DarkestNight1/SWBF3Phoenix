@@ -79,6 +79,52 @@ public static class PhxDamage
     }
 
     /// <summary>
+    /// TEMPORARY DIAGNOSTIC - the other half of "why does nothing get hit".
+    /// </summary>
+    /// <remarks>
+    /// A bolt can only miss every soldier for two reasons: it is ignoring them,
+    /// or they have nothing to be hit on. PhxBolt reports the first at the
+    /// moment of firing; this reports the second.
+    ///
+    /// The capsule is the only thing a bolt can collide with on a soldier, and
+    /// SetPilot disables it deliberately for a rider hidden inside a hull
+    /// ("exposed" seats keep theirs). So a count of soldiers whose capsule is
+    /// missing, disabled or a trigger is the answer either way - if it is most
+    /// of them, that is the bug; if it is none, the fault is on the bolt's side
+    /// and the ignore list above says which.
+    ///
+    /// Rate-limited: this walks every soldier in the scene and firing is not a
+    /// rare event.
+    /// </remarks>
+    static float NextColliderReport;
+
+    public static void ReportSoldierColliders()
+    {
+        if (!Trace || Time.time < NextColliderReport) return;
+        NextColliderReport = Time.time + 5f;
+
+        PhxSoldier[] soldiers = Object.FindObjectsByType<PhxSoldier>(
+            FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+
+        int total = 0, missing = 0, disabled = 0, trigger = 0, hittable = 0;
+        foreach (PhxSoldier s in soldiers)
+        {
+            if (s == null || s.IsDead) continue;
+            ++total;
+
+            CapsuleCollider capsule = s.GetComponent<CapsuleCollider>();
+            if (capsule == null) { ++missing; continue; }
+            if (!capsule.enabled) { ++disabled; continue; }
+            if (capsule.isTrigger) { ++trigger; continue; }
+            ++hittable;
+        }
+
+        Debug.Log($"[PhxDamage] soldier colliders: {total} alive, {hittable} hittable, "
+                  + $"{missing} with no capsule, {disabled} disabled, {trigger} trigger-only. "
+                  + "Anything but 'all hittable' is why bolts pass through people.");
+    }
+
+    /// <summary>
     /// Resolve a target's HealthType from its odf class. Falls back to the
     /// documented per-class defaults when the property is absent (soldiers are
     /// 'person', vehicles 'vehicle', buildings 'building').
