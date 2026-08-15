@@ -24,23 +24,59 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
     {
         public PhxProp<string> GeometryName = new PhxProp<string>("");
 
-        /// <summary>Explosion odf set off on trigger or on being shot.</summary>
+        // Three explosions, not one. Measured from the stock classes, which
+        // declare ExplosionTrigger / ExplosionExpire / ExplosionDeath and
+        // never declare ExplosionName - so the single ExplosionName this used
+        // to bind was a silent null on every mine in the game, and mines went
+        // off producing nothing at all. That is exactly the PhxProp failure
+        // mode: a name that does not match binds quietly and reads as zero.
+
+        /// <summary>Explosion when it goes off the way it is meant to.</summary>
+        public PhxProp<PhxClass> ExplosionTrigger = new PhxProp<PhxClass>(null);
+
+        /// <summary>Explosion when its lifespan runs out. Usually a smaller "destroyed" one.</summary>
+        public PhxProp<PhxClass> ExplosionExpire = new PhxProp<PhxClass>(null);
+
+        /// <summary>Explosion when it is shot off a wall.</summary>
+        public PhxProp<PhxClass> ExplosionDeath = new PhxProp<PhxClass>(null);
+
+        /// <summary>Legacy single-explosion spelling, kept for mods that use it.</summary>
         public PhxProp<PhxClass> ExplosionName = new PhxProp<PhxClass>(null);
 
-        /// <summary>Distance an enemy must come within to set it off.</summary>
-        public PhxProp<float> TriggerRadius = new PhxProp<float>(3.0f);
+        /// <summary>
+        /// Distance an enemy must come within to set it off. 0 means it has no
+        /// proximity trigger at all.
+        /// </summary>
+        /// <remarks>
+        /// Defaulted to 3 m, which is a trigger the data never asked for: the
+        /// stock landmine declares 1.0 and a detpack declares nothing, because
+        /// a detpack is not proximity-triggered. Anything that wants a radius
+        /// states one.
+        /// </remarks>
+        public PhxProp<float> TriggerRadius = new PhxProp<float>(0f);
+
+        /// <summary>Goes off on being touched as well as on proximity.</summary>
+        public PhxProp<bool> TriggerContact = new PhxProp<bool>(false);
+
+        /// <summary>Seconds it stays before removing itself; 0 means it stays.</summary>
+        /// <remarks>
+        /// LifeSpan is the spelling the odfs use - LifeTime bound nothing, so
+        /// no mine has ever expired. Stock mines and detpacks both declare 60.
+        /// </remarks>
+        public PhxProp<float> LifeSpan = new PhxProp<float>(0f);
+
 
         /// <summary>Delay after placement before it can trigger at all.</summary>
         public PhxProp<float> ArmedTime = new PhxProp<float>(1.5f);
-
-        /// <summary>Seconds before it removes itself; 0 means it stays.</summary>
-        public PhxProp<float> LifeTime = new PhxProp<float>(0f);
 
         /// <summary>Health, so mines can be shot off a doorway.</summary>
         public PhxProp<float> MaxHealth = new PhxProp<float>(10f);
 
         /// <summary>Effect shown while armed and waiting.</summary>
         public PhxProp<string> ArmedEffect = new PhxProp<string>(null);
+
+        /// <summary>Blinking light and its colour, the "there is a mine here" cue.</summary>
+        public PhxProp<string> TrailEffect = new PhxProp<string>(null);
     }
 
     public PhxProp<float> CurHealth = new PhxProp<float>(10f);
@@ -68,11 +104,12 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
 
         CurHealth.Set(C.MaxHealth.Get());
         ArmTimer = C.ArmedTime.Get();
-        LifeTimer = C.LifeTime.Get();
+        LifeTimer = C.LifeSpan.Get();
 
-        if (!string.IsNullOrEmpty(C.ArmedEffect.Get()))
+        string armedEffect = string.IsNullOrEmpty(C.ArmedEffect.Get()) ? C.TrailEffect.Get() : C.ArmedEffect.Get();
+        if (!string.IsNullOrEmpty(armedEffect))
         {
-            SCENE?.EffectsManager.PlayEffectOnce(C.ArmedEffect.Get(), transform.position, transform.rotation);
+            SCENE?.EffectsManager.PlayEffectOnce(armedEffect, transform.position, transform.rotation);
         }
 
         PhxDestructionRegistry.Register(this);
@@ -102,18 +139,25 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
             return;
         }
 
-        if (C.LifeTime.Get() > 0f)
+        if (C.LifeSpan.Get() > 0f)
         {
             LifeTimer -= deltaTime;
             if (LifeTimer <= 0f)
             {
-                // Expiry is not a detonation: an expired mine is picked back
-                // up, it does not blow up under whoever placed it.
-                SCENE?.DestroyInstance(this);
-                Detonated = true;
+                // Expiry is its own ending with its own explosion - the stock
+                // classes name a "destroyed" one for it, distinct from the
+                // full blast. Which is right: an expired charge fizzles, it
+                // does not level the room it was left in.
+                Detonate(C.ExplosionExpire.Get() as PhxExplosionClass);
                 return;
             }
         }
+
+        // No radius and no contact trigger means it is not a proximity mine at
+        // all - a detpack waits to be set off by whoever placed it. Skipping
+        // the overlap test also keeps a pile of detpacks from costing a sphere
+        // query each per frame.
+        if (C.TriggerRadius.Get() <= 0f && !C.TriggerContact) return;
 
         if (FindVictim() != null)
         {
@@ -154,13 +198,20 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
         return null;
     }
 
-    public void Detonate()
+    /// <summary>Set it off, using the explosion for the way it ended.</summary>
+    public void Detonate(PhxExplosionClass explosion = null)
     {
         if (Detonated) return;
         Detonated = true;
 
-        PhxExplosionManager.AddExplosion(Owner, C.ExplosionName.Get() as PhxExplosionClass,
-                                         transform.position, transform.rotation);
+        // ExplosionName is the legacy spelling and no stock class declares it,
+        // so it is the last fallback rather than the only option.
+        if (explosion == null)
+        {
+            explosion = (C.ExplosionTrigger.Get() ?? C.ExplosionName.Get()) as PhxExplosionClass;
+        }
+
+        PhxExplosionManager.AddExplosion(Owner, explosion, transform.position, transform.rotation);
 
         int? objIdx = SCENE?.GetInstanceIndex(this);
         PhxLuaEvents.InvokeParameterized(PhxLuaEvents.Event.OnObjectKillName, gameObject.name.ToLower(), objIdx);
@@ -196,7 +247,10 @@ public class PhxMine : PhxInstance<PhxMine.ClassProperties>,
         {
             // Shooting a mine sets it off where it lies - which is how mines
             // are cleared, and why clearing one from close range is a bad idea.
-            Detonate();
+            // ExplosionDeath is the smaller blast the data names for being
+            // shot off, not the full trigger explosion - clearing a mine at
+            // range should not be as lethal as stepping on it.
+            Detonate((C.ExplosionDeath.Get() ?? C.ExplosionTrigger.Get()) as PhxExplosionClass);
         }
     }
 }
