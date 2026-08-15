@@ -1725,7 +1725,9 @@ public class PhxSoldier : PhxControlableInstance<PhxSoldier.ClassProperties>, IC
                 }
 
                 PhxVehicle Vehicle = CollidedObj.GetComponent<PhxVehicle>();
-                if (Vehicle != null && Vehicle.HasAvailableSeat())
+                // CanBeEnteredBy, not HasAvailableSeat: a vehicle full of AI is
+                // still enterable by a person, who turns one of them out.
+                if (Vehicle != null && Vehicle.CanBeEnteredBy(this))
                 {
                     float Dist = Vector3.Magnitude(transform.position - Vehicle.transform.position);
                     if (Dist < ClosestDist)

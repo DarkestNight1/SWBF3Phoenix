@@ -560,6 +560,81 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
     }
 
 
+    /// <summary>
+    /// Whether this seat's occupant may be turned out to make room.
+    /// </summary>
+    /// <remarks>
+    /// The rule is about who is <i>driving</i> the occupant, not who it is. An
+    /// AI can be told to get out; a person cannot have their vehicle taken from
+    /// under them by someone walking up to it.
+    ///
+    /// Written against the controller type rather than against
+    /// <see cref="IsPlayerSoldier"/> deliberately. IsPlayerSoldier asks "is this
+    /// the local player", which is the same question only while there is
+    /// exactly one person playing - the moment there are two, it would start
+    /// answering "yes, evict them" for every remote player. Any human, local or
+    /// not, arrives here as a <see cref="PhxPlayerController"/>, so testing the
+    /// controller is the rule that stays correct when multiplayer lands rather
+    /// than one that has to be found and fixed then.
+    ///
+    /// An unoccupied or uncontrolled seat is takeable; an occupant with no
+    /// controller at all is not a person, so nothing is being taken from anyone.
+    /// </remarks>
+    static bool MayBeTurnedOutOf(PhxSeat seat)
+    {
+        if (seat == null) return false;
+
+        PhxSoldier occupant = seat.Occupant;
+        if (occupant == null) return true;
+
+        return !(occupant.GetController() is PhxPlayerController);
+    }
+
+    /// <summary>
+    /// Whether this soldier could get in, counting seats they could take.
+    /// </summary>
+    /// <remarks>
+    /// The test the "which vehicle is nearest" search must use.
+    /// <see cref="HasAvailableSeat"/> asks only whether a seat is empty, so a
+    /// full vehicle was dropped from the candidate list before anything got as
+    /// far as asking who was sitting in it - which would have left the
+    /// commandeering below unreachable.
+    /// </remarks>
+    public bool CanBeEnteredBy(PhxSoldier soldier)
+    {
+        if (HasAvailableSeat()) return true;
+
+        if (!(soldier != null && soldier.GetController() is PhxPlayerController))
+        {
+            return false;
+        }
+
+        return FindTurnOutSeat() != -1;
+    }
+
+    /// <summary>
+    /// Index of a seat held by AI that could be taken, or -1.
+    /// </summary>
+    /// <remarks>
+    /// Searched from the back. The lowest seat index is the pilot's, and a
+    /// player walking up to a full vehicle wants to fly it - but taking the
+    /// gunner's seat when the gunner is the only one who can be displaced beats
+    /// refusing entirely, so this returns whatever it can and prefers the
+    /// front.
+    /// </remarks>
+    int FindTurnOutSeat()
+    {
+        for (int i = 0; i < Seats.Count; ++i)
+        {
+            PhxSeat seat = Seats[i];
+            if (seat == null || seat.Occupant == null) continue;
+            if (!MayBeTurnedOutOf(seat)) continue;
+
+            return i;
+        }
+        return -1;
+    }
+
     public PhxSeat TryEnterVehicle(PhxSoldier soldier)
     {
         // Find first available seat
@@ -567,18 +642,43 @@ public abstract class PhxVehicle : PhxControlableInstance<PhxVehicleProperties>,
 
         if (seat == -1)
         {
-            return null;
-        }
-        else
-        {
-            Seats[seat].SetOccupant(soldier);
-            if (IsPlayerSoldier(soldier))
+            // Nothing free. A vehicle sitting full of AI while the player who
+            // wants it stands next to it is the stock game's most reliable way
+            // to make a map feel like it is playing itself, so the AI gives it
+            // up - but only to a person, and only the AI gives it up.
+            //
+            // Gated on the arriving soldier as well as the sitting one. Squad
+            // AI walk this same path looking for a ride, and without this a
+            // full transport would have its crew turning each other out for the
+            // rest of the match.
+            if (!(soldier != null && soldier.GetController() is PhxPlayerController))
             {
-                PhxGame.GetCamera().Track(Seats[seat]);
+                return null;
             }
 
-            return Seats[seat];
+            seat = FindTurnOutSeat();
+            if (seat == -1)
+            {
+                return null;
+            }
+
+            PhxSoldier displaced = Seats[seat].Occupant;
+            if (!Eject(seat))
+            {
+                return null;
+            }
+
+            Debug.Log($"[PhxVehicle] '{name}' seat {seat} commandeered; " +
+                      $"'{(displaced != null ? displaced.name : "?")}' turned out.");
         }
+
+        Seats[seat].SetOccupant(soldier);
+        if (IsPlayerSoldier(soldier))
+        {
+            PhxGame.GetCamera().Track(Seats[seat]);
+        }
+
+        return Seats[seat];
     }
 
 
