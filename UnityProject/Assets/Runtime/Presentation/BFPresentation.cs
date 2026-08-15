@@ -67,6 +67,12 @@ public static class BFPresentation
         Host.AddComponent<BFDecalSystem>();
         Host.AddComponent<BFTerrainInteractionSystem>();
         Host.AddComponent<BFWaterSystem>();
+        // After the water system, never before: both hook OnMapLoaded, handlers
+        // run in subscription order, and subscription happens in Start in the
+        // order components were added. BFMapWater only builds a surface when
+        // discovery found none, so it has to be able to see that discovery has
+        // already run.
+        Host.AddComponent<BFMapWater>();
         Host.AddComponent<BFWetnessSystem>();
         Host.AddComponent<BFSnowAccumulation>();
         Host.AddComponent<BFPresentationMapHook>();

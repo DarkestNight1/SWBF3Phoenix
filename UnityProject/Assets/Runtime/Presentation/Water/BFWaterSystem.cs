@@ -412,6 +412,36 @@ public sealed class BFWaterSystem : MonoBehaviour
         return texture != null && BFSurfaceQuery.FromKeyword(texture.name) == BFSurfaceType.Water;
     }
 
+    /// <summary>
+    /// Take over a surface that arrived after discovery had already run.
+    /// </summary>
+    /// <remarks>
+    /// Discovery is a scan at map load, which is the right shape for water the
+    /// map brought with it and the wrong shape for water built during that same
+    /// load - <see cref="BFMapWater"/> constructs a surface for maps whose water
+    /// lives in terrain data this project cannot read, and by then the scan has
+    /// been and gone. Rather than rescan on a timer for something that happens
+    /// once, the builder says so.
+    ///
+    /// Idempotent: a surface that already carries a <see cref="BFWaterSurface"/>
+    /// is one this system has, and adopting it twice would give one body two
+    /// ripple simulations and two reflection probes.
+    /// </remarks>
+    public static void Adopt(GameObject surface)
+    {
+        if (surface == null) return;
+
+        Renderer renderer = surface.GetComponent<Renderer>();
+        if (renderer == null) return;
+        if (surface.GetComponent<BFWaterSurface>() != null) return;
+
+        BFWaterSurface body = surface.AddComponent<BFWaterSurface>();
+        body.Important = renderer.bounds.size.x * renderer.bounds.size.z > 10000f;
+        Bodies.Add(body);
+
+        Debug.Log("[BFPresentation] 1 water surface adopted after discovery.");
+    }
+
     /// <summary>The body containing a position, or null.</summary>
     public static BFWaterSurface BodyAt(Vector3 worldPosition)
     {
