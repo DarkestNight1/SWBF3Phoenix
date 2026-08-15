@@ -143,6 +143,21 @@ public class SoundLoader : Loader
         }
     }
 
+    /// <summary>Name a sound as helpfully as the caller allows.</summary>
+    /// <remarks>
+    /// The three warnings below used to read
+    /// <c>soundNameString == null ? soundNameString : FNVToString(...)</c>,
+    /// which is backwards in both directions: with no name it printed null, and
+    /// with a name it threw that name away and printed a hash decode instead.
+    /// So a message whose entire job was to say WHICH sound failed never did.
+    /// </remarks>
+    static string DescribeSound(string soundNameString, uint soundName)
+    {
+        return string.IsNullOrEmpty(soundNameString)
+            ? HashUtils.FNVToString(soundName, false)
+            : soundNameString;
+    }
+
     public AudioClip LoadSound(uint soundName, string soundNameString = null)
     {
         uint clipNameHash;
@@ -177,7 +192,7 @@ public class SoundLoader : Loader
         if (sound == null)
         {
             Debug.LogWarningFormat("failed to find sound queried with: {0} (hash key: 0x{1:X})",
-                                    soundNameString == null ? soundNameString : HashUtils.FNVToString(soundName, false),
+                                    DescribeSound(soundNameString, soundName),
                                     clipNameHash);
             BFImportDiagnostics.Missing(BFSourceKind.Sound,
                                         soundNameString ?? $"0x{clipNameHash:X}");
@@ -186,8 +201,27 @@ public class SoundLoader : Loader
 
         if (!sound.GetData(out uint sampleRate, out uint sampleCount, out byte blockAlign, out byte[] data))
         {
+            // Say WHY, when the reason is knowable.
+            //
+            // A clip carrying an alias has no samples of its own - the native
+            // reader skips it deliberately, because its data belongs to the
+            // clip it points at - so "couldn't retrieve data" is true but
+            // useless. Alias resolution is not implemented, and measuring the
+            // stock data says it need not be: one aliased clip out of 1567 in
+            // common.bnk, none in any level bank, and no aliased stream segment
+            // on any map checked. A mod leaning on aliases would look like
+            // randomly silent sounds, so it names itself here rather than
+            // costing someone an afternoon.
+            if (sound.Alias != 0)
+            {
+                Debug.LogWarning($"Sound '{DescribeSound(soundNameString, soundName)}' is an alias " +
+                                 $"of 0x{sound.Alias:X} and carries no samples of its own; alias " +
+                                 "resolution is not implemented, so this sound is silent.");
+                return null;
+            }
+
             Debug.LogWarningFormat("Couldn't retrieve sound data of sound '{0}'! (hash key: 0x{1:X})",
-                                    soundNameString == null ? soundNameString : HashUtils.FNVToString(soundName, false),
+                                    DescribeSound(soundNameString, soundName),
                                     clipNameHash);
             return null;
         }
@@ -233,7 +267,7 @@ public class SoundLoader : Loader
         if (!clip.SetData(pcm, 0))
         {
             Debug.LogErrorFormat("Couldn't set sound data of sound '{0}'! (hash key: 0x{1:X})", 
-                                soundNameString == null ? soundNameString : HashUtils.FNVToString(soundName, false), 
+                                DescribeSound(soundNameString, soundName), 
                                 clipNameHash);
         }
 
