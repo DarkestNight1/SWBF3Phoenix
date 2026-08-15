@@ -365,13 +365,20 @@ public class WorldLoader : Loader
     /// either way.
     ///
     /// Truncation alone misregisters the blend map against the ground by the
-    /// ratio of the error. Zero is the "flat terrain" case, and it fails twice
-    /// over: <see cref="BuildBlendLightingScale"/> rejects a bound of zero and
-    /// returns null, so the map silently loses its baked terrain lighting, and
-    /// the shader's world UV - (worldPos.xz + bound/2) / bound in
+    /// ratio of the error. Zero would be worse and fails twice over:
+    /// <see cref="BuildBlendLightingScale"/> rejects a bound of zero and returns
+    /// null, so the map silently loses its baked terrain lighting, and the
+    /// shader's world UV - (worldPos.xz + bound/2) / bound in
     /// BlendTerrainLayers.hlsl - divides by zero, so every layer samples a
-    /// single texel. Evenly lit and evenly textured, which is what flat looks
-    /// like.
+    /// single texel.
+    ///
+    /// This is defensive, not a fix for anything shipped. Probing all twelve
+    /// stock terrains (Tools/SkelProbe --terrain) says every one of them is
+    /// authored at 4 or 8 metres per grid unit, whole in every case, so the
+    /// stated and measured extents agree everywhere and this guard never fires
+    /// on stock data. It is kept because the cost is one comparison at import
+    /// and the failure it prevents is silent, and because addon and mod terrain
+    /// is not bound by the convention the shipped maps happen to follow.
     ///
     /// The mesh already knows the answer. <see cref="BuildTerrainMesh"/> places
     /// every vertex in world space centred on the origin, so its bounds are the

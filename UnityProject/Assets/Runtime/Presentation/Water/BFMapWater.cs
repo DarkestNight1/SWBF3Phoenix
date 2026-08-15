@@ -6,80 +6,89 @@ using UnityEngine;
 /// </summary>
 /// <remarks>
 /// <see cref="BFWaterSystem"/> takes water over rather than creating it: it
-/// scans the loaded map for a renderer that reads as water and replaces how
-/// that renderer is shaded. That is the right design when the map brings its
-/// own water plane, and it finds nothing at all on Kashyyyk, because Kashyyyk's
-/// water is not a placed object.
+/// scans a loaded map for a renderer that reads as water and replaces how that
+/// renderer is shaded. That is right for maps that bring their own water plane,
+/// and it finds nothing on Kashyyyk.
 ///
-/// SWBF2 draws that water from the terrain, not from world geometry, and the
-/// terrain chunk this project reads does not carry it. The <c>tern</c> INFO
-/// block LibSWBF2 parses stops at grid and texture counts - there is no water
-/// height, no water texture and no per-patch water flag in the struct - so no
-/// amount of work further down the import can recover a surface that was never
-/// read. Nothing arrives, so nothing is discovered, and the village stands over
-/// a dry hole.
+/// Probing kas2.lvl says why, and rules out the two obvious explanations:
 ///
-/// So the surface is built here instead, and the height is measured rather than
-/// typed in. The terrain still says where the water goes even though it no
-/// longer says how high: the artists painted the bed with a water texture, and
-/// <see cref="BFTerrainSurfaceMap"/> already classifies every terrain layer by
-/// texture name for footsteps and impacts. The painted region is the water's
-/// footprint, and the shoreline - the highest bed still painted as water - is
-/// its surface height, because that is what a shoreline is.
+/// <list type="bullet">
+/// <item>The water is not a placed object. There is no water model and no world
+/// instance whose name or class reads as water - only the texture set
+/// (kas2_water, plus water_bumpmap_0..15 and water_normalmap_0..15, an animated
+/// sixteen-frame surface).</item>
+/// <item>The bed is not painted with a water terrain layer either. kas2's three
+/// layers are kas2_main_1..3, and no stock map has a water-named layer at
+/// all - so a level cannot be derived from the terrain painting.</item>
+/// </list>
 ///
-/// Measuring beats a per-map constant here. A typed height is one number that
-/// is right on one map at one scale and silently wrong everywhere else, and
-/// there is no way to check it from the Unity side without the game installed;
-/// a measured one is derived from the same data the ground is drawn from, and
-/// comes out right on any map whose bed is painted, Kashyyyk included.
-/// <see cref="Overrides"/> exists for maps where it is not, and is empty until
-/// one turns up - an empty table is the honest state, not a placeholder.
+/// The texture exists and nothing draws it, which is what terrain-section water
+/// looks like from this side: SWBF2's terrain renderer holds the water height
+/// and the water texture, and the <c>tern</c> INFO block LibSWBF2 parses stops
+/// at grid and texture counts. The height is not lost in translation, it is
+/// never read, and it is not present anywhere else in the munged level. So it
+/// cannot be computed here and has to be stated.
+///
+/// Stated from measurement rather than taste. Probing kas2's terrain: the
+/// height range is -0.36 to 145.08, and over half of every vertex on the map
+/// sits at exactly 0.00 (p40, p50 = 0.00; the ground only starts climbing at
+/// p55). That flat plane at zero, covering the majority of a map that rises to
+/// 145 m elsewhere, is the seabed the village stands over, and the water sits
+/// just above it.
+///
+/// The footprint is measured rather than stated, because it can be: the water
+/// covers the flat plane, and the flat plane is found by asking the terrain
+/// collider for its height. What is deliberately NOT done is inferring the
+/// water level from that plane - "largest flat area low in the range" also
+/// describes Tatooine, Endor, Yavin, Naboo and Rhen Var, whose terrain is
+/// equally dominated by a single height and equally dry, and a rule that
+/// floods five maps to fill one is not a rule.
 /// </remarks>
 public sealed class BFMapWater : MonoBehaviour
 {
-    /// <summary>A map whose water level cannot be measured off its own terrain.</summary>
+    /// <summary>A map whose water level the munged level does not carry.</summary>
     struct WaterLevel
     {
         public string ScriptPrefix;     // map, by mission-script prefix
         public float SurfaceHeight;     // world Y of the still surface
+        public float BedTolerance;      // how far above the surface still counts as bed
         public string Why;
     }
 
-    /// <summary>
-    /// Empty on purpose. Every map whose bed carries a water texture is handled
-    /// by measurement; this is for one that does not, and adding speculative
-    /// entries would put unverifiable numbers in front of the measurement that
-    /// would otherwise have been right.
-    /// </summary>
-    static readonly WaterLevel[] Overrides = { };
+    static readonly WaterLevel[] Levels =
+    {
+        new WaterLevel
+        {
+            ScriptPrefix = "kas",
 
-    /// <summary>
-    /// Grid resolution of the search for painted water, per axis.
-    /// </summary>
+            // Just above the bed, not level with it. The seabed is authored at
+            // exactly 0.00 and the terrain's own minimum is -0.36, so a surface
+            // at zero would z-fight the ground it is supposed to cover. This is
+            // also honest to the original: Kashyyyk's sea is ankle-deep at the
+            // shore and a boundary further out, not something to swim in, so a
+            // shallow surface is the right shape as well as the safe one.
+            SurfaceHeight = 0.15f,
+
+            // The bed is flat to within a few centimetres over half the map, so
+            // the footprint only needs to admit ground at about water level;
+            // anything higher is the bank and the shoreline belongs there.
+            BedTolerance = 0.6f,
+
+            Why = "terrain-section water: kas2 ships the kas2_water texture set and " +
+                  "a seabed authored flat at y=0, but no water geometry, and the tern " +
+                  "chunk LibSWBF2 reads carries no water height",
+        },
+    };
+
+    /// <summary>Grid resolution of the footprint search, per axis.</summary>
     /// <remarks>
-    /// This walks the terrain looking for a region, not shading it, so it wants
-    /// to be dense enough to find a river and cheap enough to run once at load.
-    /// 128 x 128 is sixteen thousand samples of an in-memory byte array.
+    /// This finds a region rather than shading one, so it wants to be dense
+    /// enough to trace a shoreline and cheap enough to run once at load.
+    /// 128 x 128 is sixteen thousand raycasts against one collider.
     /// </remarks>
     const int SampleGrid = 128;
 
-    /// <summary>
-    /// Where in the sorted bed heights the surface is taken from.
-    /// </summary>
-    /// <remarks>
-    /// Not the maximum. A blend map is painted by hand and its edges feather,
-    /// so the single highest texel that still counts as water is usually one
-    /// stray sample partway up a bank, and taking it floods the map. The upper
-    /// decile is the shoreline proper: past the bed, short of the outliers.
-    /// </remarks>
-    const float ShorelinePercentile = 0.9f;
-
-    /// <summary>Least painted area worth building a surface for, in samples.</summary>
-    /// <remarks>
-    /// A handful of scattered water texels is a texture blend on a riverbed
-    /// that has no water in it, not a lake. Building a plane for those puts a
-    /// sheet of water across a dry map.
-    /// </remarks>
+    /// <summary>Least submerged area worth building a surface for, in samples.</summary>
     const int MinimumSamples = 24;
 
     void Start()
@@ -95,46 +104,49 @@ public sealed class BFMapWater : MonoBehaviour
     void Build()
     {
         // Only ever adds water that is missing. A map that imported its own
-        // surface already has one, and a second plane at a measured height
-        // would z-fight the authored one.
+        // surface already has one, and a second plane would z-fight it.
         if (BFWaterSystem.Surfaces.Count > 0) return;
 
         string world = PhxGame.GetEnvironment()?.GetWorldName();
         if (string.IsNullOrEmpty(world)) return;
 
-        for (int i = 0; i < Overrides.Length; ++i)
+        for (int i = 0; i < Levels.Length; ++i)
         {
-            WaterLevel o = Overrides[i];
-            if (!world.StartsWith(o.ScriptPrefix, System.StringComparison.OrdinalIgnoreCase)) continue;
-
-            if (TerrainFootprint(out Bounds full))
+            WaterLevel level = Levels[i];
+            if (!world.StartsWith(level.ScriptPrefix, System.StringComparison.OrdinalIgnoreCase))
             {
-                Create(full, o.SurfaceHeight, world, $"authored level - {o.Why}");
+                continue;
             }
+
+            if (!MeasureFootprint(level, out Bounds footprint, out int samples))
+            {
+                Debug.LogWarning($"[BFPresentation] '{world}' has a water level of " +
+                                 $"{level.SurfaceHeight}m configured, but only {samples} " +
+                                 "terrain sample(s) sit at or below it - no water built. " +
+                                 "Either the level is wrong for this map or the terrain " +
+                                 "did not import.");
+                return;
+            }
+
+            Create(footprint, level.SurfaceHeight, world, level.Why);
             return;
         }
-
-        if (!MeasurePaintedWater(out Bounds footprint, out float height)) return;
-
-        Create(footprint, height, world, "measured from the terrain's own water painting");
     }
 
     /// <summary>
-    /// Find the painted water region and the height of its shoreline.
+    /// The area of terrain lying at or below the water level.
     /// </summary>
-    bool MeasurePaintedWater(out Bounds footprint, out float surfaceHeight)
+    bool MeasureFootprint(WaterLevel level, out Bounds footprint, out int samples)
     {
         footprint = default;
-        surfaceHeight = 0f;
+        samples = 0;
 
-        if (!BFTerrainSurfaceMap.IsLoaded) return false;
         if (!TerrainFootprint(out Bounds terrain)) return false;
 
-        var bedHeights = new List<float>();
-        bool any = false;
-
+        float ceiling = level.SurfaceHeight + level.BedTolerance;
         float stepX = terrain.size.x / SampleGrid;
         float stepZ = terrain.size.z / SampleGrid;
+        bool any = false;
 
         for (int gx = 0; gx < SampleGrid; ++gx)
         {
@@ -143,18 +155,12 @@ public sealed class BFMapWater : MonoBehaviour
                 float x = terrain.min.x + (gx + 0.5f) * stepX;
                 float z = terrain.min.z + (gz + 0.5f) * stepZ;
 
-                // The sample map is indexed in world space, so the probe does
-                // not need the terrain's height to ask what is painted there.
-                Vector3 column = new Vector3(x, terrain.center.y, z);
-                if (BFTerrainSurfaceMap.Sample(column) != BFSurfaceType.Water) continue;
-
-                // It does need the height to place the surface, and only the
-                // collider knows that - the blend map carries no elevation.
                 if (!BedHeightAt(x, z, terrain, out float bed)) continue;
+                if (bed > ceiling) continue;
 
-                bedHeights.Add(bed);
+                ++samples;
 
-                Vector3 point = new Vector3(x, bed, z);
+                Vector3 point = new Vector3(x, level.SurfaceHeight, z);
                 if (!any)
                 {
                     footprint = new Bounds(point, Vector3.zero);
@@ -167,15 +173,7 @@ public sealed class BFMapWater : MonoBehaviour
             }
         }
 
-        if (!any || bedHeights.Count < MinimumSamples)
-        {
-            return false;
-        }
-
-        bedHeights.Sort();
-        int index = Mathf.Clamp(Mathf.RoundToInt((bedHeights.Count - 1) * ShorelinePercentile),
-                                0, bedHeights.Count - 1);
-        surfaceHeight = bedHeights[index];
+        if (!any || samples < MinimumSamples) return false;
 
         // Grow by one grid step. The footprint is the centre of every sample
         // that hit, so its edge sits half a step inside the real shoreline, and
@@ -192,10 +190,11 @@ public sealed class BFMapWater : MonoBehaviour
         // From above the terrain, straight down. Terrain lives on TerrainAll,
         // which is what keeps this from measuring a crate standing in a river.
         Vector3 from = new Vector3(x, terrain.max.y + 10f, z);
-        int mask = 1 << LayerMask.NameToLayer("TerrainAll");
+        int layer = LayerMask.NameToLayer("TerrainAll");
+        if (layer < 0) return false;
 
         if (!Physics.Raycast(from, Vector3.down, out RaycastHit hit,
-                             terrain.size.y + 20f, mask, QueryTriggerInteraction.Ignore))
+                             terrain.size.y + 20f, 1 << layer, QueryTriggerInteraction.Ignore))
         {
             return false;
         }
@@ -226,17 +225,17 @@ public sealed class BFMapWater : MonoBehaviour
     /// <remarks>
     /// Deliberately only geometry and a name. Depth colour, smoothness, the
     /// planar reflection, ripples and the underwater volume all belong to
-    /// <see cref="BFWaterSurface"/>, and it attaches itself to anything whose
-    /// name reads as water - so naming this correctly is the whole handoff.
-    /// Shading it here as well would be the second implementation of water in
-    /// a codebase that only wants one.
+    /// <see cref="BFWaterSurface"/>, and it attaches to anything whose name
+    /// reads as water - so naming this correctly is the whole handoff. Shading
+    /// it here as well would be the second implementation of water in a
+    /// codebase that only wants one.
     /// </remarks>
-    void Create(Bounds footprint, float surfaceHeight, string world, string provenance)
+    void Create(Bounds footprint, float surfaceHeight, string world, string why)
     {
         GameObject surface = GameObject.CreatePrimitive(PrimitiveType.Quad);
 
-        // "water" is the keyword BFSurfaceQuery classifies on, and BFWaterSystem
-        // discovers by that classification. The name is load-bearing.
+        // "water" is the keyword BFSurfaceQuery classifies on and BFWaterSystem
+        // discovers by. The name is load-bearing.
         surface.name = "BFMapWater_water";
         surface.transform.SetParent(transform, false);
         surface.transform.position = new Vector3(footprint.center.x, surfaceHeight,
@@ -245,17 +244,17 @@ public sealed class BFMapWater : MonoBehaviour
         surface.transform.rotation = Quaternion.Euler(90f, 0f, 0f);
         surface.transform.localScale = new Vector3(footprint.size.x, footprint.size.z, 1f);
 
-        // No collider. Water is something soldiers wade into, and the surface
-        // interaction system reports entry through its own bounds - a solid
-        // plane across the map would have them walking on it instead.
+        // No collider. Water is waded into, and the interaction system reports
+        // entry through the renderer's bounds - a solid plane across the bay
+        // would have soldiers walking on it instead.
         Collider collider = surface.GetComponent<Collider>();
         if (collider != null) Destroy(collider);
 
         Debug.Log($"[BFPresentation] Water built on '{world}' at y={surfaceHeight:0.00}, " +
-                  $"{footprint.size.x:0}x{footprint.size.z:0}m - {provenance}.");
+                  $"{footprint.size.x:0}x{footprint.size.z:0}m - {why}.");
 
-        // The system has already run its own discovery for this load by now,
-        // so hand it this one directly rather than waiting for the next map.
+        // Discovery has already run for this load by the time this fires, so
+        // hand the body over directly rather than waiting for the next map.
         BFWaterSystem.Adopt(surface);
     }
 }

@@ -40,6 +40,8 @@ namespace SkelProbe
         static bool MatFlagMode;
         static bool CollisionMode;
         static bool PostureMode;
+        static bool TerrainMode;
+        static bool WaterMode;
         static string LookupCsv = "lookup.csv";
 
         static int Main(string[] args)
@@ -58,11 +60,15 @@ namespace SkelProbe
             MatFlagMode = false;
             CollisionMode = false;
             PostureMode = false;
+            TerrainMode = false;
+            WaterMode = false;
             ResolveNames = false;
 
             for (int i = 0; i < args.Length; ++i)
             {
-                if (args[i] == "--posture") { PostureMode = true; }
+                if (args[i] == "--water") { WaterMode = true; }
+                else if (args[i] == "--terrain") { TerrainMode = true; }
+                else if (args[i] == "--posture") { PostureMode = true; }
                 else                 if (args[i] == "--collision") { CollisionMode = true; }
                 else if (args[i] == "--matflags") { MatFlagMode = true; }
                 else if (args[i] == "--classprops") { ClassMode = true; }
@@ -104,6 +110,8 @@ namespace SkelProbe
 
             foreach (string path in files)
             {
+                if (WaterMode) { WaterProbe.Run(path); continue; }
+                if (TerrainMode) { TerrainProbe.Run(path); continue; }
                 if (PostureMode) { PostureProbe.Run(path); continue; }
                 if (CollisionMode) { CollisionProbe.Run(path); continue; }
                 if (MatFlagMode) { MatFlagProbe.Run(path); continue; }
