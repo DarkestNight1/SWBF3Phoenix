@@ -57,6 +57,23 @@ public class PhxHUD : PhxMenuInterface
 
         CrosshairMat = Crosshair.materialForRendering;
 
+        // Reticle size is taste, so it is a setting rather than a constant.
+        //
+        // The prefab default is 56 units against a 1920x1080 reference canvas -
+        // about 5% of screen height. It was 128, which is nearly 12%: enormous
+        // by shooter convention, where a reticle usually sits between 3% and
+        // 6%. It cannot go much below this and stay useful, because this is not
+        // a bare dot - the shader draws ammo and magazine as arcs around it,
+        // and those stop being readable once the ring gets small.
+        //
+        // Zero means "leave the prefab alone", so there is only ever one source
+        // of truth for the default.
+        float crosshairSize = PhxBF3.Config.CrosshairSize;
+        if (crosshairSize > 0f)
+        {
+            Crosshair.rectTransform.sizeDelta = new Vector2(crosshairSize, crosshairSize);
+        }
+
         if (ObjectiveFeed == null)
         {
             ObjectiveFeed = CreateObjectiveFeedText();

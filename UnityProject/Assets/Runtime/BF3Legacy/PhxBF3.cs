@@ -448,6 +448,17 @@ public class PhxBF3Config
     public bool AlwaysAllowHeroes = false;
 
     /// <summary>
+    /// Aim reticle size, in units of a 1920x1080 canvas. 0 keeps the default.
+    /// </summary>
+    /// <remarks>
+    /// The shipped default is 56, roughly 5% of screen height, which is where
+    /// shooter reticles normally sit. Raise it if the ammo arcs around the ring
+    /// are hard to read at your resolution; much below about 40 and they stop
+    /// being legible at all.
+    /// </remarks>
+    public float CrosshairSize = 0f;
+
+    /// <summary>
     /// Re-compress imported world textures to DXT on upload.
     /// </summary>
     /// <remarks>
