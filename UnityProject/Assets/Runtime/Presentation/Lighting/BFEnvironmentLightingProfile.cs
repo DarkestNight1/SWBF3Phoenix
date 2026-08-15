@@ -648,9 +648,12 @@ public sealed class BFEnvironmentLightingProfile
         SunShadowResolutionCap = 1024,
         ShadowCascadeCap = 2,
 
-        // Interiors are where SSGI runs, so leave some resolution headroom
-        // rather than spending it all on pixels.
-        DynamicResolutionFloor = 0.70f,
+        // Was 0.70 to leave SSGI some headroom. Raised to match the config
+        // floor after softness was reported on exactly these maps: an interior
+        // is where the player is closest to walls and to their own character,
+        // so it is the worst place in the game to be upscaling from 70%.
+        // SSGI gives its headroom back through its own quality setting instead.
+        DynamicResolutionFloor = 0.80f,
     };
 
     static BFEnvironmentLightingProfile Space(string name) => new BFEnvironmentLightingProfile

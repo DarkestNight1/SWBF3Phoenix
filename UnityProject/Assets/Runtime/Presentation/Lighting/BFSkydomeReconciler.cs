@@ -116,12 +116,36 @@ public static class BFSkydomeReconciler
     /// paints, precisely so distant geometry blends into it. If the map
     /// authored no fog, fall back to the profile's own tint.
     /// </remarks>
+    /// <summary>
+    /// The colour the dome should light the world with.
+    /// </summary>
+    /// <remarks>
+    /// DomeInfo's own Ambient first. The skydome format carries a field whose
+    /// entire purpose is "what colour does this dome light the map with", the
+    /// importer parses it into SWBFSkyProperties.DomeAmbient - and this used
+    /// the FOG colour instead, so the field was read and thrown away.
+    ///
+    /// The two are not interchangeable. Fog is the colour distance fades TO,
+    /// which on a map with a dark haze between crystal towers is a long way
+    /// from the light falling on the towers. Mygeeto is the case that showed
+    /// it: dark fog, bright overcast, and standing the atmosphere down in
+    /// favour of the fog colour left the whole map lit by nothing but its own
+    /// window emissives.
+    /// </remarks>
     public static Color GetDomeAmbient(BFEnvironmentLightingProfile profile)
     {
+        if (SWBFSkyProperties.HasDomeAmbient)
+        {
+            return SWBFSkyProperties.DomeAmbient;
+        }
+
+        // Fog is the fallback rather than the first choice: better than
+        // nothing when the dome declared no ambient of its own.
         if (SWBFSkyProperties.HasSkyInfo)
         {
             return SWBFSkyProperties.FogColor;
         }
+
         return profile != null ? profile.AtmosphereTint : Color.grey;
     }
 }

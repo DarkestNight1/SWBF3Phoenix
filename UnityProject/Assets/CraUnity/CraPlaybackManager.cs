@@ -203,9 +203,43 @@ public class CraPlaybackManager
             int localFrameIndex = player.FrameIndex[playerSubIdx];
 
             float transition = player.Transition[playerSubIdx];
-            int frameIndex = clipFrameOffset + (boneIndex * clipFrameCount) + localFrameIndex;
 
-            CraTransform frameTransform = BakedClipTransforms[frameIndex];
+            // Sub-frame interpolation.
+            //
+            // FrameIndex is floor(FPS * playback), so the pose used to SNAP to
+            // whole baked frames. The stock clips are authored around 30 fps
+            // and the game runs at 60 or more, so a walk cycle updated its pose
+            // half as often as the camera moved - which is what "the walking
+            // animation is choppy" is. The lerp/slerp below is the crossfade
+            // between animator states and never smoothed within a clip.
+            //
+            // Recomputed here rather than stored: everything needed is already
+            // in the job, and widening CraPlayerData would cost a float4 per
+            // player for a value that is one multiply to recover.
+            float framePosition = ClipData[clipIdx].FPS * player.Playback[playerSubIdx];
+            float frameFraction = math.saturate(framePosition - localFrameIndex);
+
+            // The frame to blend toward. A looping clip wraps to its own first
+            // frame so the cycle closes; a one-shot holds its last, which is
+            // what the state machine expects to find when it asks whether the
+            // clip finished.
+            int nextLocalFrame = localFrameIndex + 1;
+            if (nextLocalFrame >= clipFrameCount)
+            {
+                nextLocalFrame = player.Looping[playerSubIdx] ? 0 : clipFrameCount - 1;
+            }
+
+            int baseIndex = clipFrameOffset + (boneIndex * clipFrameCount);
+            CraTransform frameA = BakedClipTransforms[baseIndex + localFrameIndex];
+            CraTransform frameB = BakedClipTransforms[baseIndex + nextLocalFrame];
+
+            // Rotation is stored as a raw float4; slerp needs it as a
+            // quaternion and hands one back, so it round-trips through .value.
+            CraTransform frameTransform;
+            frameTransform.Position = math.lerp(frameA.Position, frameB.Position, frameFraction);
+            frameTransform.Rotation = math.slerp(new quaternion(frameA.Rotation),
+                                                 new quaternion(frameB.Rotation),
+                                                 frameFraction).value;
 
             transform.localPosition = math.lerp(
                 transform.localPosition,

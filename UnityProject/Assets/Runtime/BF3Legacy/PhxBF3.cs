@@ -380,7 +380,19 @@ public class PhxBF3Config
     /// geometry upscales cleanly. The pipeline asset's minPercentage is the
     /// absolute backstop beneath all of them.
     /// </remarks>
-    public float MinDynamicResolutionPercent = 65f;
+    /// <remarks continued>
+    /// Raised from 65 to 80 after the softness was reported twice. 65% of
+    /// 1440p is 936p being upscaled to fill the screen, which is a visible
+    /// loss on exactly the high-frequency detail a character model is made of
+    /// - and DRS spends most of its time at the floor, not at the ceiling, so
+    /// the floor is what the game normally looks like rather than a worst
+    /// case. 80% is 1152p, which upscales cleanly.
+    ///
+    /// This trades frames for sharpness. Turn it back down if the frame rate
+    /// suffers; the resident scale is logged, so it is checkable rather than a
+    /// matter of opinion.
+    /// </remarks>
+    public float MinDynamicResolutionPercent = 80f;
 
     /// <summary>
     /// Motion blur strength, 0 to 1. 0 disables it.
